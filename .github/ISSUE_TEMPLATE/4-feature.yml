@@ -1,0 +1,20 @@
+name: Feature request
+description: A new language, SDK/sink rule, data type, output format or command.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What piiflow should do. For a new sink, name the library, the call and where the data goes.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Workarounds you use today
+      description: For example, a rule in `.piiflow/rules/`.

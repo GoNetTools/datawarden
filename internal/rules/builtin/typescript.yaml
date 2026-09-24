@@ -1,0 +1,167 @@
+# Built-in rules for TypeScript / JavaScript (browser, React Native, Node).
+# Imported names resolve to "<module>.<name>": `import * as Sentry from
+# "@sentry/react"; Sentry.setUser(u)` is "@sentry/react.setUser".
+
+- id: log.ts.console
+  lang: typescript
+  call: ["console.log", "console.info", "console.warn", "console.error", "console.debug", "console.trace", "console.table", "console.dir"]
+  arg: "*"
+  dest: { kind: log, host: console }
+  category: logging
+
+- id: log.ts.logger
+  lang: typescript
+  call: ["*.Logger.info", "*.Logger.debug", "*.Logger.warn", "*.Logger.error", "*.Logger.fatal", "*.Logger.trace", "*.Logger.log",
+         "winston.info", "winston.warn", "winston.error", "winston.debug", "winston.log"]
+  receiver: "(?i)^(this\\.)?_?(log|logger)$"
+  arg: "*"
+  dest: { kind: log, host: application-log }
+  category: logging
+
+- id: sdk.ts.sentry.set_user
+  lang: typescript
+  call: ["@sentry/*.setUser", "@sentry/*.captureMessage", "@sentry/*.captureException", "@sentry/*.addBreadcrumb", "@sentry/*.setExtras", "@sentry/*.setTags",
+         "@sentry/*.Scope.setUser", "@sentry/*.Scope.addBreadcrumb"]
+  receiver: "(?i)^scope$"
+  arg: 0
+  dest: { host: sentry.io, kind: third_party, vendor: Sentry }
+  category: crash_reporting
+
+- id: sdk.ts.sentry.set_extra
+  lang: typescript
+  call: ["@sentry/*.setExtra", "@sentry/*.setTag", "@sentry/*.setContext", "@sentry/*.Scope.setExtra", "@sentry/*.Scope.setTag", "@sentry/*.Scope.setContext"]
+  receiver: "(?i)^scope$"
+  arg: 1
+  dest: { host: sentry.io, kind: third_party, vendor: Sentry }
+  category: crash_reporting
+
+- id: sdk.ts.datadog
+  lang: typescript
+  call: ["@datadog/browser-rum*.datadogRum.setUser", "@datadog/browser-rum*.datadogRum.addAction", "@datadog/browser-rum*.datadogRum.setGlobalContextProperty",
+         "@datadog/browser-logs.datadogLogs.logger.*", "@datadog/mobile-react-native.DdSdkReactNative.setUser", "@datadog/mobile-react-native.DdLogs.*"]
+  arg: "*"
+  dest: { host: browser-intake-datadoghq.com, kind: third_party, vendor: Datadog }
+  category: monitoring
+
+- id: sdk.ts.logrocket
+  lang: typescript
+  call: ["logrocket.identify", "logrocket.track", "logrocket.log", "logrocket-react-native.identify"]
+  arg: "*"
+  dest: { host: logrocket.com, kind: third_party, vendor: LogRocket }
+  category: monitoring
+
+- id: sdk.ts.segment
+  lang: typescript
+  call: ["@segment/analytics-*.track", "@segment/analytics-*.identify", "@segment/analytics-*.page", "@segment/analytics-*.AnalyticsBrowser.track",
+         "@segment/analytics-*.AnalyticsBrowser.identify", "@segment/analytics-*.Analytics.track", "@segment/analytics-*.Analytics.identify"]
+  receiver: "(?i)^(this\\.)?(analytics|segment)$"
+  arg: "*"
+  dest: { host: api.segment.io, kind: third_party, vendor: Segment }
+  category: analytics
+
+- id: sdk.ts.mixpanel
+  lang: typescript
+  call: ["mixpanel-browser.track", "mixpanel-browser.identify", "mixpanel-browser.register", "mixpanel-browser.people.set", "mixpanel-browser.people.set_once",
+         "mixpanel-react-native.Mixpanel.track", "mixpanel-react-native.Mixpanel.identify", "mixpanel.track", "mixpanel.people.set"]
+  receiver: "(?i)mixpanel"
+  arg: "*"
+  dest: { host: api.mixpanel.com, kind: third_party, vendor: Mixpanel }
+  category: analytics
+
+- id: sdk.ts.amplitude
+  lang: typescript
+  call: ["@amplitude/*.track", "@amplitude/*.setUserId", "@amplitude/*.identify", "@amplitude/*.logEvent"]
+  receiver: "(?i)amplitude"
+  arg: "*"
+  dest: { host: api2.amplitude.com, kind: third_party, vendor: Amplitude }
+  category: analytics
+
+- id: sdk.ts.posthog
+  lang: typescript
+  call: ["posthog-js.capture", "posthog-js.identify", "posthog-js.people.set", "posthog-js.register", "posthog-node.PostHog.capture", "posthog-node.PostHog.identify",
+         "posthog-react-native.PostHog.capture", "posthog-react-native.PostHog.identify"]
+  receiver: "(?i)posthog"
+  arg: "*"
+  dest: { host: app.posthog.com, kind: third_party, vendor: PostHog }
+  category: analytics
+
+- id: sdk.ts.firebase.analytics
+  lang: typescript
+  call: ["firebase/analytics.logEvent", "firebase/analytics.setUserProperties", "firebase/analytics.setUserId", "@firebase/analytics.logEvent",
+         "@react-native-firebase/analytics*.logEvent", "@react-native-firebase/analytics*.setUserProperty", "@react-native-firebase/analytics*.setUserProperties", "@react-native-firebase/analytics*.setUserId"]
+  receiver: "(?i)^(analytics(\\(\\))?|firebaseAnalytics)$"
+  arg: "*"
+  dest: { host: app-measurement.com, kind: third_party, vendor: Google Analytics for Firebase }
+  category: analytics
+
+- id: sdk.ts.firebase.crashlytics
+  lang: typescript
+  call: ["@react-native-firebase/crashlytics*.setUserId", "@react-native-firebase/crashlytics*.setAttribute", "@react-native-firebase/crashlytics*.setAttributes",
+         "@react-native-firebase/crashlytics*.log", "@react-native-firebase/crashlytics*.recordError"]
+  receiver: "(?i)crashlytics"
+  arg: "*"
+  dest: { host: firebasecrashlytics.googleapis.com, kind: third_party, vendor: Google Firebase }
+  category: crash_reporting
+
+- id: sdk.ts.gtag
+  lang: typescript
+  call: ["gtag"]
+  arg: [1, 2]
+  dest: { host: google-analytics.com, kind: third_party, vendor: Google Analytics }
+  category: analytics
+
+- id: sdk.ts.meta_pixel
+  lang: typescript
+  call: ["fbq"]
+  arg: [1, 2]
+  dest: { host: facebook.com, kind: third_party, vendor: Meta }
+  category: advertising
+
+- id: sdk.ts.intercom
+  lang: typescript
+  call: ["Intercom", "@intercom/messenger-js-sdk.*", "@intercom/intercom-react-native.*"]
+  arg: "*"
+  dest: { host: intercom.io, kind: third_party, vendor: Intercom }
+  category: support
+
+- id: storage.ts.web_storage
+  lang: typescript
+  call: ["localStorage.setItem", "sessionStorage.setItem"]
+  arg: 1
+  dest: { kind: storage, host: browser-storage }
+  category: storage
+  description: Web Storage is readable by any script on the origin (XSS) and is never encrypted.
+
+- id: storage.ts.async_storage
+  lang: typescript
+  call: ["@react-native-async-storage/async-storage.setItem", "@react-native-async-storage/async-storage.mergeItem", "@react-native-async-storage/async-storage.multiSet"]
+  receiver: "(?i)asyncstorage"
+  arg: "*"
+  dest: { kind: storage, host: async-storage }
+  category: storage
+  description: AsyncStorage is unencrypted on device.
+
+- id: net.ts.fetch
+  lang: typescript
+  call: ["fetch"]
+  arg: [0, 1]
+  host_arg: 0
+  dest: { kind: network }
+  category: network
+
+- id: net.ts.axios
+  lang: typescript
+  call: ["axios", "axios.post", "axios.put", "axios.patch", "axios.get", "axios.delete", "axios.request", "axios.AxiosInstance.*"]
+  receiver: "(?i)^(this\\.)?_?(http|api|client|axios\\w*)$"
+  arg: "*"
+  host_arg: 0
+  dest: { kind: network }
+  category: network
+
+- id: net.ts.beacon
+  lang: typescript
+  call: ["navigator.sendBeacon"]
+  arg: 1
+  host_arg: 0
+  dest: { kind: network }
+  category: network

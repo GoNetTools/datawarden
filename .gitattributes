@@ -1,0 +1,9 @@
+# Check out text files with LF everywhere (including Windows) so literal
+# detection, fingerprints and fixture line numbers are identical on all OSes.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+
+# Fixtures in other languages are sample input, not project code.
+testdata/** linguist-vendored

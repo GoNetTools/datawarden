@@ -1,0 +1,30 @@
+# Copy to .github/workflows/piiflow.yml in the repository to scan.
+name: piiflow
+
+on:
+  pull_request:
+  push:
+    branches: [main]   # full scans on main refresh the cache PR scans reuse
+
+permissions:
+  contents: read
+  security-events: write   # upload SARIF to code scanning
+  pull-requests: write     # summary comment
+
+jobs:
+  piiflow:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0   # --diff needs the merge base
+
+      # Only for Go code: the Go frontend type-checks with go/packages.
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - uses: GoNetTools/pii-scanner@v0
+        # with:
+        #   args: --caller-depth 3
+        #   fail-on-new: "false"

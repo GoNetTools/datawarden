@@ -1,0 +1,7 @@
+.git
+.github
+.scratch
+.piiflow/cache
+bin
+dist
+*.sarif

@@ -1,0 +1,144 @@
+# Built-in sink rules for Go. Callee names are "importpath.Func" or
+# "importpath.Type.Method" (pointer receivers and type parameters dropped).
+# `arg` counts from 0 and excludes the receiver; "*" means every argument.
+
+- id: log.go.stdlib
+  lang: go
+  call: ["log.Print*", "log.Fatal*", "log.Panic*", "log.Logger.Print*", "log.Logger.Fatal*", "log.Logger.Panic*", "log.Logger.Output"]
+  arg: "*"
+  dest: { kind: log, host: stderr }
+  category: logging
+
+- id: log.go.fmt_print
+  lang: go
+  call: ["fmt.Print", "fmt.Printf", "fmt.Println"]
+  arg: "*"
+  dest: { kind: log, host: stdout }
+  category: logging
+
+- id: log.go.slog
+  lang: go
+  call: ["log/slog.Info*", "log/slog.Debug*", "log/slog.Warn*", "log/slog.Error*", "log/slog.Log*", "log/slog.Logger.*"]
+  arg: "*"
+  dest: { kind: log, host: slog }
+  category: logging
+
+- id: log.go.zap
+  lang: go
+  call: ["go.uber.org/zap.Logger.*", "go.uber.org/zap.SugaredLogger.*"]
+  arg: "*"
+  dest: { kind: log, host: zap }
+  category: logging
+
+- id: log.go.logrus
+  lang: go
+  call: ["github.com/sirupsen/logrus.Info*", "github.com/sirupsen/logrus.Debug*", "github.com/sirupsen/logrus.Warn*",
+         "github.com/sirupsen/logrus.Error*", "github.com/sirupsen/logrus.Print*", "github.com/sirupsen/logrus.With*",
+         "github.com/sirupsen/logrus.Entry.*", "github.com/sirupsen/logrus.Logger.*", "github.com/sirupsen/logrus.FieldLogger.*"]
+  arg: "*"
+  dest: { kind: log, host: logrus }
+  category: logging
+
+- id: log.go.zerolog
+  lang: go
+  call: ["github.com/rs/zerolog.Event.*", "github.com/rs/zerolog.Context.*", "github.com/rs/zerolog/log.Print*"]
+  arg: "*"
+  dest: { kind: log, host: zerolog }
+  category: logging
+
+- id: sdk.go.sentry.scope
+  lang: go
+  call: ["github.com/getsentry/sentry-go.Scope.SetUser", "github.com/getsentry/sentry-go.Scope.SetExtras", "github.com/getsentry/sentry-go.Scope.SetTags",
+         "github.com/getsentry/sentry-go.Scope.AddBreadcrumb", "github.com/getsentry/sentry-go.AddBreadcrumb",
+         "github.com/getsentry/sentry-go.CaptureMessage", "github.com/getsentry/sentry-go.CaptureException", "github.com/getsentry/sentry-go.CaptureEvent",
+         "github.com/getsentry/sentry-go.Hub.CaptureMessage", "github.com/getsentry/sentry-go.Hub.CaptureException", "github.com/getsentry/sentry-go.Hub.CaptureEvent"]
+  arg: 0
+  dest: { kind: third_party, host: sentry.io, vendor: Sentry }
+  category: crash_reporting
+
+- id: sdk.go.sentry.scope_kv
+  lang: go
+  call: ["github.com/getsentry/sentry-go.Scope.SetExtra", "github.com/getsentry/sentry-go.Scope.SetTag", "github.com/getsentry/sentry-go.Scope.SetContext"]
+  arg: 1
+  dest: { kind: third_party, host: sentry.io, vendor: Sentry }
+  category: crash_reporting
+
+- id: net.go.http_body
+  lang: go
+  call: ["net/http.Post", "net/http.Client.Post"]
+  arg: [0, 2]
+  host_arg: 0
+  dest: { kind: network }
+  category: network
+
+- id: net.go.http_form
+  lang: go
+  call: ["net/http.PostForm", "net/http.Client.PostForm"]
+  arg: [0, 1]
+  host_arg: 0
+  dest: { kind: network }
+  category: network
+
+- id: net.go.http_get
+  lang: go
+  call: ["net/http.Get", "net/http.Head", "net/http.Client.Get", "net/http.Client.Head"]
+  arg: 0
+  host_arg: 0
+  dest: { kind: network }
+  category: network
+
+- id: net.go.http_do
+  lang: go
+  call: ["net/http.Client.Do", "net/http.RoundTripper.RoundTrip", "net/http.Transport.RoundTrip"]
+  arg: 0
+  dest: { kind: network }
+  category: network
+
+- id: sdk.go.segment
+  lang: go
+  call: ["github.com/segmentio/analytics-go*.Client.Enqueue"]
+  arg: 0
+  dest: { kind: third_party, host: api.segment.io, vendor: Segment }
+  category: analytics
+
+- id: sdk.go.twilio.sms
+  lang: go
+  call: ["github.com/twilio/twilio-go/rest/api/v2010.ApiService.CreateMessage"]
+  arg: 0
+  dest: { kind: third_party, host: api.twilio.com, vendor: Twilio }
+  category: messaging
+
+- id: sdk.go.aws.sns
+  lang: go
+  call: ["github.com/aws/aws-sdk-go-v2/service/sns.Client.Publish"]
+  arg: 1
+  dest: { kind: third_party, host: sns.amazonaws.com, vendor: AWS }
+  category: messaging
+
+- id: storage.go.file
+  lang: go
+  call: ["os.WriteFile", "os.File.Write", "os.File.WriteString"]
+  arg: "*"
+  dest: { kind: storage, host: local-file }
+  category: storage
+
+- id: storage.go.sql
+  lang: go
+  call: ["database/sql.DB.Exec*", "database/sql.Tx.Exec*", "database/sql.Stmt.Exec*", "database/sql.Conn.Exec*"]
+  arg: "*"
+  dest: { kind: first_party, host: database }
+  category: storage
+
+- id: storage.go.gorm
+  lang: go
+  call: ["gorm.io/gorm.DB.Create", "gorm.io/gorm.DB.Save", "gorm.io/gorm.DB.Updates", "gorm.io/gorm.DB.Update", "gorm.io/gorm.DB.FirstOrCreate"]
+  arg: "*"
+  dest: { kind: first_party, host: database }
+  category: storage
+
+- id: storage.go.redis
+  lang: go
+  call: ["github.com/redis/go-redis/*.Set", "github.com/redis/go-redis/*.HSet", "github.com/redis/go-redis/*.SetEx", "github.com/redis/go-redis/*.LPush"]
+  arg: "*"
+  dest: { kind: first_party, host: redis }
+  category: storage

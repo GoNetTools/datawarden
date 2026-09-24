@@ -1,0 +1,10 @@
+piiflow
+Copyright 2026 The piiflow Authors
+
+This product includes software developed by The piiflow Authors
+(https://github.com/GoNetTools/pii-scanner).
+
+Binary releases and container images also contain third-party components
+(Go standard library, golang.org/x/tools, go-tree-sitter and the tree-sitter
+grammars it bundles, gopkg.in/yaml.v3). Their licenses are reproduced in
+THIRD_PARTY_LICENSES.txt, shipped alongside the binary.

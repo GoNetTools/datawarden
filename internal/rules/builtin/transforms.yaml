@@ -1,0 +1,81 @@
+# Transform rules: calls whose result is a protected form of the input.
+# Whether a transform makes a flow acceptable is decided by
+# policy.safe_transforms in .piiflow.yaml, not here.
+
+- id: xform.go.sha256
+  kind: transform
+  lang: go
+  call: ["crypto/sha256.Sum256", "crypto/sha256.Sum224"]
+  transform: sha256
+- id: xform.go.sha512
+  kind: transform
+  lang: go
+  call: ["crypto/sha512.Sum512*", "crypto/sha512.Sum384"]
+  transform: sha512
+- id: xform.go.weak_hash
+  kind: transform
+  lang: go
+  call: ["crypto/md5.Sum", "crypto/sha1.Sum"]
+  transform: md5_or_sha1
+- id: xform.go.hash_sum
+  kind: transform
+  lang: go
+  call: ["hash.Hash.Sum", "hash.Hash32.Sum32", "hash.Hash64.Sum64"]
+  transform: hashed
+- id: xform.go.kdf
+  kind: transform
+  lang: go
+  call: ["golang.org/x/crypto/bcrypt.GenerateFromPassword", "golang.org/x/crypto/argon2.IDKey", "golang.org/x/crypto/argon2.Key", "golang.org/x/crypto/scrypt.Key"]
+  transform: hashed
+- id: xform.go.encrypt
+  kind: transform
+  lang: go
+  call: ["crypto/cipher.AEAD.Seal", "crypto/rsa.EncryptOAEP", "crypto/rsa.EncryptPKCS1v15"]
+  transform: encrypted
+- id: xform.go.base64
+  kind: transform
+  lang: go
+  call: ["encoding/base64.Encoding.EncodeToString", "encoding/base64.Encoding.Encode"]
+  transform: base64
+
+- id: xform.jvm.digest
+  kind: transform
+  lang: [kotlin, java]
+  call: ["java.security.MessageDigest.digest", "com.google.common.hash.HashFunction.hashString", "com.google.common.hash.HashFunction.hashBytes"]
+  transform: hashed
+- id: xform.jvm.commons_digest
+  kind: transform
+  lang: [kotlin, java]
+  call: ["org.apache.commons.codec.digest.DigestUtils.sha256Hex", "org.apache.commons.codec.digest.DigestUtils.sha256", "org.apache.commons.codec.digest.DigestUtils.sha512Hex"]
+  transform: sha256
+- id: xform.jvm.cipher
+  kind: transform
+  lang: [kotlin, java]
+  call: ["javax.crypto.Cipher.doFinal", "androidx.security.crypto.EncryptedSharedPreferences.create"]
+  transform: encrypted
+- id: xform.jvm.base64
+  kind: transform
+  lang: [kotlin, java]
+  call: ["android.util.Base64.encodeToString", "java.util.Base64.Encoder.encodeToString", "java.util.Base64.Encoder.encode"]
+  transform: base64
+
+- id: xform.ts.crypto_js
+  kind: transform
+  lang: typescript
+  call: ["crypto-js.SHA256", "crypto-js/sha256", "js-sha256.sha256", "crypto-js.HmacSHA256"]
+  transform: sha256
+- id: xform.ts.bcrypt
+  kind: transform
+  lang: typescript
+  call: ["bcrypt.hash", "bcrypt.hashSync", "bcryptjs.hash", "bcryptjs.hashSync", "argon2.hash"]
+  transform: hashed
+- id: xform.ts.encrypt
+  kind: transform
+  lang: typescript
+  call: ["crypto-js.AES.encrypt", "crypto.publicEncrypt"]
+  transform: encrypted
+- id: xform.ts.base64
+  kind: transform
+  lang: typescript
+  call: ["btoa", "Buffer.from"]
+  transform: base64

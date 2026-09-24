@@ -1,0 +1,129 @@
+name: piiflow
+description: Find personal data (PII) flowing to logs, analytics/crash SDKs and third parties. Uploads SARIF and comments on pull requests.
+author: The piiflow Authors
+branding:
+  icon: shield
+  color: blue
+
+inputs:
+  version:
+    description: piiflow release to install (e.g. v0.1.0), or "latest". The archive is verified against the release's checksums.txt.
+    default: latest
+  repository:
+    description: GitHub repository that publishes piiflow releases.
+    default: GoNetTools/pii-scanner
+  path:
+    description: Directory to scan (repository root by default).
+    default: .
+  args:
+    description: Extra arguments for `piiflow scan`.
+    default: ""
+  diff:
+    description: On pull requests, scan only changed files and their callers ("true"/"false").
+    default: "true"
+  sarif:
+    description: Upload SARIF to GitHub code scanning.
+    default: "true"
+  comment:
+    description: Create/update a summary comment on the pull request.
+    default: "true"
+  fail-on-new:
+    description: Fail the job when there are new violations.
+    default: "true"
+  token:
+    description: Token for downloading releases and posting comments.
+    default: ${{ github.token }}
+
+outputs:
+  exit-code:
+    description: 0 clean, 1 new violations, 2 error.
+    value: ${{ steps.scan.outputs.exit-code }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install piiflow
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+        REPO: ${{ inputs.repository }}
+        GH_TOKEN: ${{ inputs.token }}
+      run: |
+        set -euo pipefail
+        os=$(uname -s | tr '[:upper:]' '[:lower:]')
+        case "$(uname -m)" in x86_64|amd64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; *) echo "unsupported arch $(uname -m)"; exit 2 ;; esac
+        case "$os" in mingw*|msys*|cygwin*) os=windows ;; esac
+        asset="piiflow_${os}_${arch}.tar.gz"; [ "$os" = windows ] && asset="piiflow_${os}_${arch}.zip"
+        if [ "$VERSION" = latest ]; then base="https://github.com/$REPO/releases/latest/download"; else base="https://github.com/$REPO/releases/download/$VERSION"; fi
+        dir="$RUNNER_TEMP/piiflow-bin"; mkdir -p "$dir"
+        curl -sSfL --retry 3 -H "Authorization: Bearer $GH_TOKEN" "$base/$asset" -o "$dir/$asset"
+        curl -sSfL --retry 3 -H "Authorization: Bearer $GH_TOKEN" "$base/checksums.txt" -o "$dir/checksums.txt"
+        # Verify the archive against the release's checksums before running it.
+        (
+          cd "$dir"
+          awk -v a="$asset" '$2 == a' checksums.txt > "$asset.sha256"
+          [ -s "$asset.sha256" ] || { echo "::error::$asset is not listed in checksums.txt"; exit 2; }
+          if command -v sha256sum >/dev/null 2>&1; then sha256sum -c "$asset.sha256"; else shasum -a 256 -c "$asset.sha256"; fi
+        )
+        if [ "$os" = windows ]; then (cd "$dir" && unzip -oq "$asset"); else tar -xzf "$dir/$asset" -C "$dir"; fi
+        echo "$dir" >> "$GITHUB_PATH"
+        "$dir/piiflow" version
+
+    - name: Restore analysis cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ inputs.path }}/.piiflow/cache
+        key: piiflow-${{ runner.os }}-${{ github.base_ref || github.ref_name }}-${{ github.sha }}
+        restore-keys: |
+          piiflow-${{ runner.os }}-${{ github.base_ref || github.ref_name }}-
+
+    - name: Scan
+      id: scan
+      shell: bash
+      working-directory: ${{ inputs.path }}
+      env:
+        BASE_REF: ${{ github.base_ref }}
+        USE_DIFF: ${{ inputs.diff }}
+        EXTRA_ARGS: ${{ inputs.args }}
+      run: |
+        set +e
+        args=(scan . --sarif "$RUNNER_TEMP/piiflow.sarif" --markdown "$RUNNER_TEMP/piiflow.md")
+        if [ -n "$BASE_REF" ] && [ "$USE_DIFF" = "true" ]; then
+          git fetch --no-tags --quiet origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF" || true
+          args+=(--diff "origin/$BASE_REF")
+        fi
+        # shellcheck disable=SC2086
+        piiflow "${args[@]}" $EXTRA_ARGS
+        code=$?
+        echo "exit-code=$code" >> "$GITHUB_OUTPUT"
+        if [ -f "$RUNNER_TEMP/piiflow.md" ]; then cat "$RUNNER_TEMP/piiflow.md" >> "$GITHUB_STEP_SUMMARY"; fi
+        if [ "$code" -ge 2 ]; then exit "$code"; fi
+        exit 0
+
+    - name: Save analysis cache
+      if: github.event_name == 'push'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ inputs.path }}/.piiflow/cache
+        key: piiflow-${{ runner.os }}-${{ github.ref_name }}-${{ github.sha }}
+
+    - name: Upload SARIF
+      if: inputs.sarif == 'true' && always() && steps.scan.outputs.exit-code != '2'
+      uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+      with:
+        sarif_file: ${{ runner.temp }}/piiflow.sarif
+        category: piiflow
+
+    - name: Comment on pull request
+      if: inputs.comment == 'true' && github.event_name == 'pull_request' && steps.scan.outputs.exit-code != '2'
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.token }}
+      run: piiflow comment --only-if-new "$RUNNER_TEMP/piiflow.md" || echo "::warning::could not post the piiflow comment (fork PRs have a read-only token)"
+
+    - name: Fail on new violations
+      if: inputs.fail-on-new == 'true' && steps.scan.outputs.exit-code == '1'
+      shell: bash
+      run: |
+        echo "::error::piiflow found new personal-data flows or committed PII (see the job summary)."
+        exit 1

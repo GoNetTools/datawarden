@@ -1,0 +1,4 @@
+# The fixtures contain deliberate PII leaks and synthetic personal data.
+testdata/
+# Detector unit tests use valid-looking synthetic values on purpose.
+internal/detect/*_test.go

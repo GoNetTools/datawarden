@@ -1,0 +1,46 @@
+name: Missed leak
+description: Personal data reaches a log, SDK, third party or storage and piiflow does not report it.
+labels: ["false negative", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Use synthetic data only.** If the missed leak could be abused to hide leaks on purpose, report it privately instead (see SECURITY.md).
+  - type: input
+    id: version
+    attributes:
+      label: piiflow version
+      description: Output of `piiflow version`.
+    validations:
+      required: true
+  - type: dropdown
+    id: lang
+    attributes:
+      label: Language
+      options: [Go, Kotlin, Java, TypeScript / JavaScript, Committed value (literal detector), Other]
+    validations:
+      required: true
+  - type: textarea
+    id: code
+    attributes:
+      label: Minimal code
+      description: Where the personal data comes from and where it ends up, with synthetic data.
+    validations:
+      required: true
+  - type: input
+    id: sink
+    attributes:
+      label: Sink library and call
+      description: "For example: `com.google.firebase:firebase-analytics` `logEvent`, `@datadog/browser-logs` `logger.info`."
+  - type: input
+    id: datatype
+    attributes:
+      label: Expected data type
+      description: "For example: phone, email, vn_cccd, full_name, address."
+  - type: checkboxes
+    id: data
+    attributes:
+      label: Data check
+      options:
+        - label: This report contains no real personal data.
+          required: true

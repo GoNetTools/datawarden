@@ -1,0 +1,51 @@
+name: False positive
+description: piiflow reported a flow or value that is not personal data, or not a leak.
+labels: ["false positive", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Use synthetic data only.** Do not paste real phone numbers, ID numbers, emails or other personal data, even masked in your own way.
+  - type: input
+    id: version
+    attributes:
+      label: piiflow version
+      description: Output of `piiflow version`.
+    validations:
+      required: true
+  - type: dropdown
+    id: lang
+    attributes:
+      label: Language
+      options: [Go, Kotlin, Java, TypeScript / JavaScript, Committed value (literal detector), Other]
+    validations:
+      required: true
+  - type: textarea
+    id: finding
+    attributes:
+      label: The finding
+      description: The piiflow output for it (text report lines, or the SARIF result). It includes the rule id, data type and confidence.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: code
+    attributes:
+      label: Minimal code
+      description: The smallest snippet that reproduces the finding, with synthetic data.
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why this is not a leak
+      description: For example, the value is already masked, the field is not personal data, the destination is first-party.
+    validations:
+      required: true
+  - type: checkboxes
+    id: data
+    attributes:
+      label: Data check
+      options:
+        - label: This report contains no real personal data.
+          required: true

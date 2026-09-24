@@ -1,0 +1,209 @@
+# Copyright 2026 The piiflow Authors
+# SPDX-License-Identifier: Apache-2.0
+#
+# Publishes a release when a version tag is pushed:
+#   git tag -a v0.2.0 -m v0.2.0 && git push origin v0.2.0
+# Tags with a suffix (v0.2.0-rc.1) become pre-releases: they don't move the
+# `latest` image tag or the major tag the GitHub Action resolves to.
+
+name: release
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  GOTOOLCHAIN: local
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: stable
+          cache: false # no cache restores in release builds
+      - name: Test
+        run: |
+          CGO_ENABLED=1 go vet ./...
+          CGO_ENABLED=1 go test ./...
+          CGO_ENABLED=0 go test ./...
+
+  # Tree-sitter needs cgo, so each platform is built natively (or with the
+  # platform's own cross compiler) and linked statically on Linux/Windows.
+  binaries:
+    needs: test
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        include:
+          - { runner: ubuntu-24.04, goos: linux, goarch: amd64 }
+          - { runner: ubuntu-24.04-arm, goos: linux, goarch: arm64 }
+          - { runner: macos-15, goos: darwin, goarch: arm64 }
+          - { runner: macos-15, goos: darwin, goarch: amd64, cc: "clang -arch x86_64" }
+          - { runner: windows-2025, goos: windows, goarch: amd64 }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: stable
+          cache: false
+      - name: C compiler for cgo (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          if ! command -v gcc >/dev/null 2>&1; then
+            choco install mingw --no-progress -y
+            echo 'C:\ProgramData\mingw64\mingw64\bin' >> "$GITHUB_PATH"
+          fi
+      - name: Build
+        shell: bash
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CROSS_CC: ${{ matrix.cc }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          if [ -n "$CROSS_CC" ]; then export CC="$CROSS_CC"; fi
+          bash scripts/release/build.sh "$VERSION" dist/bin
+      - name: Smoke test
+        if: matrix.cc == ''
+        shell: bash
+        env:
+          BIN: dist/bin/${{ matrix.goos }}_${{ matrix.goarch }}/piiflow
+        run: |
+          version="$("$BIN" version)"
+          echo "$version"
+          case "$version" in
+            *go*java*kotlin*typescript*) ;;
+            *) echo "::error::binary is missing frontends: $version"; exit 1 ;;
+          esac
+          code=0
+          "$BIN" scan testdata/web --root testdata/web --no-baseline --no-cache > /dev/null || code=$?
+          if [ "$code" -ne 1 ]; then
+            echo "::error::scan of testdata/web: exit code $code, want 1"
+            exit 1
+          fi
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bin-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/bin
+          if-no-files-found: error
+          retention-days: 7
+
+  package:
+    needs: binaries
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: stable # the release binaries' Go, for THIRD_PARTY_LICENSES.txt
+          cache: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: bin-*
+          path: dist/bin
+          merge-multiple: true
+      - name: Archives and checksums
+        run: bash scripts/release/package.sh dist/bin dist/release
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release
+          path: dist/release
+          if-no-files-found: error
+          retention-days: 7
+
+  image:
+    needs: test
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/piiflow
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}},enable=${{ !startsWith(github.ref, 'refs/tags/v0.') }}
+          flavor: |
+            latest=auto
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: VERSION=${{ github.ref_name }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+
+  publish:
+    needs: [package, image]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.ref_name }}
+      REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release
+          path: dist
+      - name: Create the GitHub release
+        run: |
+          flags=(--verify-tag --title "$TAG" --generate-notes)
+          case "$TAG" in *-*) flags+=(--prerelease --latest=false) ;; esac
+          gh release create "$TAG" --repo "$REPO" "${flags[@]}" dist/*
+      # `uses: GoNetTools/pii-scanner@v0` resolves to this tag. GITHUB_TOKEN may
+      # not move a tag across commits that change workflow files; set a
+      # RELEASE_TAG_TOKEN secret (contents + workflows write) to avoid that.
+      - name: Move the major version tag
+        if: ${{ !contains(github.ref_name, '-') }}
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TAG_TOKEN || github.token }}
+        run: |
+          major="${TAG%%.*}"
+          if gh api "repos/$REPO/git/ref/tags/$major" > /dev/null 2>&1; then
+            ok=0; gh api -X PATCH "repos/$REPO/git/refs/tags/$major" -f sha="$GITHUB_SHA" -F force=true > /dev/null || ok=$?
+          else
+            ok=0; gh api -X POST "repos/$REPO/git/refs" -f ref="refs/tags/$major" -f sha="$GITHUB_SHA" > /dev/null || ok=$?
+          fi
+          if [ "$ok" -ne 0 ]; then
+            echo "::warning::Could not move $major to $TAG. Run: git tag -f $major $TAG^{} && git push -f origin $major"
+          else
+            echo "$major now points to $TAG" >> "$GITHUB_STEP_SUMMARY"
+          fi

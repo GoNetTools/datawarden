@@ -1,0 +1,223 @@
+# Built-in rules for Kotlin and Java (Android and server side).
+
+- id: log.android.logcat
+  lang: [kotlin, java]
+  call: ["android.util.Log.v", "android.util.Log.d", "android.util.Log.i", "android.util.Log.w", "android.util.Log.e", "android.util.Log.wtf", "android.util.Log.println"]
+  arg: "*"
+  dest: { kind: log, host: logcat }
+  category: logging
+  description: Logcat is readable via adb and ends up in bug reports.
+
+- id: log.android.timber
+  lang: [kotlin, java]
+  call: ["timber.log.Timber.v", "timber.log.Timber.d", "timber.log.Timber.i", "timber.log.Timber.w", "timber.log.Timber.e", "timber.log.Timber.wtf", "timber.log.Timber.log", "timber.log.Timber.Tree.*"]
+  arg: "*"
+  dest: { kind: log, host: logcat }
+  category: logging
+
+- id: log.jvm.stdout
+  lang: [kotlin, java]
+  call: ["java.lang.System.out.print*", "java.lang.System.err.print*", "kotlin.io.println", "kotlin.io.print"]
+  arg: "*"
+  dest: { kind: log, host: stdout }
+  category: logging
+
+- id: log.jvm.logger
+  lang: [kotlin, java]
+  call: ["org.slf4j.Logger.trace", "org.slf4j.Logger.debug", "org.slf4j.Logger.info", "org.slf4j.Logger.warn", "org.slf4j.Logger.error",
+         "java.util.logging.Logger.info", "java.util.logging.Logger.warning", "java.util.logging.Logger.severe", "java.util.logging.Logger.fine", "java.util.logging.Logger.log",
+         "org.apache.logging.log4j.Logger.info", "org.apache.logging.log4j.Logger.debug", "org.apache.logging.log4j.Logger.warn", "org.apache.logging.log4j.Logger.error",
+         "mu.KLogger.info", "mu.KLogger.debug", "mu.KLogger.warn", "mu.KLogger.error", "mu.KLogger.trace"]
+  receiver: "(?i)^(this\\.)?_?(log|logger)$"
+  arg: "*"
+  dest: { kind: log, host: application-log }
+  category: logging
+
+- id: sdk.sentry.set_user
+  lang: [kotlin, java]
+  call: ["io.sentry.Sentry.setUser", "io.sentry.Scope.setUser", "io.sentry.IScope.setUser", "io.sentry.IHub.setUser"]
+  arg: 0
+  dest: { host: sentry.io, kind: third_party, vendor: Sentry }
+  category: crash_reporting
+
+- id: sdk.sentry.capture
+  lang: [kotlin, java]
+  call: ["io.sentry.Sentry.captureMessage", "io.sentry.Sentry.captureException", "io.sentry.Sentry.addBreadcrumb", "io.sentry.Scope.addBreadcrumb"]
+  arg: 0
+  dest: { host: sentry.io, kind: third_party, vendor: Sentry }
+  category: crash_reporting
+
+- id: sdk.sentry.set_extra
+  lang: [kotlin, java]
+  call: ["io.sentry.Sentry.setExtra", "io.sentry.Sentry.setTag", "io.sentry.Scope.setExtra", "io.sentry.Scope.setTag", "io.sentry.Scope.setContexts"]
+  arg: 1
+  dest: { host: sentry.io, kind: third_party, vendor: Sentry }
+  category: crash_reporting
+
+- id: sdk.firebase.crashlytics
+  lang: [kotlin, java]
+  call: ["com.google.firebase.crashlytics.FirebaseCrashlytics.setUserId", "com.google.firebase.crashlytics.FirebaseCrashlytics.log",
+         "com.google.firebase.crashlytics.FirebaseCrashlytics.recordException"]
+  receiver: "(?i)crashlytics"
+  arg: 0
+  dest: { host: firebasecrashlytics.googleapis.com, kind: third_party, vendor: Google Firebase }
+  category: crash_reporting
+
+- id: sdk.firebase.crashlytics.custom_key
+  lang: [kotlin, java]
+  call: ["com.google.firebase.crashlytics.FirebaseCrashlytics.setCustomKey"]
+  receiver: "(?i)crashlytics"
+  arg: 1
+  dest: { host: firebasecrashlytics.googleapis.com, kind: third_party, vendor: Google Firebase }
+  category: crash_reporting
+
+- id: sdk.firebase.analytics
+  lang: [kotlin, java]
+  call: ["com.google.firebase.analytics.FirebaseAnalytics.logEvent", "com.google.firebase.analytics.FirebaseAnalytics.setUserProperty",
+         "com.google.firebase.analytics.FirebaseAnalytics.setDefaultEventParameters"]
+  receiver: "(?i)(firebase|^analytics$|^(this\\.)?_?firebaseAnalytics$)"
+  arg: "*"
+  dest: { host: app-measurement.com, kind: third_party, vendor: Google Analytics for Firebase }
+  category: analytics
+
+- id: sdk.firebase.analytics.user_id
+  lang: [kotlin, java]
+  call: ["com.google.firebase.analytics.FirebaseAnalytics.setUserId"]
+  receiver: "(?i)(firebase|^analytics$)"
+  arg: 0
+  dest: { host: app-measurement.com, kind: third_party, vendor: Google Analytics for Firebase }
+  category: analytics
+
+- id: sdk.mixpanel
+  lang: [kotlin, java]
+  call: ["com.mixpanel.android.mpmetrics.MixpanelAPI.track", "com.mixpanel.android.mpmetrics.MixpanelAPI.identify", "com.mixpanel.android.mpmetrics.MixpanelAPI.registerSuperProperties",
+         "com.mixpanel.android.mpmetrics.MixpanelAPI.People.set", "com.mixpanel.android.mpmetrics.MixpanelAPI.People.identify"]
+  receiver: "(?i)mixpanel|people"
+  arg: "*"
+  dest: { host: api.mixpanel.com, kind: third_party, vendor: Mixpanel }
+  category: analytics
+
+- id: sdk.segment
+  lang: [kotlin, java]
+  call: ["com.segment.analytics.Analytics.track", "com.segment.analytics.Analytics.identify", "com.segment.analytics.Analytics.screen",
+         "com.segment.analytics.kotlin.core.Analytics.track", "com.segment.analytics.kotlin.core.Analytics.identify"]
+  receiver: "(?i)segment|^analytics$"
+  arg: "*"
+  dest: { host: api.segment.io, kind: third_party, vendor: Segment }
+  category: analytics
+
+- id: sdk.amplitude
+  lang: [kotlin, java]
+  call: ["com.amplitude.android.Amplitude.track", "com.amplitude.android.Amplitude.setUserId", "com.amplitude.android.Amplitude.identify",
+         "com.amplitude.api.AmplitudeClient.logEvent", "com.amplitude.api.AmplitudeClient.setUserId", "com.amplitude.api.AmplitudeClient.setUserProperties"]
+  receiver: "(?i)amplitude"
+  arg: "*"
+  dest: { host: api2.amplitude.com, kind: third_party, vendor: Amplitude }
+  category: analytics
+
+- id: sdk.appsflyer
+  lang: [kotlin, java]
+  call: ["com.appsflyer.AppsFlyerLib.logEvent", "com.appsflyer.AppsFlyerLib.setCustomerUserId", "com.appsflyer.AppsFlyerLib.setUserEmails", "com.appsflyer.AppsFlyerLib.setAdditionalData"]
+  receiver: "(?i)appsflyer"
+  arg: "*"
+  dest: { host: appsflyer.com, kind: third_party, vendor: AppsFlyer }
+  category: attribution
+
+- id: sdk.facebook.app_events
+  lang: [kotlin, java]
+  call: ["com.facebook.appevents.AppEventsLogger.logEvent", "com.facebook.appevents.AppEventsLogger.setUserData", "com.facebook.appevents.AppEventsLogger.setUserID"]
+  receiver: "(?i)appevents|fblogger|^logger$"
+  arg: "*"
+  dest: { host: graph.facebook.com, kind: third_party, vendor: Meta }
+  category: analytics
+
+- id: sdk.onesignal
+  lang: [kotlin, java]
+  call: ["com.onesignal.OneSignal.setEmail", "com.onesignal.OneSignal.setSMSNumber", "com.onesignal.OneSignal.login", "com.onesignal.OneSignal.setExternalUserId",
+         "com.onesignal.user.IUserManager.addEmail", "com.onesignal.user.IUserManager.addSms", "com.onesignal.user.IUserManager.addTag"]
+  receiver: "(?i)onesignal"
+  arg: "*"
+  dest: { host: onesignal.com, kind: third_party, vendor: OneSignal }
+  category: messaging
+
+- id: sdk.clevertap
+  lang: [kotlin, java]
+  call: ["com.clevertap.android.sdk.CleverTapAPI.onUserLogin", "com.clevertap.android.sdk.CleverTapAPI.pushProfile", "com.clevertap.android.sdk.CleverTapAPI.pushEvent"]
+  receiver: "(?i)clevertap"
+  arg: "*"
+  dest: { host: clevertap-prod.com, kind: third_party, vendor: CleverTap }
+  category: analytics
+
+- id: sdk.braze
+  lang: [kotlin, java]
+  call: ["com.braze.Braze.changeUser", "com.braze.BrazeUser.setEmail", "com.braze.BrazeUser.setPhoneNumber", "com.braze.BrazeUser.setCustomUserAttribute", "com.braze.Braze.logCustomEvent"]
+  receiver: "(?i)braze"
+  arg: "*"
+  dest: { host: braze.com, kind: third_party, vendor: Braze }
+  category: messaging
+
+- id: sdk.intercom
+  lang: [kotlin, java]
+  call: ["io.intercom.android.sdk.Intercom.registerIdentifiedUser", "io.intercom.android.sdk.Intercom.updateUser", "io.intercom.android.sdk.Intercom.logEvent"]
+  receiver: "(?i)intercom"
+  arg: "*"
+  dest: { host: intercom.io, kind: third_party, vendor: Intercom }
+  category: support
+
+- id: sdk.bugsnag
+  lang: [kotlin, java]
+  call: ["com.bugsnag.android.Bugsnag.setUser", "com.bugsnag.android.Bugsnag.leaveBreadcrumb", "com.bugsnag.android.Bugsnag.addMetadata", "com.bugsnag.android.Bugsnag.notify"]
+  arg: "*"
+  dest: { host: notify.bugsnag.com, kind: third_party, vendor: Bugsnag }
+  category: crash_reporting
+
+- id: storage.android.shared_prefs
+  lang: [kotlin, java]
+  call: ["android.content.SharedPreferences.Editor.putString", "android.content.SharedPreferences.Editor.putStringSet"]
+  receiver: "(?i)(edit(or)?|pref)"
+  match_bare: true
+  arg: 1
+  dest: { kind: storage, host: shared-preferences }
+  category: storage
+  description: SharedPreferences are stored unencrypted in the app sandbox and included in backups by default.
+
+- id: storage.jvm.file
+  lang: [kotlin, java]
+  call: ["java.io.File.writeText", "java.io.File.appendText", "java.io.FileWriter.write", "java.io.FileOutputStream.write", "java.nio.file.Files.write", "java.nio.file.Files.writeString"]
+  arg: "*"
+  dest: { kind: storage, host: local-file }
+  category: storage
+
+- id: ipc.android.clipboard
+  lang: [kotlin, java]
+  call: ["android.content.ClipboardManager.setPrimaryClip"]
+  receiver: "(?i)clip"
+  arg: 0
+  dest: { kind: ipc, host: clipboard }
+  category: ipc
+  description: Other apps and keyboards can read the clipboard.
+
+- id: ipc.android.broadcast
+  lang: [kotlin, java]
+  call: ["android.content.Context.sendBroadcast", "android.content.Context.sendOrderedBroadcast", "android.content.Context.sendStickyBroadcast"]
+  match_bare: true
+  receiver: "(?i)(context|ctx|activity|application)"
+  arg: 0
+  dest: { kind: ipc, host: broadcast }
+  category: ipc
+
+- id: net.android.webview
+  lang: [kotlin, java]
+  call: ["android.webkit.WebView.loadUrl", "android.webkit.WebView.evaluateJavascript", "android.webkit.WebView.postUrl"]
+  receiver: "(?i)web"
+  arg: "*"
+  dest: { kind: network, host: webview }
+  category: network
+
+- id: net.jvm.okhttp
+  lang: [kotlin, java]
+  call: ["okhttp3.OkHttpClient.newCall", "okhttp3.Call.Factory.newCall"]
+  receiver: "(?i)(http|client|okhttp)"
+  arg: 0
+  dest: { kind: network }
+  category: network

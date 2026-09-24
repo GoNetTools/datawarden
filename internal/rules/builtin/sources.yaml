@@ -1,0 +1,51 @@
+# Source rules: API calls whose result is personal data regardless of the
+# variable name it is stored in.
+
+- id: src.android.phone_number
+  kind: source
+  lang: [kotlin, java]
+  call: ["android.telephony.TelephonyManager.getLine1Number"]
+  receiver: "(?i)telephony|tm"
+  data_type: phone
+- id: src.android.device_ids
+  kind: source
+  lang: [kotlin, java]
+  call: ["android.telephony.TelephonyManager.getDeviceId", "android.telephony.TelephonyManager.getImei", "android.telephony.TelephonyManager.getMeid",
+         "android.telephony.TelephonyManager.getSubscriberId", "android.telephony.TelephonyManager.getSimSerialNumber", "android.os.Build.getSerial"]
+  receiver: "(?i)telephony|tm|build"
+  data_type: device_id
+- id: src.android.advertising_id
+  kind: source
+  lang: [kotlin, java]
+  call: ["com.google.android.gms.ads.identifier.AdvertisingIdClient.Info.getId", "com.google.android.gms.ads.identifier.AdvertisingIdClient.getAdvertisingIdInfo"]
+  data_type: device_id
+- id: src.android.location
+  kind: source
+  lang: [kotlin, java]
+  call: ["android.location.LocationManager.getLastKnownLocation", "android.location.Location.getLatitude", "android.location.Location.getLongitude",
+         "com.google.android.gms.location.FusedLocationProviderClient.getLastLocation", "com.google.android.gms.location.FusedLocationProviderClient.getCurrentLocation"]
+  receiver: "(?i)location"
+  data_type: location
+- id: src.android.accounts
+  kind: source
+  lang: [kotlin, java]
+  call: ["android.accounts.AccountManager.getAccounts", "android.accounts.AccountManager.getAccountsByType"]
+  data_type: email
+- id: src.android.contacts
+  kind: source
+  lang: [kotlin, java]
+  call: ["android.content.ContentResolver.query"]
+  receiver: "(?i)contentresolver"
+  data_type: phone
+  description: Content provider queries (contacts, call log, SMS). Refine with a repo rule if you only query non-PII providers.
+- id: src.ts.geolocation
+  kind: source
+  lang: typescript
+  call: ["navigator.geolocation.getCurrentPosition", "navigator.geolocation.watchPosition", "expo-location.getCurrentPositionAsync", "expo-location.getLastKnownPositionAsync",
+         "@react-native-community/geolocation.getCurrentPosition", "react-native-geolocation-service.getCurrentPosition"]
+  data_type: location
+- id: src.ts.contacts
+  kind: source
+  lang: typescript
+  call: ["expo-contacts.getContactsAsync", "react-native-contacts.getAll"]
+  data_type: phone
