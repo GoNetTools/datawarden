@@ -76,3 +76,53 @@ cases:
       - {data_type: email, sink_rule: net.ts.fetch, function: UserService.register}
       - {data_type: phone, sink_rule: net.ts.fetch, function: UserService.register}
       - {data_type: vn_cccd, sink_rule: net.ts.fetch, function: UserService.register}
+
+  # testdata/vulnshop: a small shop (Go API, TypeScript checkout, Kotlin and
+  # Java Android, CSV seed data) that is vulnerable by design. Every LEAK
+  # comment in its sources is labelled here; SAFE comments are traps.
+  - name: vulnshop
+    dir: vulnshop
+    langs: [go, typescript, kotlin, java]
+    min_precision: 0.96
+    min_recall: 0.93
+    flows:
+      # Go API
+      - {data_type: email, sink_rule: log.go.stdlib, function: api.Server.Signup}
+      - {data_type: email, sink_rule: sdk.go.sentry.scope, function: api.Server.Signup$1}
+      - {data_type: dob, sink_rule: sdk.go.sentry.scope, function: api.Server.Signup}
+      - {data_type: phone, sink_rule: net.go.http_form, function: api.sendOTP, note: "Contact is the phone_number column"}
+      - {data_type: vn_cccd, sink_rule: log.go.fmt_print, function: api.writeAudit, note: "three calls deep: audit → record → writeAudit"}
+      - {data_type: email, sink_rule: log.go.slog, function: api.Server.Login}
+      - {data_type: ip_address, sink_rule: net.go.http_get, function: api.Server.Login}
+      - {data_type: credit_card, sink_rule: log.go.stdlib, function: api.Server.Charge, note: "wrapped into an error first"}
+      - {data_type: email, sink_rule: storage.go.file, function: api.Server.Export}
+      - {data_type: phone, sink_rule: storage.go.file, function: api.Server.Export}
+      - {data_type: email, sink_rule: log.go.fmt_print, function: api.Server.Support}
+      - {data_type: phone, sink_rule: log.go.fmt_print, function: api.Server.Support}
+      - {data_type: phone, sink_rule: log.go.stdlib, function: api.Server.Support, note: "SHA-256 of a phone number is reversible"}
+      - {data_type: person_name, sink_rule: log.go.stdlib, function: api.Server.Welcome$1, note: "from a goroutine"}
+      # TypeScript checkout
+      - {data_type: email, sink_rule: sdk.ts.sentry.set_user, function: placeOrder}
+      - {data_type: phone, sink_rule: sdk.ts.posthog, function: placeOrder}
+      - {data_type: credit_card, sink_rule: storage.ts.web_storage, function: placeOrder}
+      - {data_type: address, sink_rule: log.ts.console, function: placeOrder}
+      - {data_type: phone, sink_rule: net.ts.fetch, function: placeOrder}
+      - {data_type: location, sink_rule: net.ts.beacon, function: trackStore}
+      # Kotlin and Java Android
+      - {data_type: email, sink_rule: sdk.firebase.analytics.user_id, function: CheckoutActivity.onSignedIn}
+      - {data_type: phone, sink_rule: log.android.timber, function: CheckoutActivity.onOtpRequested}
+      - {data_type: credit_card, sink_rule: ipc.android.clipboard, function: CheckoutActivity.copyCard}
+      - {data_type: phone, sink_rule: log.android.logcat, function: CheckoutActivity.prefillPhone,
+         note: "known miss: Kotlin property telephony.line1Number is not matched by the getLine1Number() source rule"}
+      - {data_type: location, sink_rule: sdk.amplitude, function: CheckoutActivity.trackDelivery}
+      - {data_type: email, sink_rule: ipc.android.broadcast, function: ProfileSync.publish}
+      - {data_type: dob, sink_rule: log.android.logcat, function: ProfileSync.publish}
+    literals:
+      - {data_type: phone, file: seed/customers.csv, line: 2}
+      - {data_type: email, file: seed/customers.csv, line: 2}
+      - {data_type: vn_cccd, file: seed/customers.csv, line: 2,
+         note: "known miss: CCCD needs a label on its own line; in CSV the label is the header row"}
+      - {data_type: credit_card, file: seed/customers.csv, line: 2}
+      - {data_type: bank_account, file: seed/customers.csv, line: 2}
+    # Known false positive, left unlabelled on purpose: the web checkout's
+    # localStorage.setItem("emailOptIn", "true") is reported as an email.

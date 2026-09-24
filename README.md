@@ -319,6 +319,8 @@ go run ./cmd/piiflow-bench -manifest my-corpus.yaml -check
 - **Timings**: median wall time over `-runs` cold scans, memory allocated by the scan, files and functions. The Go frontend's `go list` runs in a child process, so its time is included but its memory is not.
 - `-check` exits 1 when a case scores below its `min_precision` or `min_recall`. CI runs it on every pull request and publishes the tables in the job summary; timings are reported but not gated.
 
+**See it on a realistic app:** [`testdata/vulnshop`](testdata/vulnshop) is a small shop (Go API, TypeScript checkout, Kotlin/Java Android app, CSV seed data) with 32 planted leaks and a set of traps. Run **Actions → demo → Run workflow** to scan it, or any other directory, and get the findings, the data map and the accuracy tables in the job summary.
+
 To measure piiflow on your own code, write a manifest whose case `dir` points at a checkout (absolute, or relative to the manifest) and label the leaks you know about. For recall on unlabelled code, plant known leaks in a copy and label those.
 
 For speed work:
@@ -385,9 +387,9 @@ internal/report/        text, JSON, SARIF, Markdown, GitLab SAST
 internal/datamap/       DPIA/JSON/CSV/Mermaid data map
 internal/cicomment/     PR/MR comment upsert (HTTP client injected)
 internal/eval/          labelled-corpus scoring: precision, recall, F1, confidence sweep
-testdata/               fixtures with deliberate leaks (Go, Android, web); eval.yaml labels them
+testdata/               fixtures with deliberate leaks (Go, Android, web, vulnshop demo); eval.yaml labels them
 scripts/                release build and packaging, license header check, third-party licenses
-.github/workflows/      ci.yml (lint, vulncheck, tests on Linux/macOS/Windows, accuracy, self-scan, image), release.yml
+.github/workflows/      ci.yml (lint, vulncheck, tests on Linux/macOS/Windows, accuracy, self-scan, image), demo.yml (on demand), release.yml
 ```
 
 Building needs Go 1.26 or newer and, for the tree-sitter frontends, a C compiler.
