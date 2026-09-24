@@ -7,7 +7,7 @@
 
 piiflow is a static analyzer that finds **personal data (PII) flowing into places it shouldn't go**: logs, crash reporters, analytics SDKs, third-party APIs, device storage and other apps. It also catches **real personal data committed to the repository** (fixtures, samples, seed files).
 
-It understands Go, Kotlin, Java and TypeScript/JavaScript, knows Vietnamese identifier conventions (`soDienThoai`, `sdt`, `cccd`, `ngaySinh`, `hoTen`, `diaChi`), and is built for CI: SARIF for code scanning, a PR/MR comment, a baseline so only *new* problems fail the build, and an incremental PR mode.
+It understands Go, Kotlin, Java and TypeScript/JavaScript, recognises Vietnam-specific data (CCCD/CMND citizen IDs, BHXH/BHYT insurance numbers, Vietnamese mobile numbers), and is built for CI: SARIF for code scanning, a PR/MR comment, a baseline so only *new* problems fail the build, and an incremental PR mode.
 
 ```
 $ piiflow scan --diff origin/main
@@ -15,7 +15,7 @@ piiflow v0.1.0 · diff scan vs origin/main · 2 files (typescript:2) · 5 functi
 changed: 1 files, callers: 1 files
 
 NEW      high   phone → Sentry / sentry.io (third-party)  [sdk.ts.sentry.set_user]
-         source  src/api/user.ts:22:32  field User.soDienThoai (field name soDienThoai)
+         source  src/api/user.ts:22:32  field User.phoneNumber (field name phoneNumber)
          sink    src/lib/mask.ts:10:3  @sentry/react.addBreadcrumb  in src/lib/mask:logInfo
          path    src/api/user.ts:22 → src/lib/mask.ts:8 → :10
          confidence 0.90
@@ -132,28 +132,30 @@ Useful `scan` flags: `--format text|json|sarif|markdown|gitlab`, `--sarif FILE`,
 
 ## Source detectors
 
-**1. Identifier names.** Identifiers are split on camelCase, PascalCase, ACRONYMS, snake/kebab case and letter/digit boundaries; Vietnamese diacritics are folded (`Số điện thoại` → `so dien thoai`). Token sequences are matched against a taxonomy of 23 data types, for example:
+**1. Identifier names.** Identifiers are split on camelCase, PascalCase, ACRONYMS, snake/kebab case and letter/digit boundaries. Token sequences are matched against a taxonomy of 23 data types, for example:
 
-| Data type | English | Vietnamese |
-|---|---|---|
-| `phone` | phone, phoneNumber, mobile, msisdn | soDienThoai, sdt, dienThoai, soDT, diDong |
-| `vn_cccd` | – | cccd, soCCCD, canCuocCongDan, cmnd, cmt, soDinhDanh |
-| `person_name` | fullName, firstName, lastName | hoTen, hoVaTen, tenDayDu, tenKhachHang |
-| `dob` | dob, dateOfBirth, birthday | ngaySinh, namSinh, sinhNhat |
-| `address` | streetAddress, shippingAddress | diaChi, thuongTru, tamTru, queQuan |
-| `bank_account` | accountNumber, iban | soTaiKhoan, stk |
-| `tax_id` | taxId, taxCode | maSoThue, mst |
-| `insurance_id` | socialInsurance | bhxh, bhyt |
-| `license_plate` | licensePlate | bienSo, bienSoXe |
+| Data type | Identifiers |
+|---|---|
+| `phone` | phone, phoneNumber, mobile, msisdn |
+| `vn_cccd` | cccd, cccdNumber, cmnd |
+| `person_name` | fullName, firstName, lastName |
+| `dob` | dob, dateOfBirth, birthday |
+| `address` | streetAddress, shippingAddress |
+| `bank_account` | accountNumber, iban |
+| `tax_id` | taxId, taxCode |
+| `insurance_id` | socialInsurance, bhxh, bhyt |
+| `license_plate` | licensePlate |
+
+Names are matched as English words. Vietnam-specific documents keep their own acronyms (`cccd`, `cmnd`, `bhxh`, `bhyt`); other Vietnamese words (`soDienThoai`, `hoTen`, …) are not recognised.
 
 Also email, IP address, national ID, US SSN, passport, driver's license, payment card, precise location, device/advertising IDs, gender, ethnicity, religion, health and biometric data. Sensitive categories (GDPR art. 9 / Decree 13/2023/ND-CP) are marked and raise severity.
 
 Negative context avoids the usual noise: `emailValidator`, `isEmailValid`, `phoneFormatter`, `EMAIL_KEY`, `serverAddress`, `microphone`. Names that say the value is already protected carry a transform: `maskedPhone` → masked, `emailHash` → hashed.
 
-String keys label their values: `put("email", x)`, `bundleOf("sdt" to x)`, `zap.String("phone", x)`, `r.FormValue("cccd")`, `{ phone: x }`, `m["email"] = x`.
+String keys label their values: `put("email", x)`, `bundleOf("phone" to x)`, `zap.String("phone", x)`, `r.FormValue("cccd")`, `{ phone: x }`, `m["email"] = x`.
 
 **2. Schema hints.** Field-level hints from:
-- Go struct tags: `json`, `db`, `bson`, `gorm:"column:so_dien_thoai"`, `protobuf:"...,name=email"`; explicit `pii:"email"` or `pii:"-"` (not PII).
+- Go struct tags: `json`, `db`, `bson`, `gorm:"column:phone_number"`, `protobuf:"...,name=email"`; explicit `pii:"email"` or `pii:"-"` (not PII).
 - JPA/Room/Moshi/Gson annotations: `@Column(name=...)`, `@ColumnInfo`, `@SerializedName`, `@JsonProperty`, `@Json`; explicit `@PII("email")`.
 - TypeORM decorators (`@Column({ name: ... })`), TypeScript interfaces and type aliases.
 - Protobuf messages (`string contact = 3 [(pii) = "phone"];` or `// pii: phone`).
@@ -166,7 +168,7 @@ A value whose type is a data class/entity with PII fields (a `Customer`) carries
 | Detector | Validation |
 |---|---|
 | Vietnamese mobile | `0`/`+84` + 9 digits, current carrier prefixes (03x, 05x, 07x, 08x, 09x), placeholders like `0123456789` rejected |
-| CCCD | 12 digits, valid province code, century/gender digit, birth year not in the future; needs a label on the line (`cccd`, `can cuoc`, ...) |
+| CCCD | 12 digits, valid province code, century/gender digit, birth year not in the future; needs a label on the line (`cccd`, `cmnd`, ...) |
 | CMND | 9 digits, only next to a label |
 | Email | skips `example.com`, role accounts (`noreply@`, `support@`), author/copyright lines, npm scopes, Kotlin `this@label` |
 | Payment card | Luhn + issuer prefix (Visa, Mastercard, Amex, JCB, UnionPay, NAPAS `9704`); well-known test cards skipped |

@@ -30,10 +30,10 @@ cases:
     min_precision: 1.0
     min_recall: 1.0
     flows:
-      - {data_type: phone, sink_rule: log.go.stdlib, function: service.Register, note: "Contact is the so_dien_thoai column"}
+      - {data_type: phone, sink_rule: log.go.stdlib, function: service.Register, note: "Contact is the phone_number column"}
       - {data_type: email, sink_rule: sdk.go.sentry.scope, function: service.Register$1}
       - {data_type: vn_cccd, sink_rule: net.go.http_body, function: service.sendSMS, note: "c.CCCD in Register, two calls deep through notify()"}
-      - {data_type: phone, sink_rule: log.go.slog, function: service.Handler, note: "request form value named soDienThoai"}
+      - {data_type: phone, sink_rule: log.go.slog, function: service.Handler, note: "request form value named mobileNo"}
       - {data_type: ip_address, sink_rule: log.go.fmt_print, function: service.Handler}
     literals:
       - {data_type: vn_cccd, file: fixtures/customers.json, line: 2}
@@ -53,7 +53,7 @@ cases:
       - {data_type: vn_cccd, sink_rule: sdk.firebase.crashlytics.custom_key, function: CustomerRepo.save}
       - {data_type: phone, sink_rule: storage.android.shared_prefs, function: CustomerRepo.save}
       - {data_type: person_name, sink_rule: log.android.logcat, function: CustomerRepo.save,
-         note: "known miss: SignupViewModel.submit passes hoTen as the nickname constructor argument, which save() logs"}
+         note: "known miss: SignupViewModel.submit passes fullName as the nickname constructor argument, which save() logs"}
       - {data_type: person_name, sink_rule: log.android.logcat, function: ProfileActivity.show}
       - {data_type: email, sink_rule: sdk.sentry.set_extra, function: ProfileActivity.show, note: "getMail() returns the email column"}
       - {data_type: email, sink_rule: log.android.logcat, function: ProfileActivity.send, note: "passed in from show()"}
@@ -68,7 +68,7 @@ cases:
       - {data_type: phone, sink_rule: sdk.ts.mixpanel, function: UserService.register}
       - {data_type: dob, sink_rule: storage.ts.web_storage, function: UserService.register}
       - {data_type: vn_cccd, sink_rule: net.ts.axios, function: UserService.register}
-      - {data_type: phone, sink_rule: log.ts.console, function: logInfo, note: "logInfo is called with user.soDienThoai"}
+      - {data_type: phone, sink_rule: log.ts.console, function: logInfo, note: "logInfo is called with user.phoneNumber"}
       - {data_type: email, sink_rule: storage.ts.web_storage, function: onLogin}
     ambiguous:
       # register() POSTs the whole user to ${this.baseUrl}/users: a leak only

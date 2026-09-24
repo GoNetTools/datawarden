@@ -6,20 +6,20 @@ import { maskEmail, logInfo } from "../lib/mask";
 export interface User {
   id: string;
   email: string;
-  soDienThoai?: string;
+  phoneNumber?: string;
   cccd: string;
 }
 
 export class UserService {
   constructor(private readonly baseUrl: string) {}
 
-  async register(user: User, ngaySinh: string) {
+  async register(user: User, birthDate: string) {
     Sentry.setUser({ id: user.id, email: user.email });
-    mixpanel.track("Signed Up", { sdt: user.soDienThoai });
-    localStorage.setItem("dob", ngaySinh);
+    mixpanel.track("Signed Up", { phone: user.phoneNumber });
+    localStorage.setItem("dob", birthDate);
     await axios.post("https://api.partner-crm.io/v1/leads", { cccd: user.cccd });
     console.log(`registered ${maskEmail(user.email)}`);
-    logInfo("user registered", user.soDienThoai);
+    logInfo("user registered", user.phoneNumber);
     return fetch(`${this.baseUrl}/users`, { method: "POST", body: JSON.stringify(user) });
   }
 }

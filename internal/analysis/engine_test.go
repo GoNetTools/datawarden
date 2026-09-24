@@ -14,7 +14,7 @@ import (
 
 func pos(line int) ir.Pos { return ir.Pos{File: "a.kt", Line: line} }
 
-// helper(x) = mask(x) ; recurse(x) calls itself and logs x ; caller passes sdt.
+// helper(x) = mask(x) ; recurse(x) calls itself and logs x ; caller passes phone.
 func TestSummariesAndRecursion(t *testing.T) {
 	rs, err := rules.Load(nil)
 	if err != nil {
@@ -45,15 +45,15 @@ func TestSummariesAndRecursion(t *testing.T) {
 	v := fill.AddParam("v", "", pos(20))
 	fill.Emit(ir.Instr{Op: ir.OpStore, Dst: ir.NoVar, Args: []ir.VarID{out, v}, Field: "value", Pos: pos(21)})
 
-	// fun caller(sdt: String) { recurse(sdt); Log.d(TAG, maskPhone(sdt)); val b = Builder(); fill(b, sdt); Log.d(TAG, b) }
+	// fun caller(phone: String) { recurse(phone); Log.d(TAG, maskPhone(phone)); val b = Builder(); fill(b, phone); Log.d(TAG, b) }
 	caller := &ir.Func{ID: "p.caller", Name: "caller", Lang: "kotlin", File: "a.kt"}
-	sdt := caller.AddParam("sdt", "String", pos(30))
-	caller.Emit(ir.Instr{Op: ir.OpCall, Dst: caller.Temp(pos(31)), Args: []ir.VarID{sdt}, Call: &ir.Call{Name: "recurse", Target: "p.recurse"}, Pos: pos(31)})
+	phone := caller.AddParam("phone", "String", pos(30))
+	caller.Emit(ir.Instr{Op: ir.OpCall, Dst: caller.Temp(pos(31)), Args: []ir.VarID{phone}, Call: &ir.Call{Name: "recurse", Target: "p.recurse"}, Pos: pos(31)})
 	m := caller.Temp(pos(32))
-	caller.Emit(ir.Instr{Op: ir.OpCall, Dst: m, Args: []ir.VarID{sdt}, Call: &ir.Call{Name: "maskPhone", Target: "p.maskPhone"}, Pos: pos(32)})
+	caller.Emit(ir.Instr{Op: ir.OpCall, Dst: m, Args: []ir.VarID{phone}, Call: &ir.Call{Name: "maskPhone", Target: "p.maskPhone"}, Pos: pos(32)})
 	logCall(caller, m, 32)
 	b := caller.Named("b", "", pos(33))
-	caller.Emit(ir.Instr{Op: ir.OpCall, Dst: caller.Temp(pos(34)), Args: []ir.VarID{b, sdt}, Call: &ir.Call{Name: "fill", Target: "p.fill"}, Pos: pos(34)})
+	caller.Emit(ir.Instr{Op: ir.OpCall, Dst: caller.Temp(pos(34)), Args: []ir.VarID{b, phone}, Call: &ir.Call{Name: "fill", Target: "p.fill"}, Pos: pos(34)})
 	logCall(caller, b, 35)
 
 	names := detect.NewClassifier(detect.DefaultTaxonomy())

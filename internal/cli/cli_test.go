@@ -122,7 +122,7 @@ func sentryFlow() []*finding.Flow {
 	return []*finding.Flow{{
 		DataType: "phone", SinkRule: "sdk.sentry.set_user", Dest: finding.Destination{Host: "sentry.io", Kind: "third_party", Vendor: "Sentry"},
 		Function: "com.acme.Repo.save", Confidence: 0.9, Source: ir.Pos{File: "app/Repo.kt", Line: 3}, Sink: ir.Pos{File: "app/Repo.kt", Line: 9},
-		Path: []ir.Pos{{File: "app/Repo.kt", Line: 3}, {File: "app/Repo.kt", Line: 9}}, SourceDesc: `identifier "sdt"`, SinkCall: "io.sentry.Sentry.setUser",
+		Path: []ir.Pos{{File: "app/Repo.kt", Line: 3}, {File: "app/Repo.kt", Line: 9}}, SourceDesc: `identifier "phone"`, SinkCall: "io.sentry.Sentry.setUser",
 	}}
 }
 

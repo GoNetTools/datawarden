@@ -16,7 +16,7 @@ func BenchmarkLiteralScan(b *testing.B) {
 	var sb strings.Builder
 	for i := 0; sb.Len() < 1<<20; i++ {
 		if i%8 == 0 {
-			fmt.Fprintf(&sb, `{"soDienThoai": "0912 837 465", "cccd": "001099017384", "email": "nguyen.van.a@gmail.com", "row": %d}`+"\n", i)
+			fmt.Fprintf(&sb, `{"phoneNumber": "0912 837 465", "cccd": "001099017384", "email": "nguyen.van.a@gmail.com", "row": %d}`+"\n", i)
 		} else {
 			fmt.Fprintf(&sb, `{"id": %d, "sku": "SKU-%08d", "price": %d.%02d, "status": "shipped", "note": "left at door"}`+"\n", i, i*7, i%500, i%100)
 		}
@@ -35,7 +35,7 @@ func BenchmarkLiteralScan(b *testing.B) {
 // BenchmarkClassifierIdent classifies a mix of PII and ordinary identifiers.
 func BenchmarkClassifierIdent(b *testing.B) {
 	c := NewClassifier(DefaultTaxonomy())
-	names := []string{"soDienThoai", "customerEmail", "user_phone_number", "ngaySinh", "hoTen", "cccd",
+	names := []string{"phoneNumber", "customerEmail", "user_phone_number", "birthDate", "fullName", "cccd",
 		"orderID", "retryCount", "httpClient", "nickname", "createdAt", "requestBody", "shippingAddressLine1", "ipAddr"}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

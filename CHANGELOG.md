@@ -8,7 +8,7 @@ All notable changes to piiflow are documented here. The format follows [Keep a C
 
 - `piiflow scan` with full, path, PR (`--diff <ref>`, changed files plus their callers from the cached call graph) and pre-commit (`--literals-only`, `--staged`) modes. Exit codes: 0 clean, 1 new violation, 2 error.
 - Frontends lowering to a shared IR: Go (`go/packages` + SSA), Kotlin, Java and TypeScript/JavaScript (tree-sitter).
-- Source detectors: identifier names in English and Vietnamese (`soDienThoai`, `sdt`, `cccd`, `ngaySinh`, `hoTen`, `diaChi`, …), schema hints (Go struct tags and GORM, JPA/Room/Gson/Moshi, TypeORM, protobuf, SQL migrations, explicit `pii` annotations) and validated literal values (Vietnamese mobile numbers, CCCD/CMND, cards with Luhn and NAPAS, IBAN, SSN, email).
+- Source detectors: identifier names (`phoneNumber`, `dateOfBirth`, `fullName`, `cccd`, …), schema hints (Go struct tags and GORM, JPA/Room/Gson/Moshi, TypeORM, protobuf, SQL migrations, explicit `pii` annotations) and validated literal values (Vietnamese mobile numbers, CCCD/CMND, cards with Luhn and NAPAS, IBAN, SSN, email).
 - 89 embedded sink, source and transform rules for logging, crash reporting, analytics, HTTP clients, storage and IPC, overridable per repository.
 - Interprocedural taint analysis with function summaries cached by file content hash.
 - Baseline with line-independent fingerprints (data type, sink rule, destination, enclosing function).

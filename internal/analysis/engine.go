@@ -473,7 +473,7 @@ func fieldLabel(owner, field string) string {
 }
 
 // keyLabels applies the "key names its value" heuristic: in
-// put("email", x), setCustomKey("sdt", x), zap.String("phone", x) or
+// put("email", x), setCustomKey("phone", x), zap.String("phone", x) or
 // mapOf("cccd" to x) the literal key says what the next argument is.
 func (a *analyzer) keyLabels(fn *ir.Func, in *ir.Instr, recvOff int) map[int][]*fact {
 	var out map[int][]*fact

@@ -46,7 +46,7 @@ func TestKotlinResolvesImportsAndMethods(t *testing.T) {
 	m := lower(t, NewKotlin, map[string]string{"a/Repo.kt": `package a
 import io.sentry.Sentry
 class Repo {
-  fun save(sdt: String) { Sentry.setUser(sdt); audit(sdt) }
+  fun save(phone: String) { Sentry.setUser(phone); audit(phone) }
   fun audit(x: String) {}
 }`})
 	c := calls(m)

@@ -68,7 +68,7 @@ Built-in rules are YAML files in `internal/rules/builtin/` (`go.yaml`, `jvm.yaml
 
 ### Add a data type or identifier name
 
-The taxonomy (English and Vietnamese names, negative context words, transforms) is in `internal/detect/taxonomy.go`; the literal validators are in `internal/detect/literal.go`. Add table-driven cases to `internal/detect/detect_test.go`.
+The taxonomy (identifier words, negative context words, transforms) is in `internal/detect/taxonomy.go`; the literal validators are in `internal/detect/literal.go`. Add table-driven cases to `internal/detect/detect_test.go`.
 
 ### Add a language
 

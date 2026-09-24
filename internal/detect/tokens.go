@@ -8,66 +8,15 @@ import (
 	"unicode"
 )
 
-// vnFold maps Vietnamese letters with diacritics to plain ASCII so that
-// "Số điện thoại" and "soDienThoai" tokenize the same way.
-var vnFold = func() map[rune]rune {
-	m := map[rune]rune{}
-	add := func(to rune, from string) {
-		for _, r := range from {
-			m[r] = to
-		}
-	}
-	add('a', "àáạảãâầấậẩẫăằắặẳẵ")
-	add('A', "ÀÁẠẢÃÂẦẤẬẨẪĂẰẮẶẲẴ")
-	add('e', "èéẹẻẽêềếệểễ")
-	add('E', "ÈÉẸẺẼÊỀẾỆỂỄ")
-	add('i', "ìíịỉĩ")
-	add('I', "ÌÍỊỈĨ")
-	add('o', "òóọỏõôồốộổỗơờớợởỡ")
-	add('O', "ÒÓỌỎÕÔỒỐỘỔỖƠỜỚỢỞỠ")
-	add('u', "ùúụủũưừứựửữ")
-	add('U', "ÙÚỤỦŨƯỪỨỰỬỮ")
-	add('y', "ỳýỵỷỹ")
-	add('Y', "ỲÝỴỶỸ")
-	add('d', "đ")
-	add('D', "Đ")
-	return m
-}()
-
-// Fold removes Vietnamese diacritics.
-func Fold(s string) string {
-	ascii := true
-	for i := 0; i < len(s); i++ {
-		if s[i] >= 0x80 {
-			ascii = false
-			break
-		}
-	}
-	if ascii {
-		return s
-	}
-	var b strings.Builder
-	b.Grow(len(s))
-	for _, r := range s {
-		if f, ok := vnFold[r]; ok {
-			b.WriteRune(f)
-		} else {
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
-}
-
 // Tokenize splits an identifier into lower-case words. It understands
 // camelCase, PascalCase, ACRONYMWords, snake_case, kebab-case, dotted paths
 // and letter/digit boundaries:
 //
-//	soDienThoai     -> [so dien thoai]
-//	SDT_KHACH_HANG  -> [sdt khach hang]
+//	phoneNumber     -> [phone number]
+//	USER_EMAIL_ADDR -> [user email addr]
 //	CCCDNumber      -> [cccd number]
 //	user.email2     -> [user email 2]
 func Tokenize(s string) []string {
-	s = Fold(s)
 	var out []string
 	rs := []rune(s)
 	start := -1
