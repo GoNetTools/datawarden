@@ -36,7 +36,6 @@ var neutral = set(
 	"the", "a", "an", "of", "plain", "clear", "cleartext", "plaintext", "full", "original", "orig", "unmasked", "real",
 	"normalized", "trimmed", "formatted", "local", "entered", "typed", "confirm", "confirmation", "backup", "emergency",
 	"patient", "employee", "staff", "driver", "rider", "buyer", "seller", "merchant", "applicant", "guest", "subscriber",
-	"khach", "hang", "nguoi", "dung", "nhan", "vien", "benh", "tai", "xe", "kh", "nv", "cua",
 )
 
 // Last-position words that make the identifier name a *thing about* PII
@@ -316,7 +315,7 @@ func isDigits(s string) bool {
 var keyLike = regexp.MustCompile(`^[A-Za-z_\p{L}][\p{L}A-Za-z0-9_.\-]{0,47}$`)
 
 // Key classifies a string literal used as a key ("email",
-// "so_dien_thoai", "user.phone"). Free text is rejected.
+// "phone_number", "user.phone"). Free text is rejected.
 func (c *Classifier) Key(s string) (Match, bool) {
 	if !keyLike.MatchString(s) {
 		return Match{}, false
@@ -328,7 +327,7 @@ func (c *Classifier) Key(s string) (Match, bool) {
 	return m, ok
 }
 
-// Getter classifies accessor names such as getEmail, getSoDienThoai or
+// Getter classifies accessor names such as getEmail, getPhoneNumber or
 // Email (Go style) that take no arguments.
 func (c *Classifier) Getter(name string) (Match, bool) {
 	base := name
@@ -350,7 +349,7 @@ func isUpper(b byte) bool { return b >= 'A' && b <= 'Z' }
 // Entity words suggest that a bare "name" field on the type is a person name.
 var personEntities = set("user", "customer", "person", "member", "employee", "patient", "account", "profile", "contact",
 	"applicant", "student", "teacher", "driver", "passenger", "guest", "subscriber", "buyer", "seller", "owner",
-	"khach", "nguoi", "nhan", "benh", "hoc", "sinh", "vien", "cardholder", "holder", "recipient")
+	"cardholder", "holder", "recipient")
 
 // Field classifies obj.field using the owner type (or the object variable
 // name) as extra context.
@@ -359,7 +358,7 @@ func (c *Classifier) Field(owner, field string) (Match, bool) {
 		return m, true
 	}
 	ft := Tokenize(field)
-	if len(ft) == 1 && (ft[0] == "name" || ft[0] == "ten") && owner != "" {
+	if len(ft) == 1 && ft[0] == "name" && owner != "" {
 		ot := Tokenize(lastSegment(owner))
 		for _, t := range ot {
 			if personEntities[c.singular(t)] {

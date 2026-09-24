@@ -6,7 +6,7 @@ MODULE      := $(shell go list -m)
 LDFLAGS     := -s -w -X $(MODULE)/internal/app.Version=$(VERSION)
 STATICCHECK := honnef.co/go/tools/cmd/staticcheck@v0.8.1
 
-.PHONY: build build-nocgo test test-nocgo race vet lint headers check release-local docker scan-self clean
+.PHONY: build build-nocgo test test-nocgo race vet lint headers check eval bench release-local docker scan-self clean
 
 ## build: full binary (Go + Kotlin + Java + TypeScript); needs a C compiler
 build:
@@ -38,6 +38,14 @@ headers:
 
 ## check: everything CI's lint and test jobs run
 check: vet lint headers test test-nocgo
+
+## eval: precision/recall/F1 and scan timings on the labelled corpus (testdata/eval.yaml)
+eval:
+	CGO_ENABLED=1 go run ./cmd/piiflow-bench -runs 3 -check
+
+## bench: Go benchmarks (engine scaling, detectors, end-to-end fixture scans)
+bench:
+	CGO_ENABLED=1 go test -run '^$$' -bench . -benchmem ./...
 
 ## release-local: release archives for this machine's platform in dist/
 release-local:

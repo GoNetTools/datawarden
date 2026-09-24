@@ -224,7 +224,7 @@ func tagVia(k, v string) string {
 }
 
 // tagName extracts the name part of a tag value: `json:"email,omitempty"`
-// -> email, `gorm:"column:so_dien_thoai;size:20"` -> so_dien_thoai,
+// -> email, `gorm:"column:phone_number;size:20"` -> phone_number,
 // `protobuf:"bytes,1,opt,name=email,proto3"` -> email.
 func tagName(tags map[string]string, key string) string {
 	v, ok := tags[key]

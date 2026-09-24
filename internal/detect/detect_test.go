@@ -13,12 +13,11 @@ var testC = NewClassifier(DefaultTaxonomy())
 
 func TestTokenize(t *testing.T) {
 	cases := map[string][]string{
-		"soDienThoai":    {"so", "dien", "thoai"},
-		"SDT_KHACH_HANG": {"sdt", "khach", "hang"},
-		"CCCDNumber":     {"cccd", "number"},
-		"user.email2":    {"user", "email", "2"},
-		"Số điện thoại":  {"so", "dien", "thoai"},
-		"HTTPServer":     {"http", "server"},
+		"phoneNumber":     {"phone", "number"},
+		"USER_EMAIL_ADDR": {"user", "email", "addr"},
+		"CCCDNumber":      {"cccd", "number"},
+		"user.email2":     {"user", "email", "2"},
+		"HTTPServer":      {"http", "server"},
 	}
 	for in, want := range cases {
 		if got := Tokenize(in); !reflect.DeepEqual(got, want) {
@@ -30,15 +29,15 @@ func TestTokenize(t *testing.T) {
 func TestClassifyIdent(t *testing.T) {
 	pii := map[string]string{
 		"email": "email", "userEmail": "email", "customer_email_address": "email", "eMail": "email",
-		"soDienThoai": "phone", "sdt": "phone", "phoneNumber": "phone", "msisdn": "phone", "SDT_KHACH_HANG": "phone",
-		"cccd": "vn_cccd", "soCCCD": "vn_cccd", "cmnd": "vn_cccd", "canCuocCongDan": "vn_cccd",
-		"ngaySinh": "dob", "dateOfBirth": "dob", "dob": "dob",
-		"hoTen": "person_name", "fullName": "person_name", "ho_va_ten": "person_name",
-		"diaChi": "address", "shippingAddress": "address",
+		"phoneNumber": "phone", "msisdn": "phone", "CUSTOMER_PHONE": "phone", "mobileNo": "phone",
+		"cccd": "vn_cccd", "cccdNumber": "vn_cccd", "cmnd": "vn_cccd", "bhxh": "insurance_id",
+		"birthDate": "dob", "dateOfBirth": "dob", "dob": "dob",
+		"fullName": "person_name", "first_name": "person_name",
+		"homeAddress": "address", "shippingAddress": "address",
 		"remoteAddr": "ip_address", "clientIp": "ip_address",
-		"soTaiKhoan": "bank_account", "iban": "bank_account",
-		"cardNumber": "credit_card", "latitude": "location", "imei": "device_id", "maSoThue": "tax_id",
-		"bienSoXe": "license_plate", "gioiTinh": "gender",
+		"accountNumber": "bank_account", "iban": "bank_account",
+		"cardNumber": "credit_card", "latitude": "location", "imei": "device_id", "taxCode": "tax_id",
+		"licensePlate": "license_plate", "gender": "gender",
 	}
 	for name, want := range pii {
 		m, ok := testC.Ident(name)
@@ -50,6 +49,8 @@ func TestClassifyIdent(t *testing.T) {
 		"emailValidator", "isEmailValid", "emailRegex", "phoneFormatter", "EMAIL_KEY", "hasPhone", "emailService",
 		"serverAddress", "listenAddress", "ipAddressAllowlist", "microphone", "fileName", "className", "userId",
 		"emailSent", "phoneLayout", "raceCondition", "emailCount", "onEmailChanged", "hashMapOf",
+		// Vietnamese identifier words are not supported: code is written in English.
+		"soDienThoai", "sdt", "hoTen", "ngaySinh", "diaChi", "soTaiKhoan",
 	}
 	for _, name := range notPII {
 		if m, ok := testC.Ident(name); ok {
@@ -89,7 +90,7 @@ func TestClassifyFieldEntityName(t *testing.T) {
 
 func TestLiteralScanner(t *testing.T) {
 	s := &LiteralScanner{Classifier: testC, MinConf: 0.6, Now: func() time.Time { return time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC) }}
-	src := `{"soDienThoai": "0912 837 465", "cccd": "001099017384", "email": "nguyen.van.a@gmail.com"}
+	src := `{"phoneNumber": "0912 837 465", "cccd": "001099017384", "email": "nguyen.van.a@gmail.com"}
 {"phone": "0912345678", "email": "test@example.com", "cccd": "001099012345"}
 card: 4539 1488 0343 6467
 test card 4111111111111111
@@ -146,7 +147,7 @@ func TestParseProtoAndSQL(t *testing.T) {
 package acme.user.v1;
 message Customer {
   string id = 1;
-  string so_dien_thoai = 2;
+  string phone_number = 2;
   string contact = 3 [(pii) = "email"];
   Address addr = 4; // pii: address
   message Address { string street = 1; }
@@ -161,18 +162,18 @@ message Customer {
 	}
 	sql := `CREATE TABLE IF NOT EXISTS "customers" (
   id BIGSERIAL PRIMARY KEY,
-  ho_ten TEXT NOT NULL,
-  sdt VARCHAR(20), -- pii: phone
+  full_name TEXT NOT NULL,
+  contact_no VARCHAR(20), -- pii: phone
   note TEXT,
-  CONSTRAINT uq UNIQUE (sdt)
+  CONSTRAINT uq UNIQUE (contact_no)
 );
-ALTER TABLE customers ADD COLUMN ngay_sinh DATE;`
+ALTER TABLE customers ADD COLUMN birth_date DATE;`
 	tt := ParseSQL("001_init.sql", []byte(sql))
 	if len(tt) != 1 || len(tt[0].Fields) != 5 {
 		t.Fatalf("sql: %+v", tt)
 	}
 	s := BuildSchema(testC, tt)
-	for field, want := range map[string]string{"ho_ten": "person_name", "sdt": "phone", "ngay_sinh": "dob"} {
+	for field, want := range map[string]string{"full_name": "person_name", "contact_no": "phone", "birth_date": "dob"} {
 		h, st := s.Field("table:customers", field)
 		if st != FieldPII || h.DataType != want {
 			t.Errorf("%s: %+v %v", field, h, st)

@@ -43,7 +43,7 @@ func Safe(c *model.Customer) {
 
 // Handler reads PII from a request.
 func Handler(w http.ResponseWriter, r *http.Request) {
-	soDienThoai := r.FormValue("sdt")
-	slog.Info("got", "phone", soDienThoai)
+	mobileNo := r.FormValue("mobile")
+	slog.Info("got", "value", mobileNo)
 	fmt.Println(r.RemoteAddr)
 }

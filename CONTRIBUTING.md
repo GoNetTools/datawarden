@@ -59,12 +59,16 @@ Use the issue templates. The most useful report is a **minimal snippet** (synthe
 Built-in rules are YAML files in `internal/rules/builtin/` (`go.yaml`, `jvm.yaml`, `typescript.yaml`, `sources.yaml`, `transforms.yaml`), embedded in the binary. The README's [Sink rules](README.md#sink-rules) section documents the fields.
 
 1. Add the rule with a stable, dotted `id` (`sdk.<lang>.<vendor>.<call>`); ids are part of baseline fingerprints, so don't rename existing ones.
-2. Add a case to a fixture under `testdata/` that the rule should catch, and one it should not, then add the expected flow to the fixture's test in `internal/app` (`expectFlows`).
+2. Add a case to a fixture under `testdata/` that the rule should catch, and one it should not, then add the expected flow to the fixture's test in `internal/app` (`expectFlows`) and label it in `testdata/eval.yaml`.
 3. `go run ./cmd/piiflow rules --lang <lang>` lists the loaded rules.
+
+### Keep the accuracy corpus honest
+
+`testdata/eval.yaml` labels what a reviewer would report in each fixture, not what piiflow reports today. When you add or change a fixture, label every real leak in it, including ones piiflow misses (add a `note`), and use `ambiguous` only for flows that are genuinely acceptable either way. `go run ./cmd/piiflow-bench -check` (`make eval`) prints precision, recall and every miss and false positive. Raise `min_precision`/`min_recall` when your change improves them; lowering one needs a reason in the pull request.
 
 ### Add a data type or identifier name
 
-The taxonomy (English and Vietnamese names, negative context words, transforms) is in `internal/detect/taxonomy.go`; the literal validators are in `internal/detect/literal.go`. Add table-driven cases to `internal/detect/detect_test.go`.
+The taxonomy (identifier words, negative context words, transforms) is in `internal/detect/taxonomy.go`; the literal validators are in `internal/detect/literal.go`. Add table-driven cases to `internal/detect/detect_test.go`.
 
 ### Add a language
 

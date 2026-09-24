@@ -7,7 +7,7 @@
 
 piiflow is a static analyzer that finds **personal data (PII) flowing into places it shouldn't go**: logs, crash reporters, analytics SDKs, third-party APIs, device storage and other apps. It also catches **real personal data committed to the repository** (fixtures, samples, seed files).
 
-It understands Go, Kotlin, Java and TypeScript/JavaScript, knows Vietnamese identifier conventions (`soDienThoai`, `sdt`, `cccd`, `ngaySinh`, `hoTen`, `diaChi`), and is built for CI: SARIF for code scanning, a PR/MR comment, a baseline so only *new* problems fail the build, and an incremental PR mode.
+It understands Go, Kotlin, Java and TypeScript/JavaScript, recognises Vietnam-specific data (CCCD/CMND citizen IDs, BHXH/BHYT insurance numbers, Vietnamese mobile numbers), and is built for CI: SARIF for code scanning, a PR/MR comment, a baseline so only *new* problems fail the build, and an incremental PR mode.
 
 ```
 $ piiflow scan --diff origin/main
@@ -15,7 +15,7 @@ piiflow v0.1.0 · diff scan vs origin/main · 2 files (typescript:2) · 5 functi
 changed: 1 files, callers: 1 files
 
 NEW      high   phone → Sentry / sentry.io (third-party)  [sdk.ts.sentry.set_user]
-         source  src/api/user.ts:22:32  field User.soDienThoai (field name soDienThoai)
+         source  src/api/user.ts:22:32  field User.phoneNumber (field name phoneNumber)
          sink    src/lib/mask.ts:10:3  @sentry/react.addBreadcrumb  in src/lib/mask:logInfo
          path    src/api/user.ts:22 → src/lib/mask.ts:8 → :10
          confidence 0.90
@@ -86,7 +86,7 @@ piiflow map --format dpia > docs/data-map.md
 | `piiflow comment piiflow.md` | Creates or updates the PR (GitHub) / MR (GitLab) comment. |
 | `piiflow init` | Writes starter config files. |
 
-Useful `scan` flags: `--format text|json|sarif|markdown|gitlab`, `--sarif FILE`, `--markdown FILE`, `--json FILE`, `--gitlab FILE` (write several reports in one run), `--baseline FILE`, `--no-baseline`, `--caller-depth N`, `--min-confidence F`, `--all`, `--no-cache`, `--no-fail`, `--verbose`. Flags can come before or after paths.
+Useful `scan` flags: `--format text|json|sarif|markdown|gitlab`, `--sarif FILE`, `--markdown FILE`, `--json FILE`, `--gitlab FILE` (write several reports in one run), `--baseline FILE`, `--no-baseline`, `--caller-depth N`, `--min-confidence F`, `--all`, `--no-cache`, `--no-fail`, `--verbose`, `--cpuprofile FILE`, `--memprofile FILE` (pprof profiles of the analysis; also on `baseline` and `map`). Flags can come before or after paths.
 
 **Exit codes:** `0` no new violations · `1` at least one new policy violation · `2` error. CI only needs the exit code.
 
@@ -132,28 +132,30 @@ Useful `scan` flags: `--format text|json|sarif|markdown|gitlab`, `--sarif FILE`,
 
 ## Source detectors
 
-**1. Identifier names.** Identifiers are split on camelCase, PascalCase, ACRONYMS, snake/kebab case and letter/digit boundaries; Vietnamese diacritics are folded (`Số điện thoại` → `so dien thoai`). Token sequences are matched against a taxonomy of 23 data types, for example:
+**1. Identifier names.** Identifiers are split on camelCase, PascalCase, ACRONYMS, snake/kebab case and letter/digit boundaries. Token sequences are matched against a taxonomy of 23 data types, for example:
 
-| Data type | English | Vietnamese |
-|---|---|---|
-| `phone` | phone, phoneNumber, mobile, msisdn | soDienThoai, sdt, dienThoai, soDT, diDong |
-| `vn_cccd` | – | cccd, soCCCD, canCuocCongDan, cmnd, cmt, soDinhDanh |
-| `person_name` | fullName, firstName, lastName | hoTen, hoVaTen, tenDayDu, tenKhachHang |
-| `dob` | dob, dateOfBirth, birthday | ngaySinh, namSinh, sinhNhat |
-| `address` | streetAddress, shippingAddress | diaChi, thuongTru, tamTru, queQuan |
-| `bank_account` | accountNumber, iban | soTaiKhoan, stk |
-| `tax_id` | taxId, taxCode | maSoThue, mst |
-| `insurance_id` | socialInsurance | bhxh, bhyt |
-| `license_plate` | licensePlate | bienSo, bienSoXe |
+| Data type | Identifiers |
+|---|---|
+| `phone` | phone, phoneNumber, mobile, msisdn |
+| `vn_cccd` | cccd, cccdNumber, cmnd |
+| `person_name` | fullName, firstName, lastName |
+| `dob` | dob, dateOfBirth, birthday |
+| `address` | streetAddress, shippingAddress |
+| `bank_account` | accountNumber, iban |
+| `tax_id` | taxId, taxCode |
+| `insurance_id` | socialInsurance, bhxh, bhyt |
+| `license_plate` | licensePlate |
+
+Names are matched as English words. Vietnam-specific documents keep their own acronyms (`cccd`, `cmnd`, `bhxh`, `bhyt`); other Vietnamese words (`soDienThoai`, `hoTen`, …) are not recognised.
 
 Also email, IP address, national ID, US SSN, passport, driver's license, payment card, precise location, device/advertising IDs, gender, ethnicity, religion, health and biometric data. Sensitive categories (GDPR art. 9 / Decree 13/2023/ND-CP) are marked and raise severity.
 
 Negative context avoids the usual noise: `emailValidator`, `isEmailValid`, `phoneFormatter`, `EMAIL_KEY`, `serverAddress`, `microphone`. Names that say the value is already protected carry a transform: `maskedPhone` → masked, `emailHash` → hashed.
 
-String keys label their values: `put("email", x)`, `bundleOf("sdt" to x)`, `zap.String("phone", x)`, `r.FormValue("cccd")`, `{ phone: x }`, `m["email"] = x`.
+String keys label their values: `put("email", x)`, `bundleOf("phone" to x)`, `zap.String("phone", x)`, `r.FormValue("cccd")`, `{ phone: x }`, `m["email"] = x`.
 
 **2. Schema hints.** Field-level hints from:
-- Go struct tags: `json`, `db`, `bson`, `gorm:"column:so_dien_thoai"`, `protobuf:"...,name=email"`; explicit `pii:"email"` or `pii:"-"` (not PII).
+- Go struct tags: `json`, `db`, `bson`, `gorm:"column:phone_number"`, `protobuf:"...,name=email"`; explicit `pii:"email"` or `pii:"-"` (not PII).
 - JPA/Room/Moshi/Gson annotations: `@Column(name=...)`, `@ColumnInfo`, `@SerializedName`, `@JsonProperty`, `@Json`; explicit `@PII("email")`.
 - TypeORM decorators (`@Column({ name: ... })`), TypeScript interfaces and type aliases.
 - Protobuf messages (`string contact = 3 [(pii) = "phone"];` or `// pii: phone`).
@@ -166,7 +168,7 @@ A value whose type is a data class/entity with PII fields (a `Customer`) carries
 | Detector | Validation |
 |---|---|
 | Vietnamese mobile | `0`/`+84` + 9 digits, current carrier prefixes (03x, 05x, 07x, 08x, 09x), placeholders like `0123456789` rejected |
-| CCCD | 12 digits, valid province code, century/gender digit, birth year not in the future; needs a label on the line (`cccd`, `can cuoc`, ...) |
+| CCCD | 12 digits, valid province code, century/gender digit, birth year not in the future; needs a label on the line (`cccd`, `cmnd`, ...) |
 | CMND | 9 digits, only next to a label |
 | Email | skips `example.com`, role accounts (`noreply@`, `support@`), author/copyright lines, npm scopes, Kotlin `this@label` |
 | Payment card | Luhn + issuer prefix (Visa, Mastercard, Amex, JCB, UnionPay, NAPAS `9704`); well-known test cards skipped |
@@ -302,6 +304,32 @@ piiflow favours explainable, low-noise results over completeness. Every finding 
 - Dynamic destinations (URLs built at runtime) show up as `network (unknown host)`.
 - Name-based sources depend on naming. Add explicit hints (`pii:"..."` tags, `@PII`, proto options, SQL comments) where names are unhelpful, and `pii:"-"` to silence a field.
 
+### Measuring accuracy and speed
+
+`testdata/eval.yaml` labels every leak in the fixtures, as a reviewer reading the code would report it, plus deliberate traps that must not be reported. `piiflow-bench` scans each case the way `piiflow scan --no-cache --no-baseline` does and scores it:
+
+```sh
+go run ./cmd/piiflow-bench                     # or: make eval
+go run ./cmd/piiflow-bench -runs 5 -json eval.json -markdown eval.md
+go run ./cmd/piiflow-bench -manifest my-corpus.yaml -check
+```
+
+- **Precision** = TP / (TP + FP) and **recall** = TP / (TP + FN), per case, per data type and per sink category (`log`, `sdk`, `net`, `storage`, `literal`). A label matched by several findings is one true positive; any other reported violation is a false positive. Findings matching an `ambiguous` label (for example data sent to a host that may be first party) count as neither.
+- A **confidence sweep** rescores every case at each threshold in `thresholds`, which shows what raising `policy.min_confidence` would cost in recall.
+- **Timings**: median wall time over `-runs` cold scans, memory allocated by the scan, files and functions. The Go frontend's `go list` runs in a child process, so its time is included but its memory is not.
+- `-check` exits 1 when a case scores below its `min_precision` or `min_recall`. CI runs it on every pull request and publishes the tables in the job summary; timings are reported but not gated.
+
+To measure piiflow on your own code, write a manifest whose case `dir` points at a checkout (absolute, or relative to the manifest) and label the leaks you know about. For recall on unlabelled code, plant known leaks in a copy and label those.
+
+For speed work:
+
+```sh
+make bench                                                  # engine scaling, detectors, fixture scans
+piiflow scan . --no-cache --cpuprofile cpu.out --memprofile mem.out
+go tool pprof -http=:8080 cpu.out
+go tool pprof -sample_index=alloc_space mem.out
+```
+
 ## Development
 
 ### Design: inversion of control
@@ -337,6 +365,7 @@ There is no package-level mutable state: the name classifier is built from a tax
 
 ```
 cmd/piiflow/            entry point: app.New(os.Stdout, os.Stderr).Run(ctx, args)
+cmd/piiflow-bench/      accuracy and timing on the labelled corpus (testdata/eval.yaml)
 internal/app/           composition root + end-to-end tests on testdata/
 internal/platform/      OS adapters: workspace on disk, git binary, cache file
 internal/cli/           commands, flags, exit codes (App with injected deps)
@@ -355,9 +384,10 @@ internal/policy/        violations and severity (Evaluator)
 internal/report/        text, JSON, SARIF, Markdown, GitLab SAST
 internal/datamap/       DPIA/JSON/CSV/Mermaid data map
 internal/cicomment/     PR/MR comment upsert (HTTP client injected)
-testdata/               fixtures with deliberate leaks (Go, Android, web)
+internal/eval/          labelled-corpus scoring: precision, recall, F1, confidence sweep
+testdata/               fixtures with deliberate leaks (Go, Android, web); eval.yaml labels them
 scripts/                release build and packaging, license header check, third-party licenses
-.github/workflows/      ci.yml (lint, vulncheck, tests on Linux/macOS/Windows, self-scan, image), release.yml
+.github/workflows/      ci.yml (lint, vulncheck, tests on Linux/macOS/Windows, accuracy, self-scan, image), release.yml
 ```
 
 Building needs Go 1.26 or newer and, for the tree-sitter frontends, a C compiler.
@@ -366,6 +396,8 @@ Building needs Go 1.26 or newer and, for the tree-sitter frontends, a C compiler
 make test          # all frontends (cgo)
 make test-nocgo    # Go frontend + literal detector only
 make check         # what CI runs: gofmt, vet, staticcheck, license headers, both test suites
+make eval          # precision/recall/F1 and timings on testdata/eval.yaml
+make bench         # Go benchmarks
 make release-local # release archives for this machine in dist/
 go test -coverpkg=./internal/... ./...   # ~76% of statements
 ```

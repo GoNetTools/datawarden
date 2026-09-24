@@ -15,8 +15,8 @@ class Profile {
 public class ProfileActivity {
     private static final String TAG = "Profile";
 
-    public void show(Profile profile, String hoTen) {
-        String greeting = "Xin chao " + hoTen;
+    public void show(Profile profile, String fullName) {
+        String greeting = "Hello " + fullName;
         Log.d(TAG, greeting);
         Sentry.setExtra("mail", profile.getMail());
         System.out.println("bio: " + profile.getBio());

@@ -17,7 +17,7 @@ import (
 func TestBuildUsesInjectedClockAndCatalog(t *testing.T) {
 	names := detect.NewClassifier(detect.DefaultTaxonomy())
 	schema := detect.BuildSchema(names, []*ir.TypeDecl{{Name: "table:customers", Kind: "table", Pos: ir.Pos{File: "m.sql"},
-		Fields: []ir.Field{{Name: "so_dien_thoai", Tags: map[string]string{"column": "so_dien_thoai"}}}}})
+		Fields: []ir.Field{{Name: "phone_number", Tags: map[string]string{"column": "phone_number"}}}}})
 	m := Build(Input{
 		Flows:   []*finding.Flow{{DataType: "phone", SinkRule: "sdk.x", Dest: finding.Destination{Kind: "third_party", Vendor: "Sentry", Host: "sentry.io"}, Violation: true}},
 		Schema:  schema,

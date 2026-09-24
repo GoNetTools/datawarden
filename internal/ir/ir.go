@@ -41,7 +41,7 @@ const NoVar VarID = -1
 
 // Var is a value inside a function: a parameter, a local, or a temporary.
 type Var struct {
-	// Name is the source-level identifier ("soDienThoai"). Empty for
+	// Name is the source-level identifier ("phoneNumber"). Empty for
 	// temporaries. Source detectors classify variables by this name.
 	Name string `json:"name,omitempty"`
 	// Type is the best-effort declared type, qualified when the frontend

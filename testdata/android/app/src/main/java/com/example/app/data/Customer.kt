@@ -6,7 +6,7 @@ import androidx.room.Entity
 @Entity(tableName = "customers")
 data class Customer(
     val id: Long,
-    @ColumnInfo(name = "so_dien_thoai") val contact: String,
+    @ColumnInfo(name = "phone_number") val contact: String,
     val email: String?,
     val cccd: String,
     val nickname: String,

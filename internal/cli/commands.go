@@ -60,6 +60,8 @@ func (a *App) runScan(ctx context.Context, args []string) (int, error) {
 	fs := a.flagSet("scan")
 	var c common
 	c.register(fs)
+	var prof profile
+	prof.register(fs)
 	diff := fs.String("diff", "", "PR mode: scan files changed since the merge base with `ref`, plus their callers")
 	format := fs.String("format", "text", "stdout format: text, json, sarif, markdown, gitlab")
 	output := fs.String("output", "", "write the --format output to this file instead of stdout")
@@ -92,7 +94,7 @@ func (a *App) runScan(ctx context.Context, args []string) (int, error) {
 	}
 	req := a.request(s, &c)
 	req.DiffBase, req.LiteralsOnly, req.Staged, req.CallerDepth = *diff, *literalsOnly || *staged, *staged, *callerDepth
-	res, err := a.Scanner.Run(ctx, req)
+	res, err := a.runScanner(ctx, &prof, req)
 	if err != nil {
 		return ExitError, err
 	}
@@ -149,6 +151,8 @@ func (a *App) runBaseline(ctx context.Context, args []string) error {
 	fs := a.flagSet("baseline")
 	var c common
 	c.register(fs)
+	var prof profile
+	prof.register(fs)
 	out := fs.String("output", "", "baseline file to write (default from config: .piiflow/baseline.json)")
 	pos, err := parseInterspersed(fs, args)
 	if err != nil {
@@ -161,7 +165,7 @@ func (a *App) runBaseline(ctx context.Context, args []string) error {
 	if len(s.paths) > 0 {
 		return errors.New("baseline always scans the whole repository; drop the path arguments")
 	}
-	res, err := a.Scanner.Run(ctx, a.request(s, &c))
+	res, err := a.runScanner(ctx, &prof, a.request(s, &c))
 	if err != nil {
 		return err
 	}
@@ -188,6 +192,8 @@ func (a *App) runMap(ctx context.Context, args []string) error {
 	fs := a.flagSet("map")
 	var c common
 	c.register(fs)
+	var prof profile
+	prof.register(fs)
 	format := fs.String("format", "dpia", "dpia (Markdown), json, csv or mermaid")
 	out := fs.String("output", "", "write to file instead of stdout")
 	pos, err := parseInterspersed(fs, args)
@@ -198,7 +204,7 @@ func (a *App) runMap(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	res, err := a.Scanner.Run(ctx, a.request(s, &c))
+	res, err := a.runScanner(ctx, &prof, a.request(s, &c))
 	if err != nil {
 		return err
 	}

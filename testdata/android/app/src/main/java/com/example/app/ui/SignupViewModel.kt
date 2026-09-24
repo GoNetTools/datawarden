@@ -6,11 +6,11 @@ import com.google.firebase.analytics.FirebaseAnalytics
 import androidx.core.os.bundleOf
 
 class SignupViewModel(private val repo: CustomerRepo, private val analytics: FirebaseAnalytics) {
-    fun submit(hoTen: String, soDienThoai: String, ngaySinh: String) {
-        analytics.logEvent("sign_up", bundleOf("sdt" to soDienThoai, "method" to "phone"))
-        val customer = Customer(1, soDienThoai, null, "", hoTen)
+    fun submit(fullName: String, phoneNumber: String, birthDate: String) {
+        analytics.logEvent("sign_up", bundleOf("phone" to phoneNumber, "method" to "sms"))
+        val customer = Customer(1, phoneNumber, null, "", fullName)
         repo.save(customer)
-        track(ngaySinh)
+        track(birthDate)
     }
 
     private fun track(dob: String) {
