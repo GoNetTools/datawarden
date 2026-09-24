@@ -93,7 +93,7 @@ jobs:
         run: |
           if ! command -v gcc >/dev/null 2>&1; then
             choco install mingw --no-progress -y
-            echo 'C:\ProgramData\mingw64\mingw64\bin' >> "$GITHUB_PATH"
+            printf '%s\n' 'C:\ProgramData\mingw64\mingw64\bin' >> "$GITHUB_PATH"
           fi
       - name: Test with cgo (all frontends)
         if: runner.os != 'Linux' || matrix.go != 'stable'
@@ -119,6 +119,7 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
+      actions: read # upload-sarif reads the workflow run
       security-events: write # SARIF upload on pushes to main
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

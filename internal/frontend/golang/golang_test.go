@@ -37,7 +37,11 @@ func TestModulesAreLoadedThroughTheInjectedLoader(t *testing.T) {
 		}
 		return nil, nil
 	}
-	root := filepath.Join(string(filepath.Separator), "repo")
+	// Lower resolves Root with filepath.Abs; on Windows `\repo` gains a drive letter.
+	root, err := filepath.Abs(filepath.Join(string(filepath.Separator), "repo"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	fe := New(frontend.Options{Root: root, FS: fsys}, load)
 	mod, err := fe.Lower(context.Background(), []string{"svc/api/handler.go", "svc/store/db.go", "tools/gen/main.go", "other/cmd/x/main.go"})
 	if err != nil {
