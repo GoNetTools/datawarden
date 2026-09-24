@@ -223,6 +223,37 @@ func TestReportsAreWrittenThroughTheWorkspace(t *testing.T) {
 	}
 }
 
+func TestProfilesAreWrittenThroughTheWorkspace(t *testing.T) {
+	isPprof := func(b string) bool { return strings.HasPrefix(b, "\x1f\x8b") } // gzipped protobuf
+	h := newHarness(nil)
+	for _, args := range [][]string{
+		{"scan", "--cpuprofile", "prof/scan.cpu", "--memprofile", "prof/scan.mem", "--no-fail"},
+		{"baseline", "--cpuprofile", "prof/baseline.cpu"},
+		{"map", "--memprofile", "prof/map.mem"},
+	} {
+		if code := h.run(args...); code != ExitClean {
+			t.Fatalf("%v: exit %d %s", args, code, h.errb)
+		}
+	}
+	for _, f := range []string{"prof/scan.cpu", "prof/scan.mem", "prof/baseline.cpu", "prof/map.mem"} {
+		if !isPprof(h.file(f)) {
+			t.Errorf("%s: not a pprof profile (%d bytes)", f, len(h.file(f)))
+		}
+	}
+
+	// A failed scan writes no profile; a failed write is an error.
+	h = newHarness(nil)
+	h.scanner.err = errors.New("go list failed")
+	if code := h.run("scan", "--cpuprofile", "scan.cpu"); code != ExitError || h.file("scan.cpu") != "" {
+		t.Errorf("failed scan: exit %d, profile %d bytes", code, len(h.file("scan.cpu")))
+	}
+	h = newHarness(nil)
+	h.ws.writeErr = errors.New("disk full")
+	if code := h.run("scan", "--memprofile", "scan.mem", "--no-fail"); code != ExitError || !strings.Contains(h.errb.String(), "write profile: disk full") {
+		t.Errorf("write error: exit %d, stderr %q", code, h.errb)
+	}
+}
+
 func TestRequestIsBuiltFromFlagsConfigAndRepo(t *testing.T) {
 	h := newHarness(map[string]string{
 		".piiflow.yaml":           "first_party_domains: [api.acme.vn]\nrules: [policy/rules]\n",

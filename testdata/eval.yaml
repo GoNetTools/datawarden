@@ -1,0 +1,78 @@
+# Copyright 2026 The piiflow Authors
+# SPDX-License-Identifier: Apache-2.0
+#
+# Labelled corpus for measuring piiflow's accuracy:
+#
+#   go run ./cmd/piiflow-bench            # precision, recall, F1, sweep, timings
+#   go run ./cmd/piiflow-bench -check     # also fail below min_precision/min_recall
+#
+# Labels are the ground truth: what a careful reviewer reading the fixture
+# would report, not what piiflow reports today. A known miss stays labelled
+# (it shows up as a false negative) and min_recall is set to today's score,
+# so the gate catches regressions and the miss stays visible.
+#
+# Flow labels match reported violations on data_type, sink_rule and the
+# enclosing function (a suffix at a name boundary). Literal labels match on
+# data_type, file and line. Any other reported violation is a false
+# positive, unless it matches an `ambiguous` label.
+#
+# Deliberate traps, which must NOT be reported (they would be false
+# positives): customer IDs, `Nickname`/`nickname`, `Note` (tagged pii:"-"),
+# the `bio` field, masked values (maskPhone, maskEmail), placeholder
+# literals (0912345678, test@example.com).
+
+thresholds: [0.35, 0.45, 0.55, 0.65, 0.75, 0.85, 0.95]
+
+cases:
+  - name: goapp
+    dir: goapp
+    langs: [go]
+    min_precision: 1.0
+    min_recall: 1.0
+    flows:
+      - {data_type: phone, sink_rule: log.go.stdlib, function: service.Register, note: "Contact is the so_dien_thoai column"}
+      - {data_type: email, sink_rule: sdk.go.sentry.scope, function: service.Register$1}
+      - {data_type: vn_cccd, sink_rule: net.go.http_body, function: service.sendSMS, note: "c.CCCD in Register, two calls deep through notify()"}
+      - {data_type: phone, sink_rule: log.go.slog, function: service.Handler, note: "request form value named soDienThoai"}
+      - {data_type: ip_address, sink_rule: log.go.fmt_print, function: service.Handler}
+    literals:
+      - {data_type: vn_cccd, file: fixtures/customers.json, line: 2}
+      - {data_type: phone, file: fixtures/customers.json, line: 2}
+      - {data_type: email, file: fixtures/customers.json, line: 2}
+
+  - name: android
+    dir: android
+    langs: [kotlin, java]
+    min_precision: 1.0
+    min_recall: 0.9
+    flows:
+      - {data_type: phone, sink_rule: sdk.firebase.analytics, function: SignupViewModel.submit}
+      - {data_type: dob, sink_rule: log.jvm.stdout, function: SignupViewModel.track}
+      - {data_type: phone, sink_rule: log.android.logcat, function: CustomerRepo.save}
+      - {data_type: email, sink_rule: sdk.sentry.set_user, function: CustomerRepo.save}
+      - {data_type: vn_cccd, sink_rule: sdk.firebase.crashlytics.custom_key, function: CustomerRepo.save}
+      - {data_type: phone, sink_rule: storage.android.shared_prefs, function: CustomerRepo.save}
+      - {data_type: person_name, sink_rule: log.android.logcat, function: CustomerRepo.save,
+         note: "known miss: SignupViewModel.submit passes hoTen as the nickname constructor argument, which save() logs"}
+      - {data_type: person_name, sink_rule: log.android.logcat, function: ProfileActivity.show}
+      - {data_type: email, sink_rule: sdk.sentry.set_extra, function: ProfileActivity.show, note: "getMail() returns the email column"}
+      - {data_type: email, sink_rule: log.android.logcat, function: ProfileActivity.send, note: "passed in from show()"}
+
+  - name: web
+    dir: web
+    langs: [typescript]
+    min_precision: 1.0
+    min_recall: 1.0
+    flows:
+      - {data_type: email, sink_rule: sdk.ts.sentry.set_user, function: UserService.register}
+      - {data_type: phone, sink_rule: sdk.ts.mixpanel, function: UserService.register}
+      - {data_type: dob, sink_rule: storage.ts.web_storage, function: UserService.register}
+      - {data_type: vn_cccd, sink_rule: net.ts.axios, function: UserService.register}
+      - {data_type: phone, sink_rule: log.ts.console, function: logInfo, note: "logInfo is called with user.soDienThoai"}
+      - {data_type: email, sink_rule: storage.ts.web_storage, function: onLogin}
+    ambiguous:
+      # register() POSTs the whole user to ${this.baseUrl}/users: a leak only
+      # if baseUrl is not the application's own backend.
+      - {data_type: email, sink_rule: net.ts.fetch, function: UserService.register}
+      - {data_type: phone, sink_rule: net.ts.fetch, function: UserService.register}
+      - {data_type: vn_cccd, sink_rule: net.ts.fetch, function: UserService.register}

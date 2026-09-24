@@ -86,7 +86,7 @@ piiflow map --format dpia > docs/data-map.md
 | `piiflow comment piiflow.md` | Creates or updates the PR (GitHub) / MR (GitLab) comment. |
 | `piiflow init` | Writes starter config files. |
 
-Useful `scan` flags: `--format text|json|sarif|markdown|gitlab`, `--sarif FILE`, `--markdown FILE`, `--json FILE`, `--gitlab FILE` (write several reports in one run), `--baseline FILE`, `--no-baseline`, `--caller-depth N`, `--min-confidence F`, `--all`, `--no-cache`, `--no-fail`, `--verbose`. Flags can come before or after paths.
+Useful `scan` flags: `--format text|json|sarif|markdown|gitlab`, `--sarif FILE`, `--markdown FILE`, `--json FILE`, `--gitlab FILE` (write several reports in one run), `--baseline FILE`, `--no-baseline`, `--caller-depth N`, `--min-confidence F`, `--all`, `--no-cache`, `--no-fail`, `--verbose`, `--cpuprofile FILE`, `--memprofile FILE` (pprof profiles of the analysis; also on `baseline` and `map`). Flags can come before or after paths.
 
 **Exit codes:** `0` no new violations · `1` at least one new policy violation · `2` error. CI only needs the exit code.
 
@@ -302,6 +302,32 @@ piiflow favours explainable, low-noise results over completeness. Every finding 
 - Dynamic destinations (URLs built at runtime) show up as `network (unknown host)`.
 - Name-based sources depend on naming. Add explicit hints (`pii:"..."` tags, `@PII`, proto options, SQL comments) where names are unhelpful, and `pii:"-"` to silence a field.
 
+### Measuring accuracy and speed
+
+`testdata/eval.yaml` labels every leak in the fixtures, as a reviewer reading the code would report it, plus deliberate traps that must not be reported. `piiflow-bench` scans each case the way `piiflow scan --no-cache --no-baseline` does and scores it:
+
+```sh
+go run ./cmd/piiflow-bench                     # or: make eval
+go run ./cmd/piiflow-bench -runs 5 -json eval.json -markdown eval.md
+go run ./cmd/piiflow-bench -manifest my-corpus.yaml -check
+```
+
+- **Precision** = TP / (TP + FP) and **recall** = TP / (TP + FN), per case, per data type and per sink category (`log`, `sdk`, `net`, `storage`, `literal`). A label matched by several findings is one true positive; any other reported violation is a false positive. Findings matching an `ambiguous` label (for example data sent to a host that may be first party) count as neither.
+- A **confidence sweep** rescores every case at each threshold in `thresholds`, which shows what raising `policy.min_confidence` would cost in recall.
+- **Timings**: median wall time over `-runs` cold scans, memory allocated by the scan, files and functions. The Go frontend's `go list` runs in a child process, so its time is included but its memory is not.
+- `-check` exits 1 when a case scores below its `min_precision` or `min_recall`. CI runs it on every pull request and publishes the tables in the job summary; timings are reported but not gated.
+
+To measure piiflow on your own code, write a manifest whose case `dir` points at a checkout (absolute, or relative to the manifest) and label the leaks you know about. For recall on unlabelled code, plant known leaks in a copy and label those.
+
+For speed work:
+
+```sh
+make bench                                                  # engine scaling, detectors, fixture scans
+piiflow scan . --no-cache --cpuprofile cpu.out --memprofile mem.out
+go tool pprof -http=:8080 cpu.out
+go tool pprof -sample_index=alloc_space mem.out
+```
+
 ## Development
 
 ### Design: inversion of control
@@ -337,6 +363,7 @@ There is no package-level mutable state: the name classifier is built from a tax
 
 ```
 cmd/piiflow/            entry point: app.New(os.Stdout, os.Stderr).Run(ctx, args)
+cmd/piiflow-bench/      accuracy and timing on the labelled corpus (testdata/eval.yaml)
 internal/app/           composition root + end-to-end tests on testdata/
 internal/platform/      OS adapters: workspace on disk, git binary, cache file
 internal/cli/           commands, flags, exit codes (App with injected deps)
@@ -355,9 +382,10 @@ internal/policy/        violations and severity (Evaluator)
 internal/report/        text, JSON, SARIF, Markdown, GitLab SAST
 internal/datamap/       DPIA/JSON/CSV/Mermaid data map
 internal/cicomment/     PR/MR comment upsert (HTTP client injected)
-testdata/               fixtures with deliberate leaks (Go, Android, web)
+internal/eval/          labelled-corpus scoring: precision, recall, F1, confidence sweep
+testdata/               fixtures with deliberate leaks (Go, Android, web); eval.yaml labels them
 scripts/                release build and packaging, license header check, third-party licenses
-.github/workflows/      ci.yml (lint, vulncheck, tests on Linux/macOS/Windows, self-scan, image), release.yml
+.github/workflows/      ci.yml (lint, vulncheck, tests on Linux/macOS/Windows, accuracy, self-scan, image), release.yml
 ```
 
 Building needs Go 1.26 or newer and, for the tree-sitter frontends, a C compiler.
@@ -366,6 +394,8 @@ Building needs Go 1.26 or newer and, for the tree-sitter frontends, a C compiler
 make test          # all frontends (cgo)
 make test-nocgo    # Go frontend + literal detector only
 make check         # what CI runs: gofmt, vet, staticcheck, license headers, both test suites
+make eval          # precision/recall/F1 and timings on testdata/eval.yaml
+make bench         # Go benchmarks
 make release-local # release archives for this machine in dist/
 go test -coverpkg=./internal/... ./...   # ~76% of statements
 ```

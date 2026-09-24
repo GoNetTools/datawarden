@@ -15,5 +15,7 @@ All notable changes to piiflow are documented here. The format follows [Keep a C
 - Reports: text, JSON, SARIF 2.1.0, Markdown PR summary, GitLab SAST.
 - `piiflow map` data inventory for DPIAs (Markdown, JSON, CSV, Mermaid).
 - GitHub Action, pre-commit hooks and a multi-arch container image.
+- `piiflow-bench` and a labelled corpus (`testdata/eval.yaml`): precision, recall and F1 per case, data type and sink, a confidence-threshold sweep, and scan timings; CI fails when accuracy drops below the corpus minimums.
+- `--cpuprofile` and `--memprofile` on `scan`, `baseline` and `map`, and Go benchmarks for the taint engine, the detectors and end-to-end fixture scans.
 
 [Unreleased]: https://github.com/GoNetTools/pii-scanner/commits/main

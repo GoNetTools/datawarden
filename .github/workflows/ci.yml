@@ -114,6 +114,37 @@ jobs:
           CGO_ENABLED: "0"
         run: go test ./...
 
+  # Accuracy on the labelled corpus (testdata/eval.yaml); fails when a case
+  # drops below its min_precision/min_recall. Timings are reported, not gated:
+  # shared runners are too noisy for that.
+  eval:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: stable
+      - name: Accuracy and timings
+        env:
+          CGO_ENABLED: "1"
+        run: |
+          code=0
+          go run ./cmd/piiflow-bench -runs 3 -check -json eval.json -markdown eval.md || code=$?
+          if [ -f eval.md ]; then cat eval.md >> "$GITHUB_STEP_SUMMARY"; fi
+          exit "$code"
+      - name: Benchmarks run
+        env:
+          CGO_ENABLED: "1"
+        run: go test -run '^$' -bench . -benchtime 1x ./...
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always() && hashFiles('eval.json') != ''
+        with:
+          name: eval
+          path: eval.json
+          retention-days: 30
+
   # piiflow scans itself: the fixtures must fail, the project must be clean.
   scan-self:
     runs-on: ubuntu-24.04
