@@ -1,0 +1,205 @@
+# Copyright 2026 The datawarden Authors
+# SPDX-License-Identifier: Apache-2.0
+#
+# The built-in taxonomy: the classes of sensitive data datawarden knows and
+# the data types in each. Adding a class or a data type is an edit here
+# (see CONTRIBUTING, "Add a data type or class"); TestBuiltinTaxonomy
+# checks the file.
+#
+# Class fields: id, label, description, severity (high raises the severity
+# of every finding of the class).
+# Data type fields: id, label, class, category (groups types in the data
+# map), sensitive (special-category data, GDPR art. 9), severity,
+# patterns (identifier words, space-separated tokens), weak (ambiguous
+# abbreviations, lower confidence), exclude (tokens that rule the type out)
+# and values (regular expressions for committed values, see below).
+
+classes:
+  - id: pii
+    label: Personal data
+    description: Information about an identified or identifiable person (GDPR, CCPA, Vietnam Decree 13/2023/ND-CP).
+  - id: phi
+    label: Protected health information
+    description: Health data linked to a person (HIPAA, GDPR art. 9).
+    severity: high
+  - id: pci
+    label: Cardholder data
+    description: Payment card numbers and card security data (PCI DSS).
+    severity: high
+  - id: credential
+    label: Credentials and secrets
+    description: Passwords, tokens and keys that grant access to systems or accounts.
+    severity: high
+
+data_types:
+  - id: email
+    label: Email address
+    category: contact
+    class: pii
+    patterns: [email, e mail, email address, email addr, mail address]
+    weak: [mail]
+    exclude: [server, host, smtp, port, provider, domain]
+
+  - id: phone
+    label: Phone number
+    category: contact
+    class: pii
+    patterns: [phone, phone number, phone no, phonenumber, mobile, mobile number, mobile no, msisdn, telephone, cellphone, cell phone]
+    weak: [tel]
+    exclude: [app, os, platform, frame, layout, screen, device, sdk, version, notch, portrait, landscape, web, tablet]
+
+  - id: person_name
+    label: Person name
+    category: identity
+    class: pii
+    patterns: [full name, fullname, first name, firstname, last name, lastname, given name, family name, surname, middle name, legal name, customer name, patient name, holder name, cardholder name, account holder]
+    exclude: [file, class, type, host, field, column, table, package, module, app, bucket, method, func, function, event, screen, tag, attr, attribute, font, theme, bundle]
+
+  - id: dob
+    label: Date of birth
+    category: identity
+    class: pii
+    patterns: [dob, date of birth, birth date, birthdate, birthday, birth day, year of birth, birth year]
+
+  - id: address
+    label: Postal address
+    category: location
+    class: pii
+    patterns: [street address, home address, billing address, shipping address, postal address, mailing address, residential address, zip code, zipcode, postal code, postcode]
+    weak: [address]
+    exclude: [ip, ipv4, ipv6, mac, memory, wallet, server, remote, local, bind, listen, base, host, web, url, uri, socket, net, network, peer, proxy, gateway, contract, email, mail, ptr, pointer, offset, bluetooth, ble, hw, hardware, broadcast, multicast, sender, public, return, bar, book, resolver, dns, node, api, endpoint, virtual, physical]
+
+  - id: ip_address
+    label: IP address
+    category: online
+    class: pii
+    patterns: [ip address, ipaddress, ip addr, ipaddr, client ip, remote ip, user ip, remote addr, remote address, x forwarded for, real ip]
+    weak: [ip]
+    exclude: [server, bind, listen, host, gateway, dns, proxy, subnet, cidr, range, allow, block, whitelist, allowlist]
+
+  - id: vn_cccd
+    label: Vietnamese citizen ID (CCCD/CMND)
+    category: identity
+    class: pii
+    severity: high
+    patterns: [cccd, cmnd]
+
+  - id: national_id
+    label: National ID number
+    category: identity
+    class: pii
+    severity: high
+    patterns: [national id, nationalid, citizen id, citizenid, identity number, identity card, id card, idcard, id number, nric, identification number, personal id, personal number, aadhaar]
+    weak: [nid, nin]
+
+  - id: us_ssn
+    label: US Social Security number
+    category: identity
+    class: pii
+    severity: high
+    patterns: [ssn, social security, social security number, ss number]
+
+  - id: passport
+    label: Passport number
+    category: identity
+    class: pii
+    severity: high
+    patterns: [passport, passport number, passport no]
+
+  - id: drivers_license
+    label: Driver's license number
+    category: identity
+    class: pii
+    severity: high
+    patterns: [driver license, drivers license, driving license, driving licence, driver licence, license number]
+
+  - id: tax_id
+    label: Tax identification number
+    category: identity
+    class: pii
+    severity: high
+    patterns: [tax id, taxid, tax code, taxcode, tax number, tax identification]
+    weak: [tin]
+
+  - id: insurance_id
+    label: Social/health insurance number
+    category: identity
+    class: pii
+    severity: high
+    patterns: [bhxh, bhyt, social insurance, health insurance number, insurance number, medicare number, nhs number]
+
+  - id: credit_card
+    label: Payment card number
+    category: financial
+    class: pci
+    sensitive: true
+    patterns: [card number, cardnumber, card no, credit card, creditcard, debit card, cc number, ccnumber, cc num, cvv, cvc, cvv2, card cvv, card expiry]
+    weak: [pan]
+    exclude: [type, brand, network, view, layout, icon, logo, scheme, last4, last, "4", bin, masked]
+
+  - id: bank_account
+    label: Bank account number
+    category: financial
+    class: pii
+    sensitive: true
+    patterns: [bank account, bankaccount, account number, accountnumber, account no, acct number, acct no, iban, routing number]
+
+  - id: location
+    label: Precise geolocation
+    category: location
+    class: pii
+    sensitive: true
+    patterns: [latitude, longitude, lat lng, latlng, lat long, geolocation, geo location, gps, coordinates, current location, user location, last location]
+    weak: [lat, lng, lon, location]
+    exclude: [file, url, path, dir, header, bucket, storage, code, source, line, column, offset, permission, service, manager, enabled, settings, request, provider, client]
+
+  - id: device_id
+    label: Device / advertising identifier
+    category: device
+    class: pii
+    patterns: [imei, imsi, android id, androidid, device id, deviceid, idfa, idfv, gaid, advertising id, advertisingid, ad id, adid, udid, mac address, macaddress, hardware id, fcm token, push token, device token, registration token, serial number]
+    exclude: [type, model, name, os, kind]
+
+  - id: gender
+    label: Gender
+    category: demographic
+    class: pii
+    patterns: [gender]
+    weak: [sex]
+
+  - id: ethnicity
+    label: Ethnicity / race
+    category: demographic
+    class: pii
+    sensitive: true
+    patterns: [ethnicity, ethnic, ethnic group]
+    weak: [race]
+    exclude: [condition, data, detector, check, trace]
+
+  - id: religion
+    label: Religion
+    category: demographic
+    class: pii
+    sensitive: true
+    patterns: [religion, religious]
+
+  - id: health
+    label: Health data
+    category: health
+    class: phi
+    sensitive: true
+    patterns: [diagnosis, medical record, medical history, health record, health condition, blood type, prescription, medication, allergy, allergies, disease, icd10]
+    exclude: [code, service, api, check, endpoint]
+
+  - id: biometric
+    label: Biometric data
+    category: biometric
+    class: pii
+    sensitive: true
+    patterns: [biometric, biometrics, face template, face embedding, face vector, face id, faceprint, fingerprint template, fingerprint image, voiceprint, voice print, iris scan]
+
+  - id: license_plate
+    label: Vehicle license plate
+    category: identity
+    class: pii
+    patterns: [license plate, licence plate, plate number, number plate]

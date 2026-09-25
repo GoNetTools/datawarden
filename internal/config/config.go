@@ -41,7 +41,21 @@ type Policy struct {
 	FailOnLiterals *bool `yaml:"fail_on_literals" json:"fail_on_literals"`
 	// IgnoreDataTypes drops these data types entirely.
 	IgnoreDataTypes []string `yaml:"ignore_data_types" json:"ignore_data_types,omitempty"`
-	Allow           []Allow  `yaml:"allow" json:"allow,omitempty"`
+	// IgnoreClasses drops every data type of these classes (pii, phi,
+	// pci, credential).
+	IgnoreClasses []string `yaml:"ignore_classes" json:"ignore_classes,omitempty"`
+	// Classes override fail_on and safe_transforms for one class of data:
+	// hashing a password is the right thing to do, hashing a phone number
+	// is not.
+	Classes map[string]ClassPolicy `yaml:"classes" json:"classes,omitempty"`
+	Allow   []Allow                `yaml:"allow" json:"allow,omitempty"`
+}
+
+// ClassPolicy overrides the policy for one class of data. Empty fields
+// keep the general policy.
+type ClassPolicy struct {
+	FailOn         []string `yaml:"fail_on" json:"fail_on,omitempty"`
+	SafeTransforms []string `yaml:"safe_transforms" json:"safe_transforms,omitempty"`
 }
 
 // Literals configures the committed-value (literal) detector.
@@ -88,6 +102,9 @@ func Default() *Config {
 			SafeTransforms: []string{"masked", "redacted", "encrypted", "tokenized", "anonymized"},
 			MinConfidence:  0.55,
 			FailOnLiterals: &t,
+			Classes: map[string]ClassPolicy{
+				"credential": {SafeTransforms: []string{"masked", "redacted", "encrypted", "tokenized", "hashed", "sha256", "sha512"}},
+			},
 		},
 	}
 }
@@ -128,6 +145,13 @@ func (c *Config) validate() error {
 	for _, k := range c.Policy.FailOn {
 		if !kinds[k] {
 			return fmt.Errorf("%s: policy.fail_on: unknown destination kind %q", c.Path, k)
+		}
+	}
+	for class, cp := range c.Policy.Classes {
+		for _, k := range cp.FailOn {
+			if !kinds[k] {
+				return fmt.Errorf("%s: policy.classes.%s.fail_on: unknown destination kind %q", c.Path, class, k)
+			}
 		}
 	}
 	for _, l := range c.Languages {
@@ -181,6 +205,14 @@ policy:
   min_confidence: 0.55
   fail_on_literals: true
   ignore_data_types: []
+  # Drop whole classes of data: pii, phi (health), pci (cardholder data),
+  # credential (passwords, tokens, keys).
+  ignore_classes: []
+  # Per-class overrides of fail_on and safe_transforms. A hashed password
+  # or token is fine; a hashed phone number is not.
+  classes:
+    credential:
+      safe_transforms: [masked, redacted, encrypted, tokenized, hashed, sha256, sha512]
   allow: []
   #  - sink: sdk.sentry.set_user
   #    data_types: [email]

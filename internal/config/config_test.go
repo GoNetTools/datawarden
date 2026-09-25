@@ -45,6 +45,7 @@ func TestAbsAndLoader(t *testing.T) {
 	for name, doc := range map[string]string{
 		"unknown language": "languages: [cobol]\n",
 		"bad kind":         "policy:\n  fail_on: [nowhere]\n",
+		"bad class kind":   "policy:\n  classes:\n    phi:\n      fail_on: [nowhere]\n",
 		"not yaml":         "policy: [\n",
 	} {
 		if _, err := l.Parse([]byte(doc), name); err == nil {

@@ -218,3 +218,32 @@ func TestUnknownFormatAndGitLabLinks(t *testing.T) {
 		t.Errorf("PR head sha: %s", got)
 	}
 }
+
+func TestSARIFClassTags(t *testing.T) {
+	r := rich()
+	r.Literals[1].Class = "credential"
+	var got struct {
+		Runs []struct {
+			Tool struct {
+				Driver struct {
+					Rules []struct {
+						ID         string `json:"id"`
+						Properties struct {
+							Tags []string `json:"tags"`
+						} `json:"properties"`
+					} `json:"rules"`
+				} `json:"driver"`
+			} `json:"tool"`
+		} `json:"runs"`
+	}
+	if err := json.Unmarshal([]byte(render(t, "sarif", r)), &got); err != nil {
+		t.Fatal(err)
+	}
+	tags := map[string]string{}
+	for _, rule := range got.Runs[0].Tool.Driver.Rules {
+		tags[rule.ID] = strings.Join(rule.Properties.Tags, ",")
+	}
+	if tags["pii-literal/phone"] != "security,privacy,credential" || !strings.HasPrefix(tags["pii-flow/sdk.sentry.set_user"], "security,privacy,pii,") {
+		t.Errorf("class tags: %v", tags)
+	}
+}

@@ -17,7 +17,8 @@ type Destination struct {
 
 // Flow is a path from a PII source to a sink.
 type Flow struct {
-	DataType   string      `json:"data_type"` // "email", "vn_cccd"
+	DataType   string      `json:"data_type"`       // "email", "vn_cccd"
+	Class      string      `json:"class,omitempty"` // "pii", "phi", "pci", "credential"; set by the policy
 	Source     ir.Pos      `json:"source"`
 	Sink       ir.Pos      `json:"sink"`
 	SinkRule   string      `json:"sink_rule"` // "sdk.sentry.set_user"
@@ -42,6 +43,7 @@ type Flow struct {
 // Literal is PII committed verbatim to the repository.
 type Literal struct {
 	DataType    string  `json:"data_type"`
+	Class       string  `json:"class,omitempty"`
 	Pos         ir.Pos  `json:"pos"`
 	Masked      string  `json:"masked"`
 	ValueHash   string  `json:"value_hash"`

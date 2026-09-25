@@ -52,6 +52,7 @@ type Store struct {
 type DataType struct {
 	ID         string   `json:"id"`
 	Label      string   `json:"label"`
+	Class      string   `json:"class"`
 	Category   string   `json:"category"`
 	Sensitive  bool     `json:"sensitive"`
 	Sources    []string `json:"sources"`
@@ -97,7 +98,7 @@ func Build(in Input) *Map {
 			return d
 		}
 		t := catalog.Lookup(id)
-		d := &DataType{ID: id, Label: t.Label, Category: t.Category, Sensitive: t.Sensitive}
+		d := &DataType{ID: id, Label: t.Label, Class: t.Class, Category: t.Category, Sensitive: t.Sensitive}
 		dts[id] = d
 		return d
 	}
@@ -246,7 +247,7 @@ func dpia(w io.Writer, m *Map) error {
 	}
 	b.WriteString(".\n\nThis inventory is derived from static analysis of the source code. It lists the personal data the code handles, where it is persisted and which systems receive it. It is a starting point for a Data Protection Impact Assessment (GDPR art. 35) or the impact assessment dossier required by Vietnamese personal data protection rules (Decree 13/2023/ND-CP, Law on Personal Data Protection 2025), not a substitute for one: purposes, legal bases, retention periods and data subjects must be filled in by the product owner.\n\n")
 
-	b.WriteString("## 1. Personal data processed\n\n| Data | Category | Sensitive | Stored in | Sent to | Seen as |\n|---|---|---|---|---|---|\n")
+	b.WriteString("## 1. Personal data processed\n\n| Data | Class | Category | Sensitive | Stored in | Sent to | Seen as |\n|---|---|---|---|---|---|---|\n")
 	for _, d := range m.DataTypes {
 		sens := "no"
 		if d.Sensitive {
@@ -256,7 +257,7 @@ func dpia(w io.Writer, m *Map) error {
 		if d.Committed > 0 {
 			seen += fmt.Sprintf("; %d value(s) committed in repo", d.Committed)
 		}
-		fmt.Fprintf(&b, "| %s (`%s`) | %s | %s | %s | %s | %s |\n", d.Label, d.ID, d.Category, sens, orDash(strings.Join(d.StoredIn, ", ")), orDash(strings.Join(d.Recipients, ", ")), esc(seen))
+		fmt.Fprintf(&b, "| %s (`%s`) | %s | %s | %s | %s | %s | %s |\n", d.Label, d.ID, orDash(d.Class), d.Category, sens, orDash(strings.Join(d.StoredIn, ", ")), orDash(strings.Join(d.Recipients, ", ")), esc(seen))
 	}
 	b.WriteString("\n")
 
@@ -340,10 +341,10 @@ func recipientLabel(d finding.Destination) string {
 
 func writeCSV(w io.Writer, m *Map) error {
 	cw := csv.NewWriter(w)
-	_ = cw.Write([]string{"data_type", "category", "sensitive", "dest_kind", "dest_host", "vendor", "first_party", "sink_rule", "transforms", "function", "file", "line", "confidence", "violation", "baselined"})
+	_ = cw.Write([]string{"data_type", "class", "category", "sensitive", "dest_kind", "dest_host", "vendor", "first_party", "sink_rule", "transforms", "function", "file", "line", "confidence", "violation", "baselined"})
 	for _, f := range m.Flows {
 		dt := m.catalog.Lookup(f.DataType)
-		_ = cw.Write([]string{f.DataType, dt.Category, strconv.FormatBool(dt.Sensitive), f.Dest.Kind, f.Dest.Host, f.Dest.Vendor, strconv.FormatBool(f.Dest.FirstParty),
+		_ = cw.Write([]string{f.DataType, dt.Class, dt.Category, strconv.FormatBool(dt.Sensitive), f.Dest.Kind, f.Dest.Host, f.Dest.Vendor, strconv.FormatBool(f.Dest.FirstParty),
 			f.SinkRule, strings.Join(f.Transforms, ";"), f.Function, f.Sink.File, strconv.Itoa(f.Sink.Line), strconv.FormatFloat(f.Confidence, 'f', 2, 64),
 			strconv.FormatBool(f.Violation), strconv.FormatBool(f.Baselined)})
 	}

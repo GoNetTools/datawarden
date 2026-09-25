@@ -171,10 +171,10 @@ func SARIF(w io.Writer, r *Report) error {
 			ruleMeta[id] = sarifRule{
 				ID: id, Name: "CommittedSensitiveValue" + camel(l.DataType),
 				ShortDescription:     sarifText{Text: dt.Label + " committed to the repository"},
-				FullDescription:      sarifText{Text: "A value that validates as " + strings.ToLower(dt.Label) + " is stored in the repository. Replace real personal data in fixtures and samples with synthetic values."},
+				FullDescription:      sarifText{Text: "A value that validates as " + strings.ToLower(dt.Label) + " is stored in the repository. Replace real personal data and live secrets in fixtures and samples with synthetic values."},
 				Help:                 sarifText{Text: "Replace the value with synthetic test data (for Vietnamese phone numbers and CCCD numbers, generate values that fail validation or use documented test ranges). If it is intentional, accept it with `datawarden baseline`."},
 				DefaultConfiguration: map[string]any{"level": level(l.Severity, false)},
-				Properties:           map[string]any{"tags": []string{"security", "privacy", "pii"}, "security-severity": securitySeverity[l.Severity], "precision": "high"},
+				Properties:           map[string]any{"tags": []string{"security", "privacy", classTag(l.Class)}, "security-severity": securitySeverity[l.Severity], "precision": "high"},
 			}
 		}
 		state := "new"
@@ -237,7 +237,7 @@ func flowRule(r *Report, id string, f *finding.Flow) sarifRule {
 		FullDescription:      sarifText{Text: full},
 		Help:                 sarifText{Text: "Remove the personal data from this call, mask or tokenize it first, or record the processing as accepted (policy.allow in .datawarden.yaml, or `datawarden baseline`)."},
 		DefaultConfiguration: map[string]any{"level": level(f.Severity, false)},
-		Properties:           map[string]any{"tags": []string{"security", "privacy", "pii", f.Dest.Kind}, "security-severity": securitySeverity[f.Severity], "precision": "medium"},
+		Properties:           map[string]any{"tags": []string{"security", "privacy", classTag(f.Class), f.Dest.Kind}, "security-severity": securitySeverity[f.Severity], "precision": "medium"},
 	}
 }
 
@@ -257,4 +257,13 @@ func camel(s string) string {
 		}
 	}
 	return b.String()
+}
+
+// classTag is the SARIF tag for a data class; findings from before the
+// policy set classes are personal data.
+func classTag(class string) string {
+	if class == "" {
+		return "pii"
+	}
+	return class
 }

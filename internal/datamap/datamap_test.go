@@ -49,7 +49,7 @@ func TestFormats(t *testing.T) {
 		"":        "Recipients",
 		"md":      "Recipients",
 		"json":    `"generated": "2026-09-24T00:00:00Z"`,
-		"csv":     "data_type,category",
+		"csv":     "data_type,class,category",
 		"mermaid": "flowchart",
 	} {
 		var b bytes.Buffer
