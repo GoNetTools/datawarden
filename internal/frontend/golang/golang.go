@@ -27,6 +27,7 @@ import (
 
 	"github.com/GoNetTools/pii-scanner/internal/frontend"
 	"github.com/GoNetTools/pii-scanner/internal/ir"
+	"github.com/GoNetTools/pii-scanner/internal/lang"
 )
 
 // PackageLoader loads Go packages; packages.Load in production.
@@ -49,16 +50,16 @@ func New(o frontend.Options, load PackageLoader) *Frontend {
 
 // Register adds the Go frontend to a registry.
 func Register(r *frontend.Registry, load PackageLoader) {
-	r.Register("go", func(o frontend.Options) frontend.Frontend { return New(o, load) })
+	r.Register(lang.Go, func(o frontend.Options) frontend.Frontend { return New(o, load) })
 }
 
 // Lang implements frontend.Frontend.
-func (f *Frontend) Lang() string { return "go" }
+func (f *Frontend) Lang() string { return lang.Go }
 
 // Lower implements frontend.Frontend. Files are grouped by their Go module
 // and loaded one module at a time.
 func (f *Frontend) Lower(ctx context.Context, files []string) (*ir.Module, error) {
-	out := &ir.Module{Lang: "go"}
+	out := &ir.Module{Lang: lang.Go}
 	groups := map[string][]string{}
 	for _, rel := range files {
 		mod, ok := findModRoot(f.opts.FS, rel)
@@ -150,7 +151,7 @@ func (f *Frontend) lowerModule(ctx context.Context, modRel string, rels []string
 	if err != nil {
 		return nil, err
 	}
-	mod := &ir.Module{Lang: "go"}
+	mod := &ir.Module{Lang: lang.Go}
 	packages.Visit(pkgs, nil, func(p *packages.Package) {
 		for _, e := range p.Errors {
 			mod.Warnings = append(mod.Warnings, "go: "+e.Error())
@@ -361,7 +362,7 @@ func (l *lowerer) typeDecl(n *types.Named) *ir.TypeDecl {
 		return nil
 	}
 	l.emittedTypes[name] = true
-	td := &ir.TypeDecl{Name: name, Kind: "struct", Lang: "go", Pos: l.pos(n.Obj().Pos())}
+	td := &ir.TypeDecl{Name: name, Kind: "struct", Lang: lang.Go, Pos: l.pos(n.Obj().Pos())}
 	if p := n.Obj().Pkg(); p == nil || (l.modPath != "" && p.Path() != l.modPath && !strings.HasPrefix(p.Path(), l.modPath+"/")) {
 		td.External = true
 	}
@@ -417,7 +418,7 @@ func parseTag(tag string) map[string]string {
 }
 
 func (l *lowerer) lowerFunc(fn *ssa.Function) *ir.Func {
-	F := &ir.Func{ID: funcID(fn), Name: fn.Name(), Lang: "go", Pos: l.pos(fn.Pos())}
+	F := &ir.Func{ID: funcID(fn), Name: fn.Name(), Lang: lang.Go, Pos: l.pos(fn.Pos())}
 	F.File = F.Pos.File
 	l.fn = F
 	l.vars = map[ssa.Value]ir.VarID{}

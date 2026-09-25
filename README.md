@@ -83,6 +83,7 @@ piiflow map --format dpia > docs/data-map.md
 | `piiflow baseline` | Full scan; writes the current violations to the baseline. |
 | `piiflow map --format dpia\|json\|csv\|mermaid` | Personal-data inventory. |
 | `piiflow rules [--kind sink] [--lang kotlin]` | Effective rules (built-in + repository overrides). |
+| `piiflow rules test DIR` | Checks annotated example code in `DIR` against the effective rules (see [Sink rules](#sink-rules)). |
 | `piiflow comment piiflow.md` | Creates or updates the PR (GitHub) / MR (GitLab) comment. |
 | `piiflow init` | Writes starter config files. |
 
@@ -198,6 +199,19 @@ Rules are YAML files embedded in the binary (`internal/rules/builtin/`: 89 rules
 - id: log.go.fmt_print               # same id as a built-in: replaced; here disabled
   disabled: true
 ```
+
+Rule files are read strictly: a misspelt key, an unknown `lang` or an id defined twice in one file is an error, not a silently weaker rule.
+
+**Test your rules** with annotated examples, the way the built-in rules are tested. Put code that uses the SDK in `.piiflow/rules/examples/` (scans never report that directory) and annotate each call on the line above it:
+
+```kotlin
+// ruleid: sdk.acme.telemetry
+Telemetry.send("signup", mapOf("email" to email))
+// ok: sdk.acme.telemetry
+Telemetry.send("order", mapOf("orderId" to orderId))
+```
+
+`piiflow rules test .piiflow/rules/examples` scans the directory with the repository's rules and policy, and fails if an expected finding is missing, an `ok:` line is reported, or any violation is unannotated. `todoruleid:` and `todook:` record known misses and false positives. Every built-in rule has such an example in `internal/rules/testdata/examples/`.
 
 Other fields: `kind: source` (with `data_type`) and `kind: transform` (with `transform`, e.g. `sha256`), `host_arg` (take the destination host from a constant URL argument, as for `http.Post` and `fetch`), `match_bare` (match an unresolved call without receiver, for Kotlin scope functions such as `prefs.edit { putString(...) }`), `severity`, `category`, `description`.
 
@@ -319,6 +333,8 @@ go run ./cmd/piiflow-bench -manifest my-corpus.yaml -check
 - **Timings**: median wall time over `-runs` cold scans, memory allocated by the scan, files and functions. The Go frontend's `go list` runs in a child process, so its time is included but its memory is not.
 - `-check` exits 1 when a case scores below its `min_precision` or `min_recall`. CI runs it on every pull request and publishes the tables in the job summary; timings are reported but not gated.
 
+**See it on a realistic app:** [`testdata/vulnshop`](testdata/vulnshop) is a small shop (Go API, TypeScript checkout, Kotlin/Java Android app, CSV seed data) with 32 planted leaks and a set of traps. Run **Actions → demo → Run workflow** to scan it, or any other directory, and get the findings, the data map and the accuracy tables in the job summary.
+
 To measure piiflow on your own code, write a manifest whose case `dir` points at a checkout (absolute, or relative to the manifest) and label the leaks you know about. For recall on unlabelled code, plant known leaks in a copy and label those.
 
 For speed work:
@@ -366,6 +382,7 @@ There is no package-level mutable state: the name classifier is built from a tax
 ```
 cmd/piiflow/            entry point: app.New(os.Stdout, os.Stderr).Run(ctx, args)
 cmd/piiflow-bench/      accuracy and timing on the labelled corpus (testdata/eval.yaml)
+internal/lang/          the language table: names, aliases, extensions, test-file conventions
 internal/app/           composition root + end-to-end tests on testdata/
 internal/platform/      OS adapters: workspace on disk, git binary, cache file
 internal/cli/           commands, flags, exit codes (App with injected deps)
@@ -375,8 +392,9 @@ internal/ingest/        walker, .piiflowignore, git queries
 internal/frontend/      interface + Registry
   golang/               go/packages + SSA (PackageLoader injectable)
   treesitter/           Kotlin, Java, TypeScript (cgo; Register records them unavailable without cgo)
+  testdata/conformance/ the same scenarios in every language: what a frontend must lower
 internal/detect/        Classifier + taxonomy, schema hints, literal validators
-internal/rules/         YAML rules (builtin/ embedded) and matcher
+internal/rules/         YAML rules (builtin/ embedded) and matcher; testdata/examples/ has an example per rule
 internal/analysis/      taint engine and summaries
 internal/cache/         summary + call graph cache (Persister, Hasher)
 internal/baseline/      fingerprints and baseline encoding
@@ -385,9 +403,10 @@ internal/report/        text, JSON, SARIF, Markdown, GitLab SAST
 internal/datamap/       DPIA/JSON/CSV/Mermaid data map
 internal/cicomment/     PR/MR comment upsert (HTTP client injected)
 internal/eval/          labelled-corpus scoring: precision, recall, F1, confidence sweep
-testdata/               fixtures with deliberate leaks (Go, Android, web); eval.yaml labels them
+internal/ruletest/      ruleid/ok annotations in example code, checked against scan results
+testdata/               fixtures with deliberate leaks (Go, Android, web, vulnshop demo); eval.yaml labels them
 scripts/                release build and packaging, license header check, third-party licenses
-.github/workflows/      ci.yml (lint, vulncheck, tests on Linux/macOS/Windows, accuracy, self-scan, image), release.yml
+.github/workflows/      ci.yml (lint, vulncheck, tests on Linux/macOS/Windows, accuracy, self-scan, image), demo.yml (on demand), release.yml
 ```
 
 Building needs Go 1.26 or newer and, for the tree-sitter frontends, a C compiler.
@@ -404,7 +423,7 @@ go test -coverpkg=./internal/... ./...   # ~76% of statements
 
 The version is set with `-ldflags "-X github.com/GoNetTools/pii-scanner/internal/app.Version=v1.2.3"` (`scripts/release/build.sh` does this).
 
-Adding a language means implementing `frontend.Frontend`, exposing a `Register(*frontend.Registry)` function, calling it from `app.NewComponents`, and adding rules with its `lang`.
+Adding a language or a rule is a checklist in [CONTRIBUTING.md](CONTRIBUTING.md#add-a-language), and tests enforce each step: `TestEveryLanguageIsWired` (language table, frontends and rules agree), `TestFrontendConformance` (the frontend lowers every scenario), `TestRuleExamples` (every rule has an example that passes) and `TestBuiltinRuleConventions` (ids, categories, data types).
 
 ## Contributing
 

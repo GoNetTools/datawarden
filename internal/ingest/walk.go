@@ -10,22 +10,14 @@ import (
 	"path"
 	"sort"
 	"strings"
-)
 
-// Language identifiers used across the pipeline.
-const (
-	LangGo         = "go"
-	LangKotlin     = "kotlin"
-	LangJava       = "java"
-	LangTypeScript = "typescript"
-	LangProto      = "proto"
-	LangSQL        = "sql"
+	"github.com/GoNetTools/pii-scanner/internal/lang"
 )
 
 // File is a repository file selected for scanning.
 type File struct {
 	Rel  string // slash-separated, relative to the repository root
-	Lang string // "" for non-code text files
+	Lang string // a lang name; "" for files piiflow does not parse
 	Test bool   // test/fixture source file
 	Size int64
 }
@@ -33,52 +25,18 @@ type File struct {
 // MaxFileSize bounds what is read for literal scanning.
 const MaxFileSize = 2 << 20
 
-// LangOf classifies a path by extension.
-func LangOf(rel string) string {
-	switch strings.ToLower(path.Ext(rel)) {
-	case ".go":
-		return LangGo
-	case ".kt", ".kts":
-		return LangKotlin
-	case ".java":
-		return LangJava
-	case ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts":
-		if strings.HasSuffix(rel, ".d.ts") {
-			return ""
-		}
-		return LangTypeScript
-	case ".proto":
-		return LangProto
-	case ".sql":
-		return LangSQL
-	}
-	return ""
-}
-
 // IsTestPath reports whether a source file is test code.
 func IsTestPath(rel string) bool {
 	base := path.Base(rel)
-	switch {
-	case strings.HasSuffix(base, "_test.go"):
+	if l, ok := lang.ForPath(rel); ok && l.IsTestFile(base) {
 		return true
-	case strings.Contains(base, ".test.") || strings.Contains(base, ".spec.") || strings.HasSuffix(base, "Test.kt") || strings.HasSuffix(base, "Test.java") || strings.HasSuffix(base, "Tests.java") || strings.HasSuffix(base, "Tests.kt"):
+	}
+	if strings.Contains(base, ".test.") || strings.Contains(base, ".spec.") {
 		return true
 	}
 	p := "/" + rel
 	for _, d := range []string{"/src/test/", "/src/androidTest/", "/src/testDebug/", "/__tests__/", "/__mocks__/", "/testdata/", "/e2e/", "/cypress/"} {
 		if strings.Contains(p, d) {
-			return true
-		}
-	}
-	return false
-}
-
-// GoIgnoredDir reports whether the go tool ignores the file's directory
-// (a path element starting with "." or "_", or named "testdata").
-func GoIgnoredDir(rel string) bool {
-	parts := strings.Split(rel, "/")
-	for _, p := range parts[:len(parts)-1] {
-		if strings.HasPrefix(p, ".") || strings.HasPrefix(p, "_") || p == "testdata" {
 			return true
 		}
 	}
@@ -111,7 +69,7 @@ func Walk(fsys fs.FS, m *Matcher) ([]File, error) {
 		if err != nil {
 			return nil
 		}
-		out = append(out, File{Rel: p, Lang: LangOf(p), Test: IsTestPath(p), Size: info.Size()})
+		out = append(out, File{Rel: p, Lang: lang.OfPath(p), Test: IsTestPath(p), Size: info.Size()})
 		return nil
 	})
 	sort.Slice(out, func(i, j int) bool { return out[i].Rel < out[j].Rel })

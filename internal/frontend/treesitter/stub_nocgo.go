@@ -13,7 +13,7 @@ import "github.com/GoNetTools/pii-scanner/internal/frontend"
 // Register records the tree-sitter languages as unavailable.
 func Register(r *frontend.Registry) {
 	const why = "this piiflow binary was built without cgo; use a release binary or the Docker image for Kotlin/Java/TypeScript"
-	for _, l := range []string{"kotlin", "java", "typescript"} {
+	for _, l := range Languages() {
 		r.RegisterUnavailable(l, why)
 	}
 }

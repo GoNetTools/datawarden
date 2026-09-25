@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+
+	"github.com/GoNetTools/pii-scanner/internal/lang"
 )
 
 func TestMatcher(t *testing.T) {
@@ -41,6 +43,8 @@ func TestMatcher(t *testing.T) {
 		{"logo.png", false, true},
 		{"go.sum", false, true},
 		{".piiflow/cache/piiflow-cache.json", false, true},
+		{".piiflow/rules/examples/src/telemetry.ts", false, true},
+		{".piiflow/rules/acme.yaml", false, false},
 	}
 	for _, c := range cases {
 		if got := m.Ignored(c.path, c.dir); got != c.want {
@@ -49,14 +53,14 @@ func TestMatcher(t *testing.T) {
 	}
 }
 
-func TestLangOf(t *testing.T) {
-	for p, want := range map[string]string{"a.go": "go", "A.kt": "kotlin", "B.java": "java", "c.tsx": "typescript", "d.js": "typescript", "e.d.ts": "", "x.proto": "proto", "m.sql": "sql", "r.md": ""} {
-		if got := LangOf(p); got != want {
-			t.Errorf("LangOf(%s) = %q, want %q", p, got, want)
+func TestIsTestPath(t *testing.T) {
+	for p, want := range map[string]bool{
+		"app/src/test/java/Foo.java": true, "pkg/x_test.go": true, "app/FooTest.kt": true, "web/app.spec.ts": true,
+		"web/__tests__/a.ts": true, "src/main/Foo.kt": false, "pkg/x.go": false,
+	} {
+		if got := IsTestPath(p); got != want {
+			t.Errorf("IsTestPath(%s) = %v, want %v", p, got, want)
 		}
-	}
-	if !IsTestPath("app/src/test/java/FooTest.java") || !IsTestPath("pkg/x_test.go") || IsTestPath("src/main/Foo.kt") {
-		t.Error("IsTestPath")
 	}
 }
 
@@ -86,7 +90,7 @@ func TestWalkSelectAndHash(t *testing.T) {
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("walk = %v, want %v", got, want)
 	}
-	if !files[3].Test || files[1].Lang != LangKotlin {
+	if !files[3].Test || files[1].Lang != lang.Kotlin {
 		t.Errorf("classification: %+v", files)
 	}
 	if sel := Select(fsys, files, []string{"app", "./main.go"}); len(sel) != 2 {

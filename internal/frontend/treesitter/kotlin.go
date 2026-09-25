@@ -14,6 +14,7 @@ import (
 
 	"github.com/GoNetTools/pii-scanner/internal/frontend"
 	"github.com/GoNetTools/pii-scanner/internal/ir"
+	"github.com/GoNetTools/pii-scanner/internal/lang"
 )
 
 // NewKotlin returns the kotlin frontend.
@@ -21,7 +22,7 @@ func NewKotlin(o frontend.Options) frontend.Frontend { return &ktFrontend{opts: 
 
 type ktFrontend struct{ opts frontend.Options }
 
-func (fe *ktFrontend) Lang() string { return "kotlin" }
+func (fe *ktFrontend) Lang() string { return lang.Kotlin }
 
 // ktExtra is per-class Kotlin information not in classInfo.
 type ktExtra struct {
@@ -39,7 +40,7 @@ type ktProgram struct {
 }
 
 func (fe *ktFrontend) Lower(ctx context.Context, files []string) (*ir.Module, error) {
-	kp := &ktProgram{program: newProgram("kotlin", fe.opts), extra: map[string]*ktExtra{}, extRecv: map[string]string{}, topRet: map[string]string{}}
+	kp := &ktProgram{program: newProgram(lang.Kotlin, fe.opts), extra: map[string]*ktExtra{}, extRecv: map[string]string{}, topRet: map[string]string{}}
 	kp.parse(ctx, files, kotlin.GetLanguage())
 	for _, f := range kp.files {
 		kp.header(f)
@@ -235,7 +236,7 @@ func (kp *ktProgram) collectClass(f *srcFile, n *sitter.Node, scope string, isOb
 	kp.extra[qual] = ex
 	mods := firstOf(n, "modifiers")
 	_, annNames := ktAnnotations(f, mods)
-	td := &ir.TypeDecl{Name: qual, Kind: "class", Lang: "kotlin", Annotations: annNames, Pos: posOf(f, n)}
+	td := &ir.TypeDecl{Name: qual, Kind: "class", Lang: lang.Kotlin, Annotations: annNames, Pos: posOf(f, n)}
 	if isEntityAnnotation(annNames) {
 		td.Kind = "entity"
 	}

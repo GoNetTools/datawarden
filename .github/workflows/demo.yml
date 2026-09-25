@@ -1,0 +1,140 @@
+# Copyright 2026 The piiflow Authors
+# SPDX-License-Identifier: Apache-2.0
+#
+# Scans the vulnerable-by-design demo (testdata/vulnshop), or any directory
+# in the repository, and shows the results in the job summary:
+#
+#   Actions → demo → Run workflow
+#
+# It also runs on pull requests that change the demo. Findings never fail
+# the job; this workflow is for looking at results.
+
+name: demo
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Directory to scan, relative to the repository root
+        default: testdata/vulnshop
+        type: string
+      min_confidence:
+        description: Override policy.min_confidence (empty = policy default 0.55)
+        default: ""
+        type: string
+      upload_sarif:
+        description: Also upload the findings to code scanning (category piiflow-demo)
+        default: false
+        type: boolean
+  pull_request:
+    paths:
+      - testdata/vulnshop/**
+      - testdata/eval.yaml
+      - .github/workflows/demo.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: demo-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  GOTOOLCHAIN: local
+
+jobs:
+  scan:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read # upload-sarif reads the workflow run
+      security-events: write # only used when upload_sarif is set
+    env:
+      TARGET: ${{ inputs.target || 'testdata/vulnshop' }}
+      MIN_CONFIDENCE: ${{ inputs.min_confidence }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: stable
+      - name: Check inputs
+        run: |
+          case "$TARGET" in
+            /*|*..*) echo "::error::target must be a relative path inside the repository: $TARGET"; exit 1 ;;
+          esac
+          if [ ! -d "$TARGET" ]; then
+            echo "::error::target is not a directory: $TARGET"
+            exit 1
+          fi
+          if [ -n "$MIN_CONFIDENCE" ] && ! [[ "$MIN_CONFIDENCE" =~ ^(0(\.[0-9]+)?|1(\.0+)?)$ ]]; then
+            echo "::error::min_confidence must be a number between 0 and 1: $MIN_CONFIDENCE"
+            exit 1
+          fi
+      - name: Build
+        run: |
+          bash scripts/release/build.sh "demo-${GITHUB_SHA::12}" "$RUNNER_TEMP/bin"
+          echo "PIIFLOW=$RUNNER_TEMP/bin/linux_amd64/piiflow" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/out"
+          echo "OUT=$RUNNER_TEMP/out" >> "$GITHUB_ENV"
+      - name: Scan
+        run: |
+          args=(scan "$TARGET" --root "$TARGET" --no-baseline --no-cache --no-fail
+                --sarif "$OUT/piiflow.sarif" --markdown "$OUT/piiflow.md" --json "$OUT/piiflow.json")
+          if [ -n "$MIN_CONFIDENCE" ]; then args+=(--min-confidence "$MIN_CONFIDENCE"); fi
+          "$PIIFLOW" "${args[@]}" | tee "$OUT/piiflow.txt"
+      - name: Data map
+        run: |
+          "$PIIFLOW" map --root "$TARGET" --no-cache --format dpia --output "$OUT/data-map.md"
+          "$PIIFLOW" map --root "$TARGET" --no-cache --format mermaid --output "$OUT/data-map.mmd"
+      - name: Accuracy on the labelled corpus
+        if: env.TARGET == 'testdata/vulnshop'
+        env:
+          CGO_ENABLED: "1"
+        run: go run ./cmd/piiflow-bench -json "$OUT/eval.json" -markdown "$OUT/eval.md" | tee "$OUT/eval.txt"
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "# piiflow demo: \`$TARGET\`"
+            echo
+            if [ -f "$OUT/piiflow.json" ]; then
+              jq -r '"**\(.flows | map(select(.violation)) | length) leaking flow(s), \(.literals | map(select(.violation)) | length) committed value(s)** in \(.files_scanned) files (\(.files_analyzed | to_entries | map("\(.key): \(.value)") | join(", "))), \(.functions) functions, \(.duration)"' "$OUT/piiflow.json"
+              echo
+              echo "| Severity | Data type | Destination | Rule | Where |"
+              echo "|---|---|---|---|---|"
+              jq -r '.flows[] | select(.violation) | "| \(.severity) | `\(.data_type)` | \(.dest.vendor // .dest.host // .dest.kind) (\(.dest.kind)) | `\(.sink_rule)` | `\(.sink.file):\(.sink.line)` |"' "$OUT/piiflow.json"
+              jq -r '.literals[] | select(.violation) | "| \(.severity) | `\(.data_type)` | committed value `\(.masked)` | `\(.detector)` | `\(.pos.file):\(.pos.line)` |"' "$OUT/piiflow.json"
+              echo
+            fi
+            if [ -f "$OUT/eval.md" ]; then cat "$OUT/eval.md"; echo; fi
+            if [ -f "$OUT/data-map.mmd" ]; then
+              echo "## Data map"
+              echo
+              echo '```mermaid'
+              cat "$OUT/data-map.mmd"
+              echo '```'
+              echo
+            fi
+            if [ -f "$OUT/piiflow.md" ]; then
+              echo "<details><summary>PR comment preview</summary>"
+              echo
+              cat "$OUT/piiflow.md"
+              echo
+              echo "</details>"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: piiflow-demo
+          path: ${{ runner.temp }}/out
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Upload SARIF to code scanning
+        if: inputs.upload_sarif
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          sarif_file: ${{ runner.temp }}/out/piiflow.sarif
+          category: piiflow-demo

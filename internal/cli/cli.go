@@ -89,6 +89,7 @@ Usage:
   piiflow baseline                     accept the current findings
   piiflow map --format dpia            personal-data map (dpia, json, csv, mermaid)
   piiflow rules                        print the effective sink/source/transform rules
+  piiflow rules test DIR               check annotated examples in DIR against the rules
   piiflow init                         write .piiflow.yaml and .piiflowignore
   piiflow comment piiflow.md           create/update the PR (GitHub) or MR (GitLab) summary comment
   piiflow version
@@ -117,7 +118,11 @@ func (a *App) Run(ctx context.Context, args []string) int {
 	case "map":
 		err = a.runMap(ctx, args[1:])
 	case "rules":
-		err = a.runRules(args[1:])
+		if len(args) > 1 && args[1] == "test" {
+			code, err = a.runRulesTest(ctx, args[2:])
+		} else {
+			err = a.runRules(args[1:])
+		}
 	case "init":
 		err = a.runInit(args[1:])
 	case "comment":

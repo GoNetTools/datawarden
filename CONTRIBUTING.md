@@ -54,13 +54,25 @@ The README's [Development](README.md#development) section has the full layout. T
 
 Use the issue templates. The most useful report is a **minimal snippet** (synthetic data) plus the piiflow output line, which names the rule (`[sdk.ts.sentry.set_user]`), data type and confidence.
 
-### Add or fix a sink rule
+### Add or fix a rule
 
-Built-in rules are YAML files in `internal/rules/builtin/` (`go.yaml`, `jvm.yaml`, `typescript.yaml`, `sources.yaml`, `transforms.yaml`), embedded in the binary. The README's [Sink rules](README.md#sink-rules) section documents the fields.
+Built-in rules are YAML files in `internal/rules/builtin/` (`go.yaml`, `jvm.yaml`, `typescript.yaml`, `sources.yaml`, `transforms.yaml`), embedded in the binary. The README's [Sink rules](README.md#sink-rules) section documents the fields. Rule files are read strictly: a misspelt key, an unknown `lang` or an id defined twice in one file is an error.
 
-1. Add the rule with a stable, dotted `id` (`sdk.<lang>.<vendor>.<call>`); ids are part of baseline fingerprints, so don't rename existing ones.
-2. Add a case to a fixture under `testdata/` that the rule should catch, and one it should not, then add the expected flow to the fixture's test in `internal/app` (`expectFlows`) and label it in `testdata/eval.yaml`.
-3. `go run ./cmd/piiflow rules --lang <lang>` lists the loaded rules.
+1. **Write the rule.** Give it a stable, dotted id. Sinks start with their category (`log.`, `sdk.`, `net.`, `storage.`, `ipc.`), sources with `src.` and transforms with `xform.`: for example `sdk.<lang>.<vendor>.<call>`. Ids are part of baseline fingerprints, so don't rename existing ones. A source rule must produce a data type from the taxonomy. `TestBuiltinRuleConventions` checks all of this.
+2. **Add an example** under `internal/rules/testdata/examples/<language>/`. Write the call the way real code writes it, and annotate the line above it:
+
+   ```kotlin
+   // ruleid: sdk.acme.telemetry
+   Telemetry.send("signup", mapOf("email" to email))
+   // ok: sdk.acme.telemetry
+   Telemetry.send("order", mapOf("orderId" to orderId))
+   ```
+
+   `ruleid:` means the next line must produce a finding for that rule; `ok:` means it must not produce a violation. Every violation in an example file must be annotated. If an idiomatic form isn't caught yet, mark it `todoruleid:` (or `todook:` for a known false positive) and open an issue: the test fails as soon as the gap is fixed, so the markers never go stale. Go examples import third-party SDKs through small stubs in `internal/rules/testdata/gostubs/`; add one with a `replace` line in `examples/go/go.mod`.
+3. **Run** `go test ./internal/app -run TestRuleExamples`. It also fails when any built-in rule has no example.
+4. If a fixture under `testdata/` exercises the rule, label the flow in `testdata/eval.yaml`.
+
+A rule for one repository's own SDK belongs in that repository's `.piiflow/rules/*.yaml`. Test it the same way: put annotated examples in `.piiflow/rules/examples/` (scans never report that directory) and run `piiflow rules test .piiflow/rules/examples`.
 
 ### Keep the accuracy corpus honest
 
@@ -72,7 +84,13 @@ The taxonomy (identifier words, negative context words, transforms) is in `inter
 
 ### Add a language
 
-Implement `frontend.Frontend` (lower the language to the IR in `internal/ir`), expose `Register(*frontend.Registry)`, call it from `app.NewComponents`, add rules with that `lang`, and add a fixture under `testdata/`. Tree-sitter frontends in `internal/frontend/treesitter` are the easiest model to copy.
+A new language touches five places, and a test checks each one:
+
+1. **Describe it** in `internal/lang/lang.go`: name, aliases, file extensions, test-file suffixes. The file walker, config validation and rule loading all read this table (`TestTableIsConsistent`).
+2. **Write the frontend.** Implement `frontend.Frontend`: lower each source file to the IR in `internal/ir` (functions, named and typed variables, calls with qualified callee names, field loads and stores, type declarations with their fields). The tree-sitter frontends in `internal/frontend/treesitter` are the easiest model to copy; `common.go` holds their shared helpers.
+3. **Register it** in `app.NewComponents`, and as unavailable in builds that cannot include it, the way the tree-sitter languages are without cgo (`TestEveryLanguageIsWired`).
+4. **Port the conformance programs.** Copy `internal/frontend/testdata/conformance/go` to `internal/frontend/testdata/conformance/<language>` and translate each `scenario:` function. The scenarios are the constructs the taint engine relies on: parameters, locals, string building, fields, getters, map and object keys, helper calls, return values, closures, field stores, collections, whole objects, masking, and three non-PII cases. Mark a construct the frontend can't lower yet with `todoruleid:` (`TestFrontendConformance`).
+5. **Add rules** with the new `lang`, each with an example as described above, and a fixture under `testdata/` labelled in `testdata/eval.yaml` so the accuracy report covers the language.
 
 ## Pull requests
 

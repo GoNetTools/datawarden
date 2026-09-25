@@ -7,6 +7,7 @@
 package rules
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
@@ -21,6 +22,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/GoNetTools/pii-scanner/internal/lang"
 )
 
 //go:embed builtin/*.yaml
@@ -232,20 +235,41 @@ func readTree(fsys fs.FS, root, originPrefix string) ([]*Rule, error) {
 	return out, nil
 }
 
+// parse decodes a rule file: a list of rules, or {rules: [...]}. Unknown
+// keys are errors, so a misspelt field cannot silently change what a rule
+// matches.
 func parse(b []byte, origin string) ([]*Rule, error) {
+	var doc yaml.Node
+	if err := yaml.Unmarshal(b, &doc); err != nil {
+		return nil, fmt.Errorf("%s: %w", origin, err)
+	}
+	if len(doc.Content) == 0 {
+		return nil, nil // empty file
+	}
+	dec := yaml.NewDecoder(bytes.NewReader(b))
+	dec.KnownFields(true)
 	var rs []*Rule
-	if err := yaml.Unmarshal(b, &rs); err != nil {
-		// Also accept {rules: [...]}.
+	if doc.Content[0].Kind == yaml.MappingNode {
 		var wrapped struct {
 			Rules []*Rule `yaml:"rules"`
 		}
-		if err2 := yaml.Unmarshal(b, &wrapped); err2 != nil {
+		if err := dec.Decode(&wrapped); err != nil {
 			return nil, fmt.Errorf("%s: %w", origin, err)
 		}
 		rs = wrapped.Rules
+	} else if err := dec.Decode(&rs); err != nil {
+		return nil, fmt.Errorf("%s: %w", origin, err)
 	}
+	seen := map[string]bool{}
 	for _, r := range rs {
+		if r == nil {
+			continue
+		}
 		r.Origin = origin
+		if r.ID != "" && seen[r.ID] {
+			return nil, fmt.Errorf("%s: rule %s is defined twice", origin, r.ID)
+		}
+		seen[r.ID] = true
 	}
 	return rs, nil
 }
@@ -326,7 +350,18 @@ func (r *Rule) compile() error {
 		return fmt.Errorf("lang is required")
 	}
 	for i, l := range r.Lang {
-		r.Lang[i] = NormLang(l)
+		r.Lang[i] = lang.Normalize(l)
+		if !lang.IsCode(r.Lang[i]) {
+			return fmt.Errorf("lang %q is not supported (use one of %s)", l, strings.Join(lang.CodeNames(), ", "))
+		}
+	}
+	for _, i := range r.Arg.Indexes {
+		if i < 0 {
+			return fmt.Errorf("arg %d: indexes start at 0", i)
+		}
+	}
+	if r.HostArg != nil && *r.HostArg < 0 {
+		return fmt.Errorf("host_arg %d: indexes start at 0", *r.HostArg)
 	}
 	r.callRes, r.names, r.typeSegs = nil, nil, nil
 	for _, c := range r.Call {
@@ -351,19 +386,6 @@ func (r *Rule) compile() error {
 		r.recvRe = re
 	}
 	return nil
-}
-
-// NormLang maps language aliases to frontend names.
-func NormLang(l string) string {
-	switch strings.ToLower(l) {
-	case "golang":
-		return "go"
-	case "kt", "kts":
-		return "kotlin"
-	case "js", "javascript", "ts", "tsx", "jsx":
-		return "typescript"
-	}
-	return strings.ToLower(l)
 }
 
 func globToRegexp(g string) (*regexp.Regexp, error) {
