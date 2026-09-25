@@ -196,3 +196,36 @@ func whileLoop(emails: [String]) {
         i += 1
     }
 }
+
+func switchOverwrites(email: String, kind: Int) {
+    var x = email
+    switch kind {
+    case 1: x = "one"
+    default: x = "other"
+    }
+    // ok: log.swift.print
+    print(x)
+}
+
+func guardKeepsBinding(email: String?) {
+    var x = "anonymous"
+    guard let userEmail = email else {
+        x = "missing"
+        return
+    }
+    // ruleid: log.swift.print
+    print(userEmail)
+    // ok: log.swift.print
+    print(x)
+}
+
+func catchSeesEarlierValue(email: String) {
+    var x = email
+    do {
+        x = "cleared"
+        try JSONSerialization.jsonObject(with: Data(x.utf8))
+    } catch {
+        // ruleid: log.swift.print
+        print(x)
+    }
+}

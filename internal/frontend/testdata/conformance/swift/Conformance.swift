@@ -132,3 +132,39 @@ func negativeContext(phoneCount: Int, emailTemplate: String) {
     // ok: log.swift.print
     print(phoneCount, emailTemplate)
 }
+
+// scenario: overwritten
+func overwritten(email: String) {
+    var x = email
+    x = "anonymous"
+    // ok: log.swift.print
+    print(x)
+}
+
+// scenario: remasked
+func remasked(email: String) {
+    var userEmail = email
+    userEmail = maskEmail(userEmail)
+    // ok: log.swift.print
+    print(userEmail)
+}
+
+// scenario: branch-merge
+func branchMerge(email: String, verbose: Bool) {
+    var x = "anonymous"
+    if verbose {
+        x = email
+    }
+    // ruleid: log.swift.print
+    print(x)
+}
+
+// scenario: loop-carried
+func loopCarried(email: String, items: [String]) {
+    var x = "anonymous"
+    for _ in items {
+        // ruleid: log.swift.print
+        print(x)
+        x = email
+    }
+}

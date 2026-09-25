@@ -612,10 +612,55 @@ func (tb *tsBuilder) stmt(n *sitter.Node) ir.VarID {
 		return ir.NoVar
 	case "for_in_statement":
 		iter := tb.expr(n.ChildByFieldName("right"))
-		if left := n.ChildByFieldName("left"); left != nil {
-			tb.destructure(left, iter, "")
+		tb.loop(n, func() {
+			if left := n.ChildByFieldName("left"); left != nil {
+				tb.destructure(left, iter, "")
+			}
+			tb.stmt(n.ChildByFieldName("body"))
+		})
+		return ir.NoVar
+	case "if_statement":
+		tb.stmt(n.ChildByFieldName("condition"))
+		cons, alt := n.ChildByFieldName("consequence"), n.ChildByFieldName("alternative")
+		arms := []func(){func() { tb.stmt(cons) }}
+		if alt != nil {
+			arms = append(arms, func() { tb.stmt(alt) })
 		}
-		tb.stmt(n.ChildByFieldName("body"))
+		tb.branches(n, alt == nil, arms...)
+		return ir.NoVar
+	case "for_statement":
+		tb.stmt(n.ChildByFieldName("initializer"))
+		tb.loop(n, func() {
+			tb.stmt(n.ChildByFieldName("condition"))
+			tb.stmt(n.ChildByFieldName("body"))
+			tb.stmt(n.ChildByFieldName("increment"))
+		})
+		return ir.NoVar
+	case "while_statement", "do_statement":
+		tb.loop(n, func() {
+			tb.stmt(n.ChildByFieldName("condition"))
+			tb.stmt(n.ChildByFieldName("body"))
+		})
+		return ir.NoVar
+	case "try_statement":
+		var handlers []func()
+		if h := n.ChildByFieldName("handler"); h != nil {
+			handlers = append(handlers, func() { tb.stmt(h) })
+		}
+		tb.tryCatch(n, func() { tb.stmt(n.ChildByFieldName("body")) }, handlers,
+			func() { tb.stmt(n.ChildByFieldName("finalizer")) })
+		return ir.NoVar
+	case "switch_statement":
+		tb.stmt(n.ChildByFieldName("value"))
+		var arms []func()
+		skippable := true
+		for _, c := range named(n.ChildByFieldName("body")) {
+			if c.Type() == "switch_default" {
+				skippable = false
+			}
+			arms = append(arms, func() { tb.stmt(c) })
+		}
+		tb.branches(n, skippable, arms...)
 		return ir.NoVar
 	case "catch_clause":
 		if p := n.ChildByFieldName("parameter"); p != nil {
@@ -629,8 +674,7 @@ func (tb *tsBuilder) stmt(n *sitter.Node) ir.VarID {
 		dst := tb.declare(name, "", n)
 		tb.assign(dst, n, fv)
 		return ir.NoVar
-	case "if_statement", "for_statement", "while_statement", "do_statement", "try_statement", "switch_statement",
-		"labeled_statement", "throw_statement", "parenthesized_expression", "with_statement":
+	case "labeled_statement", "throw_statement", "parenthesized_expression", "with_statement":
 		last := ir.NoVar
 		for _, c := range named(n) {
 			last = tb.stmt(c)
@@ -832,16 +876,18 @@ func (tb *tsBuilder) assignment(n *sitter.Node) ir.VarID {
 	switch left.Type() {
 	case "identifier":
 		name := tb.text(left)
-		dst, ok := tb.scope[name]
+		old, ok := tb.scope[name]
 		if !ok {
-			dst = tb.declare(name, "", left)
+			dst := tb.declare(name, "", left)
+			tb.assign(dst, n, v)
+			return dst
 		}
+		dst := tb.redefine(name, old, "", left)
 		if augmented {
-			tb.assign(dst, n, dst, v)
+			tb.assign(dst, n, old, v)
 		} else {
 			tb.assign(dst, n, v)
 		}
-		tb.noteAssign(dst)
 		return dst
 	case "member_expression":
 		obj := left.ChildByFieldName("object")

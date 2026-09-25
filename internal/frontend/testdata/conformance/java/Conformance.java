@@ -131,4 +131,39 @@ class Conformance {
         // ok: log.jvm.stdout
         System.out.println(phoneCount + " " + emailTemplate);
     }
+
+    // scenario: overwritten
+    void overwritten(String email) {
+        String x = email;
+        x = "anonymous";
+        // ok: log.jvm.stdout
+        System.out.println(x);
+    }
+
+    // scenario: remasked
+    void remasked(String email) {
+        email = maskEmail(email);
+        // ok: log.jvm.stdout
+        System.out.println(email);
+    }
+
+    // scenario: branch-merge
+    void branchMerge(String email, boolean verbose) {
+        String x = "anonymous";
+        if (verbose) {
+            x = email;
+        }
+        // ruleid: log.jvm.stdout
+        System.out.println(x);
+    }
+
+    // scenario: loop-carried
+    void loopCarried(String email, java.util.List<String> items) {
+        String x = "anonymous";
+        for (String item : items) {
+            // ruleid: log.jvm.stdout
+            System.out.println(x);
+            x = email;
+        }
+    }
 }

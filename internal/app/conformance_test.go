@@ -38,6 +38,10 @@ var conformanceScenarios = map[string]string{
 	"masked":           "a masking function makes the flow acceptable (ok)",
 	"not-pii":          "identifiers and counts are not personal data (ok)",
 	"negative-context": "names like phoneCount or emailTemplate are not personal data (ok)",
+	"overwritten":      "a variable overwritten with a non-personal value no longer carries the data (ok)",
+	"remasked":         "a variable reassigned to its own masked value (ok)",
+	"branch-merge":     "assigned on one branch of an if, the data reaches a sink after the if",
+	"loop-carried":     "assigned late in a loop body, the data reaches a sink early in the next iteration",
 }
 
 var scenarioRe = regexp.MustCompile(`(?m)^\s*(?://+|#+)\s*scenario:\s*([a-z-]+)\s*$`)

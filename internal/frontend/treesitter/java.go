@@ -362,13 +362,66 @@ func (jb *jvBuilder) stmt(n *sitter.Node) ir.VarID {
 		return ir.NoVar
 	case "enhanced_for_statement":
 		iter := jb.expr(n.ChildByFieldName("value"))
-		nameNode := n.ChildByFieldName("name")
-		if nameNode != nil {
-			dst := jb.declare(jb.text(nameNode), jb.jp.resolveType(jb.f, javaTypeText(jb.f, n.ChildByFieldName("type"))), nameNode)
-			jb.assign(dst, n, iter)
-		}
-		jb.stmt(n.ChildByFieldName("body"))
+		jb.loop(n, func() {
+			if nameNode := n.ChildByFieldName("name"); nameNode != nil {
+				dst := jb.declare(jb.text(nameNode), jb.jp.resolveType(jb.f, javaTypeText(jb.f, n.ChildByFieldName("type"))), nameNode)
+				jb.assign(dst, n, iter)
+			}
+			jb.stmt(n.ChildByFieldName("body"))
+		})
 		return ir.NoVar
+	case "if_statement":
+		jb.stmt(n.ChildByFieldName("condition"))
+		cons, alt := n.ChildByFieldName("consequence"), n.ChildByFieldName("alternative")
+		arms := []func(){func() { jb.stmt(cons) }}
+		if alt != nil {
+			arms = append(arms, func() { jb.stmt(alt) })
+		}
+		jb.branches(n, alt == nil, arms...)
+		return ir.NoVar
+	case "while_statement", "do_statement":
+		jb.loop(n, func() {
+			jb.stmt(n.ChildByFieldName("condition"))
+			jb.stmt(n.ChildByFieldName("body"))
+		})
+		return ir.NoVar
+	case "for_statement":
+		for _, c := range fieldChildren(n, "init") {
+			jb.stmt(c)
+		}
+		jb.loop(n, func() {
+			jb.stmt(n.ChildByFieldName("condition"))
+			jb.stmt(n.ChildByFieldName("body"))
+			for _, c := range fieldChildren(n, "update") {
+				jb.stmt(c)
+			}
+		})
+		return ir.NoVar
+	case "try_statement", "try_with_resources_statement":
+		jb.stmt(n.ChildByFieldName("resources"))
+		var handlers []func()
+		for _, c := range allOf(n, "catch_clause") {
+			handlers = append(handlers, func() { jb.stmt(c) })
+		}
+		var finally func()
+		if fc := firstOf(n, "finally_clause"); fc != nil {
+			finally = func() { jb.stmt(fc) }
+		}
+		jb.tryCatch(n, func() { jb.stmt(n.ChildByFieldName("body")) }, handlers, finally)
+		return ir.NoVar
+	case "switch_expression", "switch_statement":
+		jb.stmt(n.ChildByFieldName("condition"))
+		result := jb.temp(n)
+		var arms []func()
+		skippable := true
+		for _, c := range named(n.ChildByFieldName("body")) {
+			if l := firstOf(c, "switch_label"); l != nil && strings.HasPrefix(jb.text(l), "default") {
+				skippable = false
+			}
+			arms = append(arms, func() { jb.assign(result, c, jb.stmt(c)) })
+		}
+		jb.branches(n, skippable, arms...)
+		return result
 	case "catch_clause":
 		if p := firstOf(n, "catch_formal_parameter"); p != nil {
 			if nn := p.ChildByFieldName("name"); nn != nil {
@@ -387,8 +440,7 @@ func (jb *jvBuilder) stmt(n *sitter.Node) ir.VarID {
 			jb.assign(dst, n, v)
 		}
 		return ir.NoVar
-	case "if_statement", "while_statement", "for_statement", "do_statement", "try_statement", "try_with_resources_statement",
-		"synchronized_statement", "labeled_statement", "switch_expression", "switch_statement", "finally_clause", "resource_specification",
+	case "synchronized_statement", "labeled_statement", "finally_clause", "resource_specification",
 		"throw_statement", "yield_statement", "parenthesized_expression", "condition":
 		last := ir.NoVar
 		for _, c := range named(n) {
@@ -566,13 +618,13 @@ func (jb *jvBuilder) assignment(n *sitter.Node) ir.VarID {
 	switch left.Type() {
 	case "identifier":
 		name := jb.text(left)
-		if dst, ok := jb.scope[name]; ok {
+		if old, ok := jb.scope[name]; ok {
+			dst := jb.redefine(name, old, "", left)
 			if op != "=" {
-				jb.assign(dst, n, dst, v)
+				jb.assign(dst, n, old, v)
 			} else {
 				jb.assign(dst, n, v)
 			}
-			jb.noteAssign(dst)
 			return dst
 		}
 		if jb.cls != nil && jb.this != ir.NoVar {

@@ -116,3 +116,15 @@ func variadic(email string) {
 	// ruleid: log.go.stdlib
 	log.Println(parts...)
 }
+
+func switchOverwrites(email string, kind int) {
+	x := email
+	switch kind {
+	case 1:
+		x = "one"
+	default:
+		x = "other"
+	}
+	// ok: log.go.stdlib
+	log.Println(x)
+}

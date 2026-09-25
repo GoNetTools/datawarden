@@ -207,3 +207,43 @@ def raise_with(email: str):
     print("validating")
     assert email, "missing"
     raise ValueError(email)
+
+
+def elif_overwrites(email: str, kind: int):
+    x = email
+    if kind == 1:
+        x = "one"
+    elif kind == 2:
+        x = "two"
+    else:
+        x = "other"
+    # ok: log.py.print
+    print(x)
+
+
+def match_overwrites(email: str, kind: int):
+    x = email
+    match kind:
+        case 1:
+            x = "one"
+        case _:
+            x = "other"
+    # ok: log.py.print
+    print(x)
+
+
+def except_sees_earlier_value(email: str):
+    x = email
+    try:
+        x = "cleared"
+        int(x)
+    except ValueError:
+        # ruleid: log.py.print
+        print(x)
+
+
+def augmented(email: str):
+    x = "user "
+    x += email
+    # ruleid: log.py.print
+    print(x)

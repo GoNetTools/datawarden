@@ -119,3 +119,34 @@ export function defaultParam(email: string, prefix = "user") {
   // ruleid: log.ts.console
   console.log(prefix, email);
 }
+
+export function switchOverwrites(email: string, kind: number) {
+  let x = email;
+  switch (kind) {
+    case 1:
+      x = "one";
+      break;
+    default:
+      x = "other";
+  }
+  // ok: log.ts.console
+  console.log(x);
+}
+
+export function catchSeesEarlierValue(email: string) {
+  let x = email;
+  try {
+    x = "cleared";
+    JSON.parse(x);
+  } catch (e) {
+    // ruleid: log.ts.console
+    console.log(x);
+  }
+}
+
+export function augmented(email: string) {
+  let x = "user ";
+  x += email;
+  // ruleid: log.ts.console
+  console.log(x);
+}

@@ -128,3 +128,38 @@ func negativeContext(phoneCount int, emailTemplate string) {
 	// ok: log.go.stdlib
 	log.Println(phoneCount, emailTemplate)
 }
+
+// scenario: overwritten
+func overwritten(email string) {
+	x := email
+	x = "anonymous"
+	// ok: log.go.stdlib
+	log.Println(x)
+}
+
+// scenario: remasked
+func remasked(email string) {
+	email = maskEmail(email)
+	// ok: log.go.stdlib
+	log.Println(email)
+}
+
+// scenario: branch-merge
+func branchMerge(email string, verbose bool) {
+	x := "anonymous"
+	if verbose {
+		x = email
+	}
+	// ruleid: log.go.stdlib
+	log.Println(x)
+}
+
+// scenario: loop-carried
+func loopCarried(email string, items []string) {
+	x := "anonymous"
+	for range items {
+		// ruleid: log.go.stdlib
+		log.Println(x)
+		x = email
+	}
+}

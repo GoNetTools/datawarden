@@ -463,7 +463,7 @@ func (sb *swBuilder) stmt(n *sitter.Node) ir.VarID {
 		return ir.NoVar
 	}
 	switch n.Type() {
-	case "function_body", "statements", "computed_property", "while_statement", "repeat_while_statement", "switch_entry",
+	case "function_body", "statements", "computed_property", "switch_entry",
 		"defer_statement", "labeled_statement", "computed_getter":
 		last := ir.NoVar
 		for _, c := range named(n) {
@@ -499,33 +499,60 @@ func (sb *swBuilder) stmt(n *sitter.Node) ir.VarID {
 		return ir.NoVar
 	case "for_statement":
 		iter := sb.expr(n.ChildByFieldName("collection"))
-		sb.bindPattern(n.ChildByFieldName("item"), iter, "")
-		for _, c := range allOf(n, "statements") {
-			sb.stmt(c)
-		}
+		sb.loop(n, func() {
+			sb.bindPattern(n.ChildByFieldName("item"), iter, "")
+			for _, c := range named(n) {
+				switch c.Type() {
+				case "statements":
+					sb.stmt(c)
+				case "where_clause":
+					for _, k := range named(c) {
+						sb.expr(k)
+					}
+				}
+			}
+		})
+		return ir.NoVar
+	case "while_statement", "repeat_while_statement":
+		sb.loop(n, func() {
+			for _, c := range named(n) {
+				sb.stmt(c)
+			}
+		})
 		return ir.NoVar
 	case "switch_statement":
 		sb.expr(n.ChildByFieldName("expr"))
+		var arms []func()
+		skippable := true
 		for _, e := range allOf(n, "switch_entry") {
-			sb.stmt(firstOf(e, "statements"))
+			if firstOf(e, "default_keyword") != nil {
+				skippable = false
+			}
+			arms = append(arms, func() { sb.stmt(firstOf(e, "statements")) })
 		}
+		sb.branches(n, skippable, arms...)
 		return ir.NoVar
 	case "do_statement":
+		var body *sitter.Node
+		var handlers []func()
 		for _, c := range named(n) {
 			switch c.Type() {
 			case "statements":
-				sb.stmt(c)
+				body = c
 			case "catch_block":
-				errVar := sb.temp(c)
-				if p := c.ChildByFieldName("error"); p != nil {
-					sb.bindPattern(p, errVar, "")
-				} else {
-					dst := sb.declare("error", "", c)
-					sb.assign(dst, c, errVar)
-				}
-				sb.stmt(firstOf(c, "statements"))
+				handlers = append(handlers, func() {
+					errVar := sb.temp(c)
+					if p := c.ChildByFieldName("error"); p != nil {
+						sb.bindPattern(p, errVar, "")
+					} else {
+						dst := sb.declare("error", "", c)
+						sb.assign(dst, c, errVar)
+					}
+					sb.stmt(firstOf(c, "statements"))
+				})
 			}
 		}
+		sb.tryCatch(n, func() { sb.stmt(body) }, handlers, nil)
 		return ir.NoVar
 	case "function_declaration":
 		fv := sb.closure(n, allOf(n, "parameter"), n.ChildByFieldName("body"))
@@ -539,9 +566,13 @@ func (sb *swBuilder) stmt(n *sitter.Node) ir.VarID {
 }
 
 // conditions lowers if/guard: `if let x = expr, cond { ... } else { ... }`
-// binds x to expr for the body.
+// binds x to expr for the body. The body and the else branch are
+// alternative paths; a guard's else branch leaves the scope, so only the
+// bindings of its conditions carry on.
 func (sb *swBuilder) conditions(n *sitter.Node) {
 	var pending *sitter.Node // the name of an `if let` binding
+	var then, els *sitter.Node
+	afterElse := false
 	for i := 0; i < int(n.ChildCount()); i++ {
 		c := n.Child(i)
 		if !c.IsNamed() {
@@ -549,6 +580,8 @@ func (sb *swBuilder) conditions(n *sitter.Node) {
 		}
 		switch field := n.FieldNameForChild(i); {
 		case c.Type() == "value_binding_pattern":
+		case c.Type() == "else":
+			afterElse = true
 		case field == "bound_identifier":
 			pending = c
 		case field == "condition":
@@ -558,10 +591,25 @@ func (sb *swBuilder) conditions(n *sitter.Node) {
 				sb.assign(dst, c, v)
 				pending = nil
 			}
+		case afterElse:
+			els = c // the else body, or an else-if
+		case c.Type() == "statements" && then == nil:
+			then = c
 		default:
-			sb.stmt(c) // the body, else body and else-if
+			sb.stmt(c)
 		}
 	}
+	if n.Type() == "guard_statement" {
+		entry := sb.snapshot()
+		sb.stmt(els)
+		sb.scope = entry
+		return
+	}
+	arms := []func(){func() { sb.stmt(then) }}
+	if els != nil {
+		arms = append(arms, func() { sb.stmt(els) })
+	}
+	sb.branches(n, els == nil, arms...)
 }
 
 // bindPattern assigns v to the names a pattern binds.
@@ -614,9 +662,8 @@ func (sb *swBuilder) assignment(n *sitter.Node) ir.VarID {
 		if name == "_" {
 			return v
 		}
-		if dst, ok := sb.scope[name]; ok {
-			sb.assign(dst, n, v)
-			sb.noteAssign(dst)
+		if old, ok := sb.scope[name]; ok {
+			sb.assign(sb.redefine(name, old, "", target), n, v)
 			return v
 		}
 		if sb.cls != nil && sb.this != ir.NoVar {
