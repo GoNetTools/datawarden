@@ -398,3 +398,12 @@ func shortSHA(s string) string {
 	}
 	return s
 }
+
+// Mapper builds and renders data maps: the CLI's DataMapper.
+type Mapper struct{}
+
+// Build assembles the data map (see Build).
+func (Mapper) Build(in Input) *Map { return Build(in) }
+
+// Write renders m in format (see Write).
+func (Mapper) Write(w io.Writer, format string, m *Map) error { return Write(w, format, m) }

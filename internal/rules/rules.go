@@ -425,3 +425,6 @@ func (s *Set) Hash() string { return s.hash }
 
 // ByID returns a rule.
 func (s *Set) ByID(id string) *Rule { return s.byID[id] }
+
+// All returns the rules in load order.
+func (s *Set) All() []*Rule { return s.Rules }

@@ -44,6 +44,14 @@ type Options struct {
 // Factory creates a frontend for one scan.
 type Factory func(Options) Frontend
 
+// Registrar is what a frontend package needs to make its languages
+// available (implemented by *Registry). Frontend packages register through
+// it, so they never depend on the registry's implementation.
+type Registrar interface {
+	Register(lang string, f Factory)
+	RegisterUnavailable(lang, reason string)
+}
+
 // Registry maps languages to frontend factories.
 type Registry struct {
 	mu          sync.Mutex

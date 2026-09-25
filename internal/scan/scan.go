@@ -87,8 +87,19 @@ type SchemaParser interface {
 	Build(types []*ir.TypeDecl) *detect.Schema
 }
 
+// FileLister lists repository files and narrows them to requested paths
+// (ingest.Lister).
+type FileLister interface {
+	// List returns the files not excluded by the default ignore patterns
+	// and the repository's .piiflowignore.
+	List(fsys fs.FS) ([]ingest.File, error)
+	// Select keeps the files named by root-relative files or directories.
+	Select(fsys fs.FS, all []ingest.File, paths []string) []ingest.File
+}
+
 // Scanner runs scans with injected collaborators.
 type Scanner struct {
+	Files     FileLister
 	Frontends Frontends
 	Analyzer  Analyzer
 	Literals  LiteralDetector
@@ -149,11 +160,7 @@ func (s *Scanner) Run(ctx context.Context, req Request) (*Result, error) {
 	repo := req.Repo
 	res := &Result{Mode: ModeFull, FilesAnalyzed: map[string]int{}, Commit: repo.VCS.HeadCommit(ctx), Started: start}
 
-	matcher, err := ingest.LoadMatcher(repo.FS)
-	if err != nil {
-		return nil, fmt.Errorf("reading %s: %w", ingest.IgnoreFile, err)
-	}
-	all, err := ingest.Walk(repo.FS, matcher)
+	all, err := s.Files.List(repo.FS)
 	if err != nil {
 		return nil, err
 	}
@@ -209,7 +216,7 @@ func (s *Scanner) Run(ctx context.Context, req Request) (*Result, error) {
 func (s *Scanner) validate(req Request) error {
 	var missing []string
 	for name, ok := range map[string]bool{
-		"Scanner.Frontends": s.Frontends != nil, "Scanner.Analyzer": s.Analyzer != nil, "Scanner.Literals": s.Literals != nil,
+		"Scanner.Files": s.Files != nil, "Scanner.Frontends": s.Frontends != nil, "Scanner.Analyzer": s.Analyzer != nil, "Scanner.Literals": s.Literals != nil,
 		"Scanner.Schemas": s.Schemas != nil, "Scanner.Clock": s.Clock != nil, "Request.Repo.FS": req.Repo.FS != nil,
 		"Request.Repo.VCS": req.Repo.VCS != nil, "Request.Cache": req.Cache != nil, "Request.Config": req.Config != nil,
 		"Request.Rules": req.Rules != nil,
@@ -266,7 +273,7 @@ func (s *Scanner) selectTargets(ctx context.Context, req Request, all []ingest.F
 		req.logf("diff: %d changed files, %d caller files", len(changedFiles), len(res.CallerFiles))
 	case len(req.Paths) > 0:
 		res.Mode = ModePaths
-		targets = ingest.Select(req.Repo.FS, all, req.Paths)
+		targets = s.Files.Select(req.Repo.FS, all, req.Paths)
 		literalTargets = targets
 	}
 	if req.LiteralsOnly {

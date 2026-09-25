@@ -12,6 +12,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"time"
 
@@ -74,6 +75,14 @@ type App struct {
 	OpenCache CacheOpener
 	Commenter Commenter
 	Catalog   Catalog
+
+	Configs    ConfigLoader
+	Rules      RuleLoader
+	Policy     Policy
+	Baselines  BaselineCodec
+	Reporter   Reporter
+	DataMapper DataMapper
+	RuleTester RuleTester
 	// Languages lists the available frontends (for `version`).
 	Languages func() []string
 	// Links builds CI source links for Markdown reports; may be nil.
@@ -169,6 +178,15 @@ func (a *App) check() error {
 	if a.Clock == nil {
 		missing = append(missing, "Clock")
 	}
+	for name, ok := range map[string]bool{
+		"Configs": a.Configs != nil, "Rules": a.Rules != nil, "Policy": a.Policy != nil, "Baselines": a.Baselines != nil,
+		"Reporter": a.Reporter != nil, "DataMapper": a.DataMapper != nil, "RuleTester": a.RuleTester != nil,
+	} {
+		if !ok {
+			missing = append(missing, name)
+		}
+	}
+	sort.Strings(missing)
 	if len(missing) > 0 {
 		return fmt.Errorf("app is missing dependencies: %s", strings.Join(missing, ", "))
 	}

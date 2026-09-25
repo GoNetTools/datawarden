@@ -284,3 +284,14 @@ func Missing(set *rules.Set, covered map[string]bool, langs map[string]bool) []s
 	sort.Strings(out)
 	return out
 }
+
+// Tester parses and checks annotated examples: the CLI's RuleTester.
+type Tester struct{}
+
+// Parse reads the annotations under root (see Parse).
+func (Tester) Parse(fsys fs.FS, root string) ([]Annotation, error) { return Parse(fsys, root) }
+
+// Check compares annotations with findings (see Check).
+func (Tester) Check(rs Rules, anns []Annotation, flows []*finding.Flow) Result {
+	return Check(rs, anns, flows)
+}

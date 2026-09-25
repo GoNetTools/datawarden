@@ -38,7 +38,7 @@ type Report struct {
 	BaselineSize  int                `json:"baseline_size"`
 	BaselineFixed int                `json:"baseline_fixed"`
 
-	Rules *rules.Set `json:"-"`
+	Rules RuleLookup `json:"-"`
 	// ShowAll includes non-violating flows in human-readable output.
 	ShowAll bool `json:"-"`
 	// Catalog labels data types; nil falls back to the type id.
@@ -46,6 +46,11 @@ type Report struct {
 	// Links builds a URL for a source position (CI code browsing); nil
 	// renders plain locations.
 	Links func(ir.Pos) string `json:"-"`
+}
+
+// RuleLookup finds rule metadata by id (implemented by *rules.Set).
+type RuleLookup interface {
+	ByID(id string) *rules.Rule
 }
 
 // Catalog describes data types (implemented by *detect.Classifier).
@@ -174,3 +179,9 @@ func (r *Report) message(f *finding.Flow) string {
 func (r *Report) literalMessage(l *finding.Literal) string {
 	return fmt.Sprintf("%s committed to the repository: %s", r.dtLabel(l.DataType), l.Masked)
 }
+
+// Writer renders reports: the CLI's Reporter.
+type Writer struct{}
+
+// Write renders r in format (see Write).
+func (Writer) Write(w io.Writer, format string, r *Report) error { return Write(w, format, r) }

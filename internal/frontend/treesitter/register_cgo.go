@@ -11,7 +11,7 @@ import (
 )
 
 // Register adds the Kotlin, Java and TypeScript frontends to a registry.
-func Register(r *frontend.Registry) {
+func Register(r frontend.Registrar) {
 	factories := map[string]frontend.Factory{
 		lang.Java:       NewJava,
 		lang.Kotlin:     NewKotlin,

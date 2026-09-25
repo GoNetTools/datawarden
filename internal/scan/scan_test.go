@@ -143,7 +143,7 @@ func newFixture(t *testing.T, files map[string]string, vcs VCS) *fixture {
 	now := time.Date(2026, 9, 24, 10, 0, 0, 0, time.UTC)
 	fx := &fixture{frontends: &fakeFrontends{unavailable: map[string]bool{"java": true}}, analyzer: &fakeAnalyzer{}, schemas: &fakeSchemas{}, fsys: fsys, mem: &cache.Memory{}}
 	fx.store = cache.Open(fx.mem, ingest.NewHasher(fsys), "test", rs.Hash())
-	fx.scanner = &Scanner{Frontends: fx.frontends, Analyzer: fx.analyzer, Literals: fakeLiterals{}, Schemas: fx.schemas, Clock: func() time.Time { return now }}
+	fx.scanner = &Scanner{Files: ingest.Lister{}, Frontends: fx.frontends, Analyzer: fx.analyzer, Literals: fakeLiterals{}, Schemas: fx.schemas, Clock: func() time.Time { return now }}
 	fx.req = Request{Repo: Repo{Root: "/repo", FS: fsys, VCS: vcs}, Cache: fx.store, Config: config.Default(), Rules: rs}
 	return fx
 }

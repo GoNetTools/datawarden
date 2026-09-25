@@ -49,7 +49,7 @@ func New(o frontend.Options, load PackageLoader) *Frontend {
 }
 
 // Register adds the Go frontend to a registry.
-func Register(r *frontend.Registry, load PackageLoader) {
+func Register(r frontend.Registrar, load PackageLoader) {
 	r.Register(lang.Go, func(o frontend.Options) frontend.Frontend { return New(o, load) })
 }
 

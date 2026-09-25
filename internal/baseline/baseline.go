@@ -11,6 +11,7 @@
 package baseline
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -159,4 +160,33 @@ func (b *Baseline) Encode(w io.Writer) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(b)
+}
+
+// Codec reads and writes baseline documents as bytes, so the caller owns
+// file access: the CLI's BaselineCodec.
+type Codec struct{}
+
+// Mark decodes data (nil or empty: no baseline), sets fingerprints and the
+// Baselined flag on the findings, and returns the number of accepted
+// entries and the fingerprints of entries no longer found.
+func (Codec) Mark(data []byte, flows []*finding.Flow, lits []*finding.Literal) (size int, unseen []string, err error) {
+	b := Empty()
+	if len(bytes.TrimSpace(data)) > 0 {
+		if b, err = Decode(bytes.NewReader(data)); err != nil {
+			return 0, nil, err
+		}
+	}
+	unseen = b.Mark(flows, lits)
+	return b.Len(), unseen, nil
+}
+
+// Encode builds a baseline of the current violations and returns the
+// document and its number of entries.
+func (Codec) Encode(flows []*finding.Flow, lits []*finding.Literal, commit string, now time.Time) ([]byte, int, error) {
+	b := FromFindings(flows, lits, commit, now)
+	var buf bytes.Buffer
+	if err := b.Encode(&buf); err != nil {
+		return nil, 0, err
+	}
+	return buf.Bytes(), b.Len(), nil
 }

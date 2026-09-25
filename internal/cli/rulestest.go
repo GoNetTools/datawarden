@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/GoNetTools/pii-scanner/internal/ruletest"
 	"github.com/GoNetTools/pii-scanner/internal/scan"
 )
 
@@ -57,7 +56,7 @@ Every violation in DIR must be annotated. Go examples need a go.mod in DIR.
 		return ExitError, fmt.Errorf("%s is not a directory", pos[0])
 	}
 	repo := a.Workspace.Open(dir)
-	anns, err := ruletest.Parse(repo.FS, ".")
+	anns, err := a.RuleTester.Parse(repo.FS, ".")
 	if err != nil {
 		return ExitError, err
 	}
@@ -77,8 +76,8 @@ Every violation in DIR must be annotated. Go examples need a go.mod in DIR.
 	for _, w := range res.Warnings {
 		fmt.Fprintf(a.Stderr, "warning: %s\n", w)
 	}
-	flows, _ := a.evaluator(s.cfg).Apply(res.Flows, res.Literals)
-	out := ruletest.Check(s.rules, anns, flows)
+	flows, _ := a.Policy.Apply(s.cfg, res.Flows, res.Literals)
+	out := a.RuleTester.Check(s.rules, anns, flows)
 	for _, k := range out.Known {
 		fmt.Fprintf(a.Stdout, "known   %s\n", k)
 	}
@@ -86,7 +85,7 @@ Every violation in DIR must be annotated. Go examples need a go.mod in DIR.
 		fmt.Fprintf(a.Stdout, "FAIL    %s\n", f)
 	}
 	var untested []string
-	for _, r := range s.rules.Rules {
+	for _, r := range s.rules.All() {
 		if !strings.HasPrefix(r.Origin, "builtin:") && !out.Covered[r.ID] {
 			untested = append(untested, r.ID)
 		}
