@@ -125,3 +125,38 @@ export function negativeContext(phoneCount: number, emailTemplate: string) {
   // ok: log.ts.console
   console.log(phoneCount, emailTemplate);
 }
+
+// scenario: overwritten
+export function overwritten(email: string) {
+  let x = email;
+  x = "anonymous";
+  // ok: log.ts.console
+  console.log(x);
+}
+
+// scenario: remasked
+export function remasked(email: string) {
+  email = maskEmail(email);
+  // ok: log.ts.console
+  console.log(email);
+}
+
+// scenario: branch-merge
+export function branchMerge(email: string, verbose: boolean) {
+  let x = "anonymous";
+  if (verbose) {
+    x = email;
+  }
+  // ruleid: log.ts.console
+  console.log(x);
+}
+
+// scenario: loop-carried
+export function loopCarried(email: string, items: string[]) {
+  let x = "anonymous";
+  for (const _ of items) {
+    // ruleid: log.ts.console
+    console.log(x);
+    x = email;
+  }
+}

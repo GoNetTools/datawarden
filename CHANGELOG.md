@@ -27,6 +27,7 @@ All notable changes to datawarden are documented here. The format follows [Keep 
 
 ### Changed
 
+- Variable reassignment is followed in order in Python, Java, Kotlin, Swift and TypeScript/JavaScript, as it already was in Go: each assignment to a local is a new version (SSA form), merged after `if`/`else`, `switch`/`when`/`match`, loops and `try`/`catch`. A value that is overwritten (`x = "anonymous"`) or replaced by its masked or hashed form (`email = mask(email)`) no longer reaches later sinks. A variable is no longer a new name-based source when its value is computed from a same-named variable, in every language including Go, so `email = sha256(email)` reports only the hashed flow. Four conformance scenarios cover this (`overwritten`, `remasked`, `branch-merge`, `loop-carried`).
 - The README and generated files (`datawarden init`, DPIA text, SARIF help) no longer refer to one country's laws or formats.
 - Vietnam-specific detection is removed: the `vn_cccd` data type, the Vietnamese mobile number and CCCD/CMND literal detectors, the NAPAS card range and the `bhxh`/`bhyt` identifier words. Phone and national ID numbers are found through names and schema hints; committed phone and ID values are no longer reported as literals (US SSNs still are).
 

@@ -101,4 +101,32 @@ class Constructs {
         // ruleid: log.jvm.stdout
         System.out.printf("%s %s%n", "user", email);
     }
+
+    void switchOverwrites(String email, int kind) {
+        String x = email;
+        switch (kind) {
+            case 1: x = "one"; break;
+            default: x = "other";
+        }
+        // ok: log.jvm.stdout
+        System.out.println(x);
+    }
+
+    void elseOverwrites(String email, boolean c) {
+        String x = email;
+        if (c) { x = "a"; } else { x = "b"; }
+        // ok: log.jvm.stdout
+        System.out.println(x);
+    }
+
+    void catchSeesEarlierValue(String email) {
+        String x = email;
+        try {
+            x = "cleared";
+            Integer.parseInt(x);
+        } catch (NumberFormatException e) {
+            // ruleid: log.jvm.stdout
+            System.out.println(x);
+        }
+    }
 }

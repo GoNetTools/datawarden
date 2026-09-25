@@ -14,7 +14,9 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"maps"
 	"path"
+	"slices"
 	"strings"
 
 	sitter "github.com/smacker/go-tree-sitter"
@@ -259,6 +261,121 @@ func (b *builder) declare(name, typ string, n *sitter.Node) ir.VarID {
 	return v
 }
 
+// redefine gives a local a new version for a plain assignment (x = v):
+// reads after it see the returned variable, reads before it keep the old
+// one, so a value that is overwritten no longer reaches later sinks. Inside
+// a lambda, which may run any number of times and at any time, the
+// assignment stays a weak update of the existing variable.
+func (b *builder) redefine(name string, old ir.VarID, typ string, n *sitter.Node) ir.VarID {
+	if len(b.assigns) > 0 || old == b.this {
+		b.noteAssign(old)
+		return old
+	}
+	if typ == "" {
+		typ = b.fn.Vars[old].Type
+	}
+	v := b.fn.Named(name, typ, b.pos(n))
+	b.scope[name] = v
+	return v
+}
+
+func (b *builder) snapshot() map[string]ir.VarID { return maps.Clone(b.scope) }
+
+// join merges the scopes at the ends of alternative paths: a name bound to
+// different versions gets a new version assigned from all of them. Names
+// bound on only some paths are kept (Python, JS var and a missed block
+// scope all leave them visible).
+func (b *builder) join(n *sitter.Node, paths ...map[string]ir.VarID) {
+	out := map[string]ir.VarID{}
+	versions := map[string][]ir.VarID{}
+	for _, p := range paths {
+		for name, v := range p {
+			if !slices.Contains(versions[name], v) {
+				versions[name] = append(versions[name], v)
+			}
+		}
+	}
+	for _, name := range slices.Sorted(maps.Keys(versions)) {
+		vs := versions[name]
+		if len(vs) == 1 {
+			out[name] = vs[0]
+			continue
+		}
+		phi := b.fn.Named(name, b.fn.Vars[vs[0]].Type, b.pos(n))
+		b.assign(phi, n, vs...)
+		out[name] = phi
+	}
+	b.scope = out
+}
+
+// branches lowers alternative paths (if/else arms, switch cases) from the
+// current scope and joins them. skippable adds the path that takes none of
+// them: an if without else, a switch without default.
+func (b *builder) branches(n *sitter.Node, skippable bool, arms ...func()) {
+	entry := b.snapshot()
+	var ends []map[string]ir.VarID
+	if skippable || len(arms) == 0 {
+		ends = append(ends, entry)
+	}
+	for _, arm := range arms {
+		b.scope = maps.Clone(entry)
+		arm()
+		ends = append(ends, b.scope)
+	}
+	b.join(n, ends...)
+}
+
+// loop lowers a loop body that may run zero or more times. A local the body
+// redefines gets a loop-header version that merges the value from before
+// the loop with the value from the end of the previous iteration; reads in
+// the body are rewritten to it, and it is the value after the loop.
+func (b *builder) loop(n *sitter.Node, body func()) {
+	entry := b.snapshot()
+	start := len(b.fn.Instrs)
+	body()
+	end := len(b.fn.Instrs)
+	rename := map[ir.VarID]ir.VarID{}
+	for _, name := range slices.Sorted(maps.Keys(entry)) {
+		pre := entry[name]
+		post, ok := b.scope[name]
+		if !ok || post == pre {
+			continue
+		}
+		h := b.fn.Named(name, b.fn.Vars[pre].Type, b.pos(n))
+		rename[pre] = h
+		b.scope[name] = h
+		// Emitted after the body, so the rewrite below leaves it alone.
+		b.assign(h, n, pre, post)
+	}
+	for i := start; i < end; i++ {
+		in := &b.fn.Instrs[i]
+		for j, a := range in.Args {
+			if h, ok := rename[a]; ok {
+				in.Args[j] = h
+			}
+		}
+	}
+}
+
+// tryCatch lowers try/catch/finally. A handler can start after any part of
+// the body ran, so it starts from the join of the scopes before and after
+// the body; the finally block runs after either.
+func (b *builder) tryCatch(n *sitter.Node, body func(), handlers []func(), finally func()) {
+	entry := b.snapshot()
+	body()
+	done := b.snapshot()
+	ends := []map[string]ir.VarID{done}
+	for _, h := range handlers {
+		b.join(n, entry, done)
+		h()
+		ends = append(ends, b.scope)
+	}
+	b.join(n, ends...)
+	if finally != nil {
+		finally()
+	}
+}
+
 func (b *builder) noteAssign(v ir.VarID) {
 	if len(b.assigns) > 0 {
 		b.assigns[len(b.assigns)-1] = append(b.assigns[len(b.assigns)-1], v)
@@ -384,6 +501,21 @@ func named(n *sitter.Node) []*sitter.Node {
 	out := make([]*sitter.Node, 0, cnt)
 	for i := 0; i < cnt; i++ {
 		out = append(out, n.NamedChild(i))
+	}
+	return out
+}
+
+// fieldChildren returns the children of n stored under a field name, for
+// fields that repeat (a for loop's init and update clauses).
+func fieldChildren(n *sitter.Node, field string) []*sitter.Node {
+	var out []*sitter.Node
+	if n == nil {
+		return nil
+	}
+	for i := 0; i < int(n.ChildCount()); i++ {
+		if n.FieldNameForChild(i) == field {
+			out = append(out, n.Child(i))
+		}
 	}
 	return out
 }

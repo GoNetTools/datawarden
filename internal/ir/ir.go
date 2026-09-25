@@ -6,8 +6,11 @@
 // reports only ever see this IR, never a language AST.
 //
 // The IR is deliberately tiny: functions own a flat list of variables and a
-// flat list of instructions. The analysis is flow-insensitive within a
-// function, so instruction order and control flow are not modelled.
+// flat list of instructions. Instruction order and control flow are not
+// modelled; the analysis is flow-insensitive within a function. Frontends
+// give each assignment to a local its own variable and merge the versions
+// where control flow joins (SSA form, with phis lowered to assign), so a
+// value that is overwritten does not reach reads after the overwrite.
 package ir
 
 import (

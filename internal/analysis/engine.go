@@ -3,7 +3,10 @@
 
 // Package analysis runs an inter-procedural taint analysis over IR.
 //
-// Each function is analyzed flow-insensitively to a fixpoint. Parameters
+// Each function is analyzed flow-insensitively to a fixpoint; order comes
+// from the frontends, which give every assignment its own variable (SSA
+// form). A variable named after personal data is a source unless it is a
+// new version of a same-named value (email = sha256(email)). Parameters
 // carry symbolic labels so that the same pass produces both concrete flows
 // (source and sink known) and a Summary that callers apply without
 // re-analyzing the callee. Functions are processed callees-first by
@@ -310,6 +313,7 @@ func isBoolOrFunc(t string) bool {
 }
 
 func (a *analyzer) seed(st *state, fn *ir.Func) {
+	redef := redefinitions(fn)
 	for i, pid := range fn.Params {
 		v := fn.Vars[pid]
 		st.add(pid, &fact{dt: "", param: i, src: v.Pos, desc: "parameter " + v.Name, path: []ir.Pos{v.Pos}, conf: 1})
@@ -320,7 +324,7 @@ func (a *analyzer) seed(st *state, fn *ir.Func) {
 			continue
 		}
 		vid := ir.VarID(id)
-		if v.Name != "" && !isBoolOrFunc(v.Type) {
+		if v.Name != "" && !isBoolOrFunc(v.Type) && !redef[vid] {
 			if m, ok := a.opts.Names.Ident(v.Name); ok {
 				f := &fact{dt: m.DataType, param: -1, src: v.Pos, desc: fmt.Sprintf("identifier %q", v.Name), path: []ir.Pos{v.Pos}, conf: m.Conf, seed: true}
 				if m.Transform != "" {
@@ -341,6 +345,53 @@ func (a *analyzer) seed(st *state, fn *ir.Func) {
 			}
 		}
 	}
+}
+
+// redefinitions marks variables whose value is computed from an earlier
+// variable of the same name: email = sha256(email), x = x.strip(), or the
+// merged version of x after an if. Such a variable is a new version of the
+// same source value, not a new source: whatever it holds reaches it through
+// its definition, transforms included, so it is not seeded by its name.
+// email = request.get("email") has no such dependency and is seeded.
+func redefinitions(fn *ir.Func) []bool {
+	defs := make([][]ir.VarID, len(fn.Vars))
+	for i := range fn.Instrs {
+		in := &fn.Instrs[i]
+		if in.Dst < 0 || int(in.Dst) >= len(fn.Vars) {
+			continue
+		}
+		switch in.Op {
+		case ir.OpAssign, ir.OpCall:
+			defs[in.Dst] = append(defs[in.Dst], in.Args...)
+		case ir.OpLoad:
+			if len(in.Args) > 0 {
+				defs[in.Dst] = append(defs[in.Dst], in.Args[0])
+			}
+		}
+	}
+	out := make([]bool, len(fn.Vars))
+	for id := range fn.Vars {
+		name := fn.Vars[id].Name
+		if name == "" || len(defs[id]) == 0 {
+			continue
+		}
+		seen := map[ir.VarID]bool{ir.VarID(id): true}
+		work := append([]ir.VarID(nil), defs[id]...)
+		for len(work) > 0 && len(seen) < 256 {
+			v := work[len(work)-1]
+			work = work[:len(work)-1]
+			if v < 0 || int(v) >= len(fn.Vars) || seen[v] {
+				continue
+			}
+			seen[v] = true
+			if fn.Vars[v].Name == name {
+				out[id] = true
+				break
+			}
+			work = append(work, defs[v]...)
+		}
+	}
+	return out
 }
 
 func shortType(t string) string {

@@ -492,8 +492,59 @@ func (pb *pyBuilder) stmt(n *sitter.Node) ir.VarID {
 		return ir.NoVar
 	}
 	switch n.Type() {
-	case "block", "module", "else_clause", "finally_clause", "elif_clause", "if_statement", "while_statement", "try_statement",
-		"match_statement", "case_clause", "decorated_definition":
+	case "if_statement":
+		pb.expr(n.ChildByFieldName("condition"))
+		arms := []func(){func() { pb.stmt(n.ChildByFieldName("consequence")) }}
+		skippable := true
+		for _, alt := range fieldChildren(n, "alternative") {
+			if alt.Type() == "else_clause" {
+				skippable = false
+				arms = append(arms, func() { pb.stmt(alt.ChildByFieldName("body")) })
+				continue
+			}
+			pb.expr(alt.ChildByFieldName("condition"))
+			arms = append(arms, func() { pb.stmt(alt.ChildByFieldName("consequence")) })
+		}
+		pb.branches(n, skippable, arms...)
+		return ir.NoVar
+	case "while_statement":
+		pb.loop(n, func() {
+			pb.expr(n.ChildByFieldName("condition"))
+			pb.stmt(n.ChildByFieldName("body"))
+		})
+		pb.stmt(n.ChildByFieldName("alternative"))
+		return ir.NoVar
+	case "try_statement":
+		var handlers []func()
+		var elseBody, finally *sitter.Node
+		for _, c := range named(n) {
+			switch c.Type() {
+			case "except_clause":
+				handlers = append(handlers, func() { pb.stmt(c) })
+			case "else_clause":
+				elseBody = c.ChildByFieldName("body")
+			case "finally_clause":
+				finally = c
+			}
+		}
+		pb.tryCatch(n, func() {
+			pb.stmt(n.ChildByFieldName("body"))
+			pb.stmt(elseBody)
+		}, handlers, func() { pb.stmt(finally) })
+		return ir.NoVar
+	case "match_statement":
+		pb.expr(n.ChildByFieldName("subject"))
+		var arms []func()
+		skippable := true
+		for _, c := range fieldChildren(n.ChildByFieldName("body"), "alternative") {
+			if p := firstOf(c, "case_pattern"); p != nil && pb.text(p) == "_" && c.ChildByFieldName("guard") == nil {
+				skippable = false // case _: always matches
+			}
+			arms = append(arms, func() { pb.stmt(c.ChildByFieldName("consequence")) })
+		}
+		pb.branches(n, skippable, arms...)
+		return ir.NoVar
+	case "block", "module", "else_clause", "finally_clause", "decorated_definition":
 		last := ir.NoVar
 		for _, c := range named(n) {
 			last = pb.stmt(c)
@@ -514,8 +565,10 @@ func (pb *pyBuilder) stmt(n *sitter.Node) ir.VarID {
 		return ir.NoVar
 	case "for_statement":
 		iter := pb.expr(n.ChildByFieldName("right"))
-		pb.bind(n.ChildByFieldName("left"), iter)
-		pb.stmt(n.ChildByFieldName("body"))
+		pb.loop(n, func() {
+			pb.bind(n.ChildByFieldName("left"), iter)
+			pb.stmt(n.ChildByFieldName("body"))
+		})
 		pb.stmt(n.ChildByFieldName("alternative"))
 		return ir.NoVar
 	case "except_clause":
@@ -572,12 +625,13 @@ func (pb *pyBuilder) bind(t *sitter.Node, v ir.VarID) {
 	switch t.Type() {
 	case "identifier":
 		name := pb.text(t)
-		dst, ok := pb.scope[name]
-		if !ok {
+		var dst ir.VarID
+		if old, ok := pb.scope[name]; ok {
+			dst = pb.redefine(name, old, "", t)
+		} else {
 			dst = pb.declare(name, "", t)
 		}
 		pb.assign(dst, t, v)
-		pb.noteAssign(dst)
 	case "pattern_list", "tuple_pattern", "list_pattern", "tuple", "list", "expression_list":
 		for _, c := range named(t) {
 			pb.bind(c, v)

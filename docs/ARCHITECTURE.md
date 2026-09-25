@@ -242,6 +242,7 @@ classDiagram
 ```
 
 - **Five operations.** `assign` (copies, concatenation, conversions, container construction), `load` and `store` (fields and constant map keys), `call`, `return`. Anything else a language has lowers to these.
+- **One variable per assignment (SSA form).** Instructions are unordered, so order is encoded in the variables instead. Assigning to a local creates a new variable with the same name; later reads use it, earlier reads keep the old one. Where paths join (after `if`/`else`, `switch`, `when`, `match`, `try`/`catch`) a name bound to different versions gets a merged version assigned from all of them; a loop gives each variable its body changes a loop-header version, fed from before the loop and from the end of the body. Go gets this from `x/tools/go/ssa`; the tree-sitter frontends use the shared helpers in `internal/frontend/treesitter/common.go` (`redefine`, `branches`, `loop`, `tryCatch`). Inside lambdas an assignment still updates the variable in place, since the lambda may run at any time.
 - **Callee names are qualified** the way rules are written: `importpath.Type.Method` for Go, `package.Class.method` for Kotlin/Java, `<module>.<export>` for TypeScript, `<module>.<name>` for Python, the type as written for Swift. `Target` is set when the callee is code datawarden analyses, so its summary can be applied.
 - **Positions are slash-separated and root-relative** on every platform.
 
@@ -286,7 +287,7 @@ A data type that is not in the taxonomy (a custom type named by a repository's s
 
 `analysis.Engine` works per function and composes results through summaries.
 
-1. **Seeding.** A variable becomes a source when its name classifies as personal data (`phoneNumber`, not `phoneFormatter`), when its type has personal-data fields (a `User` value), when it is loaded from a field the schema marks, when it is stored under a key that names it (`{"email": v}`), when it comes from a getter (`getEmail()`), or when a source rule matches the call that produced it.
+1. **Seeding.** A variable becomes a source when its name classifies as personal data (`phoneNumber`, not `phoneFormatter`) and it is not a new version of a same-named value (`email = sha256(email)` carries whatever its definition carries, the hash included), when its type has personal-data fields (a `User` value), when it is loaded from a field the schema marks, when it is stored under a key that names it (`{"email": v}`), when it comes from a getter (`getEmail()`), or when a source rule matches the call that produced it.
 2. **Propagation.** Facts flow through assignments, field stores and loads, calls and returns. Unknown library calls pass their arguments' facts to the result, with a small confidence decay; transform rules and names like `maskEmail` record a transform instead. Network sinks are the exception: their result is the remote's response, not the request, so a login call's reply does not carry the password.
 3. **Summaries.** Each function gets a summary: which parameter reaches which sink, the return value, or another parameter. Callers apply the summaries of their callees; strongly connected components (recursion) iterate to a fixed point. This is how a value is followed through helpers several calls deep.
 4. **Flows.** When a fact reaches a sink argument, a flow is emitted with confidence = source × propagation × rule match.
@@ -309,7 +310,7 @@ The cache stores function summaries, the call graph and schema declarations keye
 | To add | Do this | Guarded by |
 |---|---|---|
 | **A rule** for an SDK | YAML entry in `internal/rules/builtin/` (or `.datawarden/rules/` in your repository), plus an annotated example | `TestBuiltinRuleConventions`, `TestRuleExamples`, `datawarden rules test` |
-| **A language** | entry in `internal/lang`, a frontend, registration in `app.NewComponents`, the 15 conformance programs, rules with examples | `TestEveryLanguageIsWired`, `TestFrontendConformance`, `TestRuleExamples` |
+| **A language** | entry in `internal/lang`, a frontend, registration in `app.NewComponents`, the 19 conformance programs, rules with examples | `TestEveryLanguageIsWired`, `TestFrontendConformance`, `TestRuleExamples` |
 | **A data type, a class or a secret pattern** | an entry in `internal/detect/builtin/datatypes.yaml`, cases in `detect_test.go` or `secrets_test.go`, a labelled leak in a fixture | `TestBuiltinTaxonomy`, `TestTaxonomyValidation`, `TestBuiltinRuleConventions` (source rules must use known types), `datawarden-bench -check` |
 | **A negative-context or transform word** | `internal/detect/names.go` | `detect_test.go` |
 | **An output format** | a case in `report.Write` (or a new `Reporter` implementation wired in `app`) | report tests |
@@ -322,14 +323,14 @@ The full checklists for rules and languages are in [CONTRIBUTING](../CONTRIBUTIN
 
 ```mermaid
 flowchart LR
-    U["Unit tests<br/>fakes, fstest.MapFS,<br/>httptest"] --> C["Contract tests<br/>rule examples (all 123 rules)<br/>frontend conformance (15 × 6)"]
+    U["Unit tests<br/>fakes, fstest.MapFS,<br/>httptest"] --> C["Contract tests<br/>rule examples (all 123 rules)<br/>frontend conformance (19 × 6)"]
     C --> E["End-to-end<br/>fixtures through the real app"]
     E --> A["Accuracy<br/>labelled corpus:<br/>precision / recall / F1"]
     S["Structure tests<br/>architecture, wiring,<br/>rule conventions, language table"] -.-> U
 ```
 
 - **Unit tests** exercise each component with fakes of its interfaces: the CLI with an in-memory workspace and a fake scanner, the scanner with fake frontends and analyzer, the engine with a fake rule matcher.
-- **Contract tests** run real code through the full scan. Every built-in rule has an annotated example (`internal/rules/testdata/examples/`). Every frontend implements the same 15 conformance scenarios (`internal/frontend/testdata/conformance/`). Known gaps are marked `todoruleid:`, and the test fails once one is fixed, so the list stays accurate.
+- **Contract tests** run real code through the full scan. Every built-in rule has an annotated example (`internal/rules/testdata/examples/`). Every frontend implements the same 19 conformance scenarios (`internal/frontend/testdata/conformance/`). Known gaps are marked `todoruleid:`, and the test fails once one is fixed, so the list stays accurate.
 - **End-to-end tests** scan the fixtures in `testdata/` with the production wiring.
 - **Accuracy** is measured on the labelled corpus (`testdata/eval.yaml`, including the vulnerable-by-design `testdata/vulnshop`). CI fails when a case drops below its minimum precision or recall.
 - **Structure tests** keep the architecture from eroding: interface-only communication, every language wired, rule conventions, a consistent language table.

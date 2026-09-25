@@ -263,3 +263,28 @@ func TestCachedSummaryOfUnchangedCallee(t *testing.T) {
 		t.Errorf("flows: %+v", res.Flows)
 	}
 }
+
+// email = digest(email); email = request.get("email"): a redefinition
+// computed from the same name is not a new source, a fresh read is.
+func TestRedefinitions(t *testing.T) {
+	f := &ir.Func{ID: "p.f", Name: "f", Lang: "python", File: "a.py"}
+	old := f.AddParam("email", "", pos(1))
+	t1 := f.Temp(pos(2))
+	f.Emit(ir.Instr{Op: ir.OpCall, Dst: t1, Args: []ir.VarID{old}, Call: &ir.Call{Name: "digest"}, Pos: pos(2)})
+	hashed := f.Named("email", "", pos(2))
+	f.Assign(hashed, pos(2), t1)
+	req := f.Named("request", "", pos(3))
+	key := f.ConstVar("email", pos(3))
+	fresh := f.Named("email", "", pos(3))
+	f.Emit(ir.Instr{Op: ir.OpCall, Dst: fresh, Args: []ir.VarID{req, key}, Call: &ir.Call{Name: "get", HasRecv: true}, Pos: pos(3)})
+	loop := f.Named("email", "", pos(4))
+	f.Assign(loop, pos(4), loop, fresh) // a loop header merging itself
+
+	got := redefinitions(f)
+	want := map[ir.VarID]bool{old: false, hashed: true, fresh: false, loop: true, t1: false, req: false}
+	for v, w := range want {
+		if got[v] != w {
+			t.Errorf("var %d (%s): redefinition = %v, want %v", v, f.Vars[v].Name, got[v], w)
+		}
+	}
+}

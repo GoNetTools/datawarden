@@ -130,3 +130,36 @@ def not_pii(u: User, order_id: str, count: int):
 def negative_context(phone_count: int, email_template: str):
     # ok: log.py.print
     print(phone_count, email_template)
+
+
+# scenario: overwritten
+def overwritten(email: str):
+    x = email
+    x = "anonymous"
+    # ok: log.py.print
+    print(x)
+
+
+# scenario: remasked
+def remasked(email: str):
+    email = mask_email(email)
+    # ok: log.py.print
+    print(email)
+
+
+# scenario: branch-merge
+def branch_merge(email: str, verbose: bool):
+    x = "anonymous"
+    if verbose:
+        x = email
+    # ruleid: log.py.print
+    print(x)
+
+
+# scenario: loop-carried
+def loop_carried(email: str, items: list):
+    x = "anonymous"
+    for _ in items:
+        # ruleid: log.py.print
+        print(x)
+        x = email

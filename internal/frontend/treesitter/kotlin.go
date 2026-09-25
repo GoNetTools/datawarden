@@ -576,21 +576,25 @@ func (kb *ktBuilder) stmt(n *sitter.Node) ir.VarID {
 				iter = kb.expr(c)
 			}
 		}
-		for _, vd := range vars {
-			id := firstOf(vd, "simple_identifier")
-			dst := kb.declare(kb.text(id), kb.kp.resolveType(kb.f, ktTypeText(kb.f, ktTypeChild(vd))), id)
-			kb.assign(dst, vd, iter)
-		}
-		kb.block(body)
+		kb.loop(n, func() {
+			for _, vd := range vars {
+				id := firstOf(vd, "simple_identifier")
+				dst := kb.declare(kb.text(id), kb.kp.resolveType(kb.f, ktTypeText(kb.f, ktTypeChild(vd))), id)
+				kb.assign(dst, vd, iter)
+			}
+			kb.block(body)
+		})
 		return ir.NoVar
 	case "while_statement", "do_while_statement":
-		for _, c := range named(n) {
-			if c.Type() == "control_structure_body" {
-				kb.block(c)
-			} else {
-				kb.expr(c)
+		kb.loop(n, func() {
+			for _, c := range named(n) {
+				if c.Type() == "control_structure_body" {
+					kb.block(c)
+				} else {
+					kb.expr(c)
+				}
 			}
-		}
+		})
 		return ir.NoVar
 	case "function_declaration":
 		// Local function: lower its body inline with its parameters as locals.
@@ -623,13 +627,13 @@ func (kb *ktBuilder) assignment(n *sitter.Node) {
 	switch {
 	case len(tk) == 1 && tk[0].Type() == "simple_identifier":
 		name := kb.text(tk[0])
-		if dst, ok := kb.scope[name]; ok {
+		if old, ok := kb.scope[name]; ok {
+			dst := kb.redefine(name, old, "", tk[0])
 			if augmented {
-				kb.assign(dst, n, dst, v)
+				kb.assign(dst, n, old, v)
 			} else {
 				kb.assign(dst, n, v)
 			}
-			kb.noteAssign(dst)
 			return
 		}
 		if kb.cls != nil && kb.this != ir.NoVar {
@@ -788,7 +792,7 @@ func (kb *ktBuilder) expr(n *sitter.Node) ir.VarID {
 			return kb.emitCall(n, &ir.Call{Name: op, HasRecv: true, RecvText: trimText(kb.text(kids[0]))}, []ir.VarID{l, r}, "")
 		}
 	case "if_expression", "when_expression", "try_expression":
-		return kb.branches(n)
+		return kb.conditional(n)
 	case "lambda_literal", "annotated_lambda":
 		return kb.lambdaLit(n)
 	case "anonymous_function":
@@ -840,37 +844,89 @@ func (kb *ktBuilder) expr(n *sitter.Node) ir.VarID {
 	return dst
 }
 
-func (kb *ktBuilder) branches(n *sitter.Node) ir.VarID {
-	var vals []ir.VarID
-	var visit func(c *sitter.Node)
-	visit = func(c *sitter.Node) {
-		switch c.Type() {
-		case "control_structure_body", "statements", "block":
-			vals = append(vals, kb.block(c))
-		case "when_entry", "catch_block", "finally_block", "when_subject":
-			for _, k := range named(c) {
-				visit(k)
+// conditional lowers if, when and try expressions: each arm is a separate
+// path from the scope before it, and the expression's value is the value of
+// whichever arm ran.
+func (kb *ktBuilder) conditional(n *sitter.Node) ir.VarID {
+	result := kb.temp(n)
+	arm := func(body *sitter.Node) func() {
+		return func() { kb.assign(result, body, kb.block(body)) }
+	}
+	switch n.Type() {
+	case "if_expression":
+		var arms []func()
+		for _, c := range named(n) {
+			if c.Type() == "control_structure_body" {
+				arms = append(arms, arm(c))
+			} else {
+				kb.expr(c)
 			}
-		case "when_condition":
-			for _, k := range named(c) {
-				kb.expr(k)
-			}
-		case "simple_identifier", "user_type", "type_identifier":
-			if c.Parent() != nil && c.Parent().Type() == "catch_block" {
-				kb.declare(kb.text(c), "", c)
-				return
-			}
-			kb.expr(c)
-		default:
-			kb.expr(c)
 		}
+		kb.branches(n, len(arms) < 2, arms...)
+	case "when_expression":
+		var arms []func()
+		exhaustive := false
+		for _, c := range named(n) {
+			switch c.Type() {
+			case "when_subject":
+				var vd *sitter.Node
+				for _, k := range named(c) {
+					if k.Type() == "variable_declaration" {
+						vd = k
+						continue
+					}
+					v := kb.expr(k)
+					if vd != nil {
+						id := firstOf(vd, "simple_identifier")
+						kb.assign(kb.declare(kb.text(id), "", id), k, v)
+					}
+				}
+			case "when_entry":
+				conds := allOf(c, "when_condition")
+				for _, cond := range conds {
+					for _, k := range named(cond) {
+						kb.expr(k)
+					}
+				}
+				if len(conds) == 0 {
+					exhaustive = true
+				}
+				if body := firstOf(c, "control_structure_body"); body != nil {
+					arms = append(arms, arm(body))
+				}
+			}
+		}
+		kb.branches(n, !exhaustive, arms...)
+	case "try_expression":
+		var body *sitter.Node
+		var handlers []func()
+		var finally func()
+		for _, c := range named(n) {
+			switch c.Type() {
+			case "catch_block":
+				handlers = append(handlers, func() {
+					if id := firstOf(c, "simple_identifier"); id != nil {
+						kb.declare(kb.text(id), "", id)
+					}
+					if b := firstOf(c, "statements"); b != nil {
+						kb.assign(result, b, kb.block(b))
+					}
+				})
+			case "finally_block":
+				finally = func() { kb.block(firstOf(c, "statements")) }
+			default:
+				if body == nil {
+					body = c
+				}
+			}
+		}
+		kb.tryCatch(n, func() {
+			if body != nil {
+				kb.assign(result, body, kb.block(body))
+			}
+		}, handlers, finally)
 	}
-	for _, c := range named(n) {
-		visit(c)
-	}
-	dst := kb.temp(n)
-	kb.assign(dst, n, vals...)
-	return dst
+	return result
 }
 
 func (kb *ktBuilder) lambdaLit(n *sitter.Node) ir.VarID {

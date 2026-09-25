@@ -346,7 +346,8 @@ Without the framework: `cp scripts/pre-commit .git/hooks/pre-commit` (runs `data
 
 datawarden favours explainable, low-noise results over completeness. Every finding has a confidence score and a source description; `policy.min_confidence` and `min_confidence` tune the trade-off.
 
-- The analysis is flow-insensitive inside a function and field-sensitive only for direct stores/loads. Objects are tracked through summaries, not heap models.
+- Each assignment to a local variable is its own version (SSA form), and versions are merged after `if`/`else`, `switch`/`when`/`match`, loops and `try`/`catch`, so a value that is overwritten (`x = "anonymous"`, `email = mask(email)`) no longer reaches later sinks. Conditions are not evaluated: both arms of an `if` are assumed possible. Assignments inside lambdas and closures, which may run at any time, still update the variable everywhere.
+- The analysis is field-sensitive only for direct stores/loads. Objects are tracked through summaries, not heap models.
 - Go interface calls are matched by the interface method (rules can target `io.Writer.Write`); implementations are not enumerated.
 - Python/Java/Kotlin/Swift/TypeScript resolution is syntactic: no type inference across generics, overloads share an ID, reflection/DI-provided instances resolve only through declared types or receiver-name rules.
 - Dynamic destinations (URLs built at runtime) show up as `network (unknown host)`.

@@ -116,3 +116,39 @@ fun negativeContext(phoneCount: Int, emailTemplate: String) {
     // ok: log.jvm.stdout
     println("$phoneCount $emailTemplate")
 }
+
+// scenario: overwritten
+fun overwritten(email: String) {
+    var x = email
+    x = "anonymous"
+    // ok: log.jvm.stdout
+    println(x)
+}
+
+// scenario: remasked
+fun remasked(email: String) {
+    var userEmail = email
+    userEmail = maskEmail(userEmail)
+    // ok: log.jvm.stdout
+    println(userEmail)
+}
+
+// scenario: branch-merge
+fun branchMerge(email: String, verbose: Boolean) {
+    var x = "anonymous"
+    if (verbose) {
+        x = email
+    }
+    // ruleid: log.jvm.stdout
+    println(x)
+}
+
+// scenario: loop-carried
+fun loopCarried(email: String, items: List<String>) {
+    var x = "anonymous"
+    for (item in items) {
+        // ruleid: log.jvm.stdout
+        println(x)
+        x = email
+    }
+}

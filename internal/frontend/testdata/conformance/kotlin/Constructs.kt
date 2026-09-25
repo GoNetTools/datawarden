@@ -105,3 +105,33 @@ fun lambdaValue(email: String) {
     }
     printer(email)
 }
+
+fun whenOverwrites(email: String, kind: Int) {
+    var x = email
+    when (kind) {
+        1 -> x = "one"
+        else -> x = "other"
+    }
+    // ok: log.jvm.stdout
+    println(x)
+}
+
+fun whenPartial(email: String, kind: Int) {
+    var x = "anonymous"
+    when (kind) {
+        1 -> x = email
+    }
+    // ruleid: log.jvm.stdout
+    println(x)
+}
+
+fun catchSeesEarlierValue(email: String) {
+    var x = email
+    try {
+        x = "cleared"
+        x.toInt()
+    } catch (e: NumberFormatException) {
+        // ruleid: log.jvm.stdout
+        println(x)
+    }
+}
