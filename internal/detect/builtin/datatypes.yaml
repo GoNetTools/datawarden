@@ -17,7 +17,7 @@
 classes:
   - id: pii
     label: Personal data
-    description: Information about an identified or identifiable person (GDPR, CCPA, Vietnam Decree 13/2023/ND-CP).
+    description: Information about an identified or identifiable person (GDPR, CCPA and similar laws).
   - id: phi
     label: Protected health information
     description: Health data linked to a person (HIPAA, GDPR art. 9).

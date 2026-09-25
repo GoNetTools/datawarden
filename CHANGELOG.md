@@ -8,7 +8,7 @@ All notable changes to datawarden are documented here. The format follows [Keep 
 
 - `datawarden scan` with full, path, PR (`--diff <ref>`, changed files plus their callers from the cached call graph) and pre-commit (`--literals-only`, `--staged`) modes. Exit codes: 0 clean, 1 new violation, 2 error.
 - Frontends lowering to a shared IR: Go (`go/packages` + SSA), Kotlin, Java and TypeScript/JavaScript (tree-sitter).
-- Source detectors: identifier names (`phoneNumber`, `dateOfBirth`, `fullName`, `cccd`, …), schema hints (Go struct tags and GORM, JPA/Room/Gson/Moshi, TypeORM, protobuf, SQL migrations, explicit `pii` annotations) and validated literal values (Vietnamese mobile numbers, CCCD/CMND, cards with Luhn and NAPAS, IBAN, SSN, email).
+- Source detectors: identifier names (`phoneNumber`, `dateOfBirth`, `fullName`, `ssn`, …), schema hints (Go struct tags and GORM, JPA/Room/Gson/Moshi, TypeORM, protobuf, SQL migrations, explicit `pii` annotations) and validated literal values (phone numbers, national IDs, cards with Luhn, IBAN, SSN, email).
 - 89 embedded sink, source and transform rules for logging, crash reporting, analytics, HTTP clients, storage and IPC, overridable per repository.
 - Interprocedural taint analysis with function summaries cached by file content hash.
 - Baseline with line-independent fingerprints (data type, sink rule, destination, enclosing function).
@@ -25,6 +25,8 @@ All notable changes to datawarden are documented here. The format follows [Keep 
 - `--cpuprofile` and `--memprofile` on `scan`, `baseline` and `map`, and Go benchmarks for the taint engine, the detectors and end-to-end fixture scans.
 
 ### Changed
+
+- The README and generated files (`datawarden init`, DPIA text, SARIF help) no longer refer to one country's laws or formats; the detectors are unchanged.
 
 - Renamed from piiflow to **datawarden**: the command is `datawarden` (and `datawarden-bench`), configuration lives in `.datawarden.yaml`, `.datawardenignore` and `.datawarden/`, the image is `ghcr.io/gonettools/datawarden`, release archives are `datawarden_<os>_<arch>`, and the GitLab token variable is `DATAWARDEN_GITLAB_TOKEN`. The Go module path and the GitHub Action reference keep the repository name (`GoNetTools/pii-scanner`) until the repository is renamed. SARIF rule names are `SensitiveDataFlow…` and `CommittedSensitiveValue…`.
 - The taxonomy moved from Go code to `internal/detect/builtin/datatypes.yaml`, read strictly and validated; adding a data type, a class or a secret pattern is a YAML change. High severity for identity documents comes from the taxonomy (`severity: high`) instead of a hard-coded list.

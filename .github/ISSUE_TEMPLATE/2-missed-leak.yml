@@ -36,7 +36,7 @@ body:
     id: datatype
     attributes:
       label: Expected data type
-      description: "For example: phone, email, vn_cccd, full_name, address."
+      description: "For example: phone, email, national_id, api_key, address."
   - type: checkboxes
     id: data
     attributes:

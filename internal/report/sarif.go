@@ -172,7 +172,7 @@ func SARIF(w io.Writer, r *Report) error {
 				ID: id, Name: "CommittedSensitiveValue" + camel(l.DataType),
 				ShortDescription:     sarifText{Text: dt.Label + " committed to the repository"},
 				FullDescription:      sarifText{Text: "A value that validates as " + strings.ToLower(dt.Label) + " is stored in the repository. Replace real personal data and live secrets in fixtures and samples with synthetic values."},
-				Help:                 sarifText{Text: "Replace the value with synthetic test data (for Vietnamese phone numbers and CCCD numbers, generate values that fail validation or use documented test ranges). If it is intentional, accept it with `datawarden baseline`."},
+				Help:                 sarifText{Text: "Replace the value with synthetic test data (for phone and ID numbers, generate values that fail validation or use documented test ranges; for secrets, revoke the key and load it from a secret store). If it is intentional, accept it with `datawarden baseline`."},
 				DefaultConfiguration: map[string]any{"level": level(l.Severity, false)},
 				Properties:           map[string]any{"tags": []string{"security", "privacy", classTag(l.Class)}, "security-severity": securitySeverity[l.Severity], "precision": "high"},
 			}

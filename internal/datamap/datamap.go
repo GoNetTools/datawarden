@@ -4,9 +4,8 @@
 // Package datamap turns flows and schema hints into a personal-data
 // inventory: what is collected, where it is stored, who receives it. The
 // "dpia" format is a Markdown document laid out to seed a Data Protection
-// Impact Assessment (GDPR art. 35) or the processing impact assessment
-// required by Vietnamese personal data protection rules (Decree
-// 13/2023/ND-CP and the 2025 Law on Personal Data Protection).
+// Impact Assessment (GDPR art. 35) or a comparable privacy impact
+// assessment under other data protection laws.
 package datamap
 
 import (
@@ -245,7 +244,7 @@ func dpia(w io.Writer, m *Map) error {
 	if m.Commit != "" {
 		fmt.Fprintf(&b, " from commit `%s`", shortSHA(m.Commit))
 	}
-	b.WriteString(".\n\nThis inventory is derived from static analysis of the source code. It lists the personal data the code handles, where it is persisted and which systems receive it. It is a starting point for a Data Protection Impact Assessment (GDPR art. 35) or the impact assessment dossier required by Vietnamese personal data protection rules (Decree 13/2023/ND-CP, Law on Personal Data Protection 2025), not a substitute for one: purposes, legal bases, retention periods and data subjects must be filled in by the product owner.\n\n")
+	b.WriteString(".\n\nThis inventory is derived from static analysis of the source code. It lists the personal data the code handles, where it is persisted and which systems receive it. It is a starting point for a Data Protection Impact Assessment (GDPR art. 35) or a comparable privacy impact assessment, not a substitute for one: purposes, legal bases, retention periods and data subjects must be filled in by the product owner.\n\n")
 
 	b.WriteString("## 1. Personal data processed\n\n| Data | Class | Category | Sensitive | Stored in | Sent to | Seen as |\n|---|---|---|---|---|---|---|\n")
 	var creds []string
@@ -277,7 +276,7 @@ func dpia(w io.Writer, m *Map) error {
 		}
 		fmt.Fprintf(&b, "| %s | %s | %s | %s | %s | %d | %d |\n", recipientName(r), kindText[r.Kind], orDash(r.Host), strings.Join(r.DataTypes, ", "), safe, r.Flows, r.Violations)
 	}
-	b.WriteString("\nFor each third-party processor, record the contract/DPA, the processing region and whether the transfer is cross-border; Vietnamese rules require a separate impact assessment for transferring personal data abroad.\n\n")
+	b.WriteString("\nFor each third-party processor, record the contract/DPA, the processing region and whether the transfer is cross-border; many data protection laws require a transfer mechanism or a separate assessment for sending personal data abroad.\n\n")
 
 	b.WriteString("## 3. Data at rest\n\n")
 	if len(m.Stores) == 0 {
