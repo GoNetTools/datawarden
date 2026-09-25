@@ -42,6 +42,8 @@ var conformanceScenarios = map[string]string{
 	"remasked":         "a variable reassigned to its own masked value (ok)",
 	"branch-merge":     "assigned on one branch of an if, the data reaches a sink after the if",
 	"loop-carried":     "assigned late in a loop body, the data reaches a sink early in the next iteration",
+	"mutated-later":    "an object logged before personal data is added to it (ok)",
+	"early-return":     "a value assigned on a path that returns does not reach the code after it (ok)",
 }
 
 var scenarioRe = regexp.MustCompile(`(?m)^\s*(?://+|#+)\s*scenario:\s*([a-z-]+)\s*$`)

@@ -166,4 +166,25 @@ class Conformance {
             x = email;
         }
     }
+
+    // scenario: mutated-later
+    void mutatedLater(String email) {
+        List<String> xs = new ArrayList<>();
+        // ok: log.jvm.stdout
+        System.out.println(xs);
+        xs.add(email);
+    }
+
+    // scenario: early-return
+    void earlyReturn(String email, boolean invalid) {
+        String x = "anonymous";
+        if (invalid) {
+            x = email;
+            // ruleid: log.jvm.stdout
+            System.out.println(x);
+            return;
+        }
+        // ok: log.jvm.stdout
+        System.out.println(x);
+    }
 }

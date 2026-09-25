@@ -152,3 +152,24 @@ fun loopCarried(email: String, items: List<String>) {
         x = email
     }
 }
+
+// scenario: mutated-later
+fun mutatedLater(email: String) {
+    val xs = mutableListOf<String>()
+    // ok: log.jvm.stdout
+    println(xs)
+    xs.add(email)
+}
+
+// scenario: early-return
+fun earlyReturn(email: String, invalid: Boolean) {
+    var x = "anonymous"
+    if (invalid) {
+        x = email
+        // ruleid: log.jvm.stdout
+        println(x)
+        return
+    }
+    // ok: log.jvm.stdout
+    println(x)
+}

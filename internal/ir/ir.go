@@ -6,15 +6,25 @@
 // reports only ever see this IR, never a language AST.
 //
 // The IR is deliberately tiny: functions own a flat list of variables and a
-// flat list of instructions. Instruction order and control flow are not
-// modelled; the analysis is flow-insensitive within a function. Frontends
-// give each assignment to a local its own variable and merge the versions
-// where control flow joins (SSA form, with phis lowered to assign), so a
-// value that is overwritten does not reach reads after the overwrite.
+// flat list of instructions. Together with the control-flow graph and the
+// def-use edges of its variables it forms a small code property graph:
+//
+//   - Data flow: frontends give each assignment to a local its own variable
+//     and merge the versions where control flow joins (SSA form, with phis
+//     lowered to assign), so a value that is overwritten does not reach
+//     reads after the overwrite.
+//   - Control flow: Blocks lists the basic blocks and their successors, and
+//     every instruction names its block. Within a block, instructions run
+//     in slice order. The analysis uses it to order mutations of objects
+//     (field stores, list.add) against the sinks that read them.
+//
+// A function without Blocks has no control-flow information; the analysis
+// then treats every mutation as visible everywhere in the function.
 package ir
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 )
 
@@ -104,6 +114,19 @@ type Instr struct {
 	Owner string `json:"owner,omitempty"`
 	Call  *Call  `json:"call,omitempty"`
 	Pos   Pos    `json:"pos"`
+	// Block is the index of the basic block (Func.Blocks) holding the
+	// instruction.
+	Block int32 `json:"block,omitempty"`
+}
+
+// Block is a basic block of the control-flow graph.
+type Block struct {
+	// Succs are the blocks control may pass to at the end of this one.
+	Succs []int32 `json:"succs,omitempty"`
+	// Floating marks code with no fixed place in the function's order: the
+	// body of a lambda or closure, which may run when it is created, later
+	// or never. It is ordered neither before nor after anything else.
+	Floating bool `json:"floating,omitempty"`
 }
 
 // Call describes the callee of an OpCall.
@@ -142,6 +165,11 @@ type Func struct {
 	Params []VarID `json:"params"` // receiver first for methods
 	Vars   []Var   `json:"vars"`
 	Instrs []Instr `json:"instrs"`
+	// Blocks is the control-flow graph; block 0 is the entry. Empty when
+	// the frontend provides no control flow.
+	Blocks []Block `json:"blocks,omitempty"`
+
+	cur int32 // block that Emit appends to
 }
 
 // NewVar appends a variable and returns its ID. Callers must set v.Param to
@@ -174,8 +202,37 @@ func (f *Func) AddParam(name, typ string, pos Pos) VarID {
 	return id
 }
 
-// Emit appends an instruction.
-func (f *Func) Emit(in Instr) { f.Instrs = append(f.Instrs, in) }
+// Emit appends an instruction to the current block.
+func (f *Func) Emit(in Instr) {
+	in.Block = f.cur
+	f.Instrs = append(f.Instrs, in)
+}
+
+// NewBlock adds a basic block with edges from the given blocks and makes it
+// the current block.
+func (f *Func) NewBlock(floating bool, preds ...int32) int32 {
+	b := int32(len(f.Blocks))
+	f.Blocks = append(f.Blocks, Block{Floating: floating})
+	for _, p := range preds {
+		f.Edge(p, b)
+	}
+	f.cur = b
+	return b
+}
+
+// Edge adds a control-flow edge.
+func (f *Func) Edge(from, to int32) {
+	if int(from) >= len(f.Blocks) || int(to) >= len(f.Blocks) || slices.Contains(f.Blocks[from].Succs, to) {
+		return
+	}
+	f.Blocks[from].Succs = append(f.Blocks[from].Succs, to)
+}
+
+// CurBlock is the block that Emit appends to.
+func (f *Func) CurBlock() int32 { return f.cur }
+
+// SetBlock makes b the block that Emit appends to.
+func (f *Func) SetBlock(b int32) { f.cur = b }
 
 // Assign emits Dst = Args...
 func (f *Func) Assign(dst VarID, pos Pos, args ...VarID) {

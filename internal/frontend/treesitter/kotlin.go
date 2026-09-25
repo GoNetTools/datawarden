@@ -604,9 +604,11 @@ func (kb *ktBuilder) stmt(n *sitter.Node) ir.VarID {
 			}
 		}
 		if body := firstOf(n, "function_body"); body != nil {
-			for _, k := range named(body) {
-				kb.block(k)
-			}
+			kb.floatingRegion(func() {
+				for _, k := range named(body) {
+					kb.block(k)
+				}
+			})
 		}
 		return ir.NoVar
 	case "class_declaration", "object_declaration", "type_alias", "line_comment", "multiline_comment":

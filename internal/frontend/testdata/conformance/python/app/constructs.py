@@ -247,3 +247,25 @@ def augmented(email: str):
     x += email
     # ruleid: log.py.print
     print(x)
+
+
+class Draft:
+    def __init__(self):
+        self.note = ""
+
+
+def store_order(email: str):
+    d = Draft()
+    # ok: log.py.print
+    print(d)
+    d.note = email
+    # ruleid: log.py.print
+    print(d)
+
+
+def alias_sees_mutation(email: str):
+    xs = []
+    view = xs
+    xs.append(email)
+    # ruleid: log.py.print
+    print(view)
