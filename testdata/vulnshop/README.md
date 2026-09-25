@@ -1,6 +1,6 @@
 # vulnshop: vulnerable by design
 
-A small online shop that leaks personal data on purpose, so you can see what datawarden reports. **Do not copy this code.** All personal data in it is synthetic.
+A small online shop that leaks personal data, health data and credentials on purpose, so you can see what datawarden reports. **Do not copy this code.** All personal data and secrets in it are synthetic.
 
 | Part | Path | Language |
 |---|---|---|
@@ -8,6 +8,7 @@ A small online shop that leaks personal data on purpose, so you can see what dat
 | Checkout page | `web/src/checkout.ts` | TypeScript |
 | Android app | `android/.../checkout/CheckoutActivity.kt`, `android/.../profile/ProfileSync.java` | Kotlin, Java |
 | Seed data | `seed/customers.csv` | CSV |
+| Deployment settings | `backend/deploy/staging.env` | env file |
 
 In the sources, `// LEAK:` marks a planted leak and `// SAFE:` marks a look-alike that must **not** be reported. The answer key used for scoring is the `vulnshop` case in [`../eval.yaml`](../eval.yaml).
 
@@ -51,12 +52,16 @@ Or on GitHub: **Actions → demo → Run workflow**. The job summary shows the f
 | 26 | Email in an implicit broadcast | `ProfileSync.publish` | `ipc.android.broadcast` |
 | 27 | Date of birth in logcat | `ProfileSync.publish` | `log.android.logcat` |
 | 28–32 | Phone, email, CCCD, card and IBAN committed in seed data | `seed/customers.csv:2` | literal detectors |
+| 33 | Password in a debug log | `api.Server.Login` | `log.go.stdlib` |
+| 34 | Medical record number in a Sentry message | `api.Server.Refill` | `sdk.go.sentry.scope` |
+| 35 | Access token in `localStorage` | `signIn` | `storage.ts.web_storage` |
+| 36–37 | AWS access key id and a service JWT committed | `backend/deploy/staging.env` | `aws-access-key-id`, `jwt` value patterns |
 
-Traps that must stay quiet: database inserts (first party), customer and order IDs, the nickname, a field tagged `pii:"-"`, masked email/card/phone, `len(email)`, cart sizes, and the placeholder row in the CSV (`0123456789`, `test@example.com`, `4111 1111 1111 1111`).
+Traps that must stay quiet: database inserts (first party), customer and order IDs, the nickname, a field tagged `pii:"-"`, masked email/card/phone, `len(email)`, cart sizes, a SHA-256 of the password (hashing is a safe transform for credentials), an API key in an `Authorization` header and a token sent to the API that issued it (credentials are meant for the services they unlock), the login request's response, email sent to the shop's own API (`first_party_domains` in `.datawarden.yaml`), the AWS documentation key `AKIAIOSFODNN7EXAMPLE`, and the placeholder row in the CSV (`0123456789`, `test@example.com`, `4111 1111 1111 1111`).
 
 ## Known results
 
-datawarden finds 30 of the 32 leaks with one false positive (precision 0.97, recall 0.94):
+datawarden finds 35 of the 37 leaks with one false positive (precision 0.97, recall 0.95):
 
 - **Missed #24:** Kotlin's property syntax `telephony.line1Number` is not matched by the source rule for `getLine1Number()`.
 - **Missed #30:** the CCCD detector needs a label on the same line as the value; in a CSV the label is in the header row.

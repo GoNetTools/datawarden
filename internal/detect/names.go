@@ -100,7 +100,15 @@ type Classifier struct {
 	types    []DataType
 	byID     map[string]*DataType
 	patterns []compiledPattern
+	values   []compiledValue
 	vocab    map[string]bool
+}
+
+// compiledValue is a data type's value pattern, ready to scan with.
+type compiledValue struct {
+	dt *DataType
+	ValuePattern
+	re *regexp.Regexp
 }
 
 // NewClassifier compiles a taxonomy's data types. Classes default to the
@@ -129,6 +137,13 @@ func NewClassifier(types []DataType, classes ...Class) *Classifier {
 		}
 		for _, p := range dt.Weak {
 			add(p, true)
+		}
+		for _, v := range dt.Values {
+			// Taxonomy.Validate compiles every regex; NewClassifier is
+			// also given hand-built types, so skip bad ones here.
+			if re, err := regexp.Compile(v.Regex); err == nil {
+				c.values = append(c.values, compiledValue{dt: dt, ValuePattern: v, re: re})
+			}
 		}
 	}
 	// Longer patterns first so "email address" beats "address".

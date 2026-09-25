@@ -189,7 +189,33 @@ func (httpRules) Match(lang, kind string, c *ir.Call) []rules.Hit {
 		return nil
 	}
 	host := 0
-	return []rules.Hit{{Rule: &rules.Rule{ID: "net.fake.post", Arg: rules.ArgSpec{Indexes: []int{1}}, HostArg: &host, Dest: rules.Dest{Kind: rules.DestNetwork}}, Conf: 1}}
+	return []rules.Hit{{Rule: &rules.Rule{ID: "net.fake.post", Arg: rules.ArgSpec{Indexes: []int{1}}, HostArg: &host, Dest: rules.Dest{Kind: rules.DestNetwork}, Category: "network"}, Conf: 1}}
+}
+
+// bothRules combines httpRules and fakeRules.
+type bothRules struct{}
+
+func (bothRules) Match(lang, kind string, c *ir.Call) []rules.Hit {
+	return append(httpRules{}.Match(lang, kind, c), fakeRules{}.Match(lang, kind, c)...)
+}
+
+// A network call's result is the remote's response: sending a password
+// in a login request does not make the reply a password.
+func TestNetworkResponseIsNotTheRequest(t *testing.T) {
+	names := detect.NewClassifier(detect.DefaultTaxonomy())
+	fn := &ir.Func{ID: "p.login", Name: "login", Lang: "go", File: "a.go"}
+	password := fn.AddParam("password", "string", pos(1))
+	url := fn.ConstVar("https://api.acme.example/session", pos(2))
+	resp := fn.Temp(pos(2))
+	fn.Emit(ir.Instr{Op: ir.OpCall, Dst: resp, Args: []ir.VarID{url, password}, Call: &ir.Call{Name: "post"}, Pos: pos(2)})
+	fn.Emit(ir.Instr{Op: ir.OpCall, Dst: fn.Temp(pos(3)), Args: []ir.VarID{resp}, Call: &ir.Call{Name: "leak"}, Pos: pos(3)})
+	res, err := Engine{Names: names}.Analyze(context.Background(), []*ir.Func{fn}, Input{Rules: bothRules{}, Schema: detect.BuildSchema(names, nil)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Flows) != 1 || res.Flows[0].SinkRule != "net.fake.post" || res.Flows[0].DataType != "password" {
+		t.Errorf("want only the request flow: %+v", res.Flows)
+	}
 }
 
 // A constant URL argument names the destination host, and hosts under the

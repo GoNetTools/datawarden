@@ -203,3 +203,116 @@ data_types:
     category: identity
     class: pii
     patterns: [license plate, licence plate, plate number, number plate]
+
+  - id: medical_record_number
+    label: Medical record number
+    category: health
+    class: phi
+    sensitive: true
+    patterns: [medical record number, medical record no, medical record id, mrn, patient number, health record number]
+
+  # Credentials. Committed values are recognised by shape (values); a
+  # value pattern needs keywords, substrings every match contains, which
+  # are checked before the regex runs. Only the first capture group, if
+  # any, is reported.
+
+  - id: password
+    label: Password
+    category: secret
+    class: credential
+    patterns: [password, passwd, passphrase, pass phrase]
+    weak: [pwd]
+    exclude: [policy, strength, rule, rules, reset, forgot, forgotten, recovery, expiry, expiration, expires, age, complexity, requirement, requirements, visibility, visible, toggle, encoder, hasher, hint, length]
+
+  - id: api_key
+    label: API key
+    category: secret
+    class: credential
+    patterns: [api key, x api key, access key, subscription key, api token]
+    exclude: [header, name, env, var, variable, param, query, id]
+    values:
+      - name: aws-access-key-id
+        regex: '\b((?:AKIA|ASIA)[0-9A-Z]{16})\b'
+        keywords: [AKIA, ASIA]
+        confidence: 0.95
+        min_entropy: 3
+      - name: stripe-secret-key
+        regex: '\b((?:sk|rk)_live_[0-9A-Za-z]{20,99})\b'
+        keywords: [sk_live_, rk_live_]
+        confidence: 0.95
+        min_entropy: 3
+      - name: google-api-key
+        regex: '\b(AIza[0-9A-Za-z_\-]{35})(?:[^0-9A-Za-z_\-]|$)'
+        keywords: [AIza]
+        confidence: 0.8
+        min_entropy: 3.5
+      - name: sendgrid-api-key
+        regex: '\b(SG\.[0-9A-Za-z_\-]{22}\.[0-9A-Za-z_\-]{43})\b'
+        keywords: [SG.]
+        confidence: 0.95
+        min_entropy: 4
+      - name: anthropic-api-key
+        regex: '\b(sk-ant-(?:api|admin)\d{2}-[0-9A-Za-z_\-]{80,120})'
+        keywords: [sk-ant-]
+        confidence: 0.95
+        min_entropy: 4
+      - name: openai-api-key
+        regex: '\b(sk-(?:proj|svcacct|admin)-[0-9A-Za-z_\-]{40,200})'
+        keywords: [sk-proj-, sk-svcacct-, sk-admin-]
+        confidence: 0.9
+        min_entropy: 4
+
+  - id: access_token
+    label: Access token
+    category: secret
+    class: credential
+    patterns: [access token, auth token, authentication token, authorization token, bearer token, refresh token, id token, oauth token, personal access token]
+    exclude: [header, name, env, type, expiry, expires, expiration, url, endpoint, lifetime, ttl, uri]
+    values:
+      - name: github-token
+        regex: '\b((?:gh[pousr]_[0-9A-Za-z]{36,255}|github_pat_[0-9A-Za-z_]{82}))\b'
+        keywords: [ghp_, gho_, ghu_, ghs_, ghr_, github_pat_]
+        confidence: 0.95
+        min_entropy: 3.5
+      - name: gitlab-token
+        regex: '\b(glpat-[0-9A-Za-z_\-]{20,})\b'
+        keywords: [glpat-]
+        confidence: 0.95
+        min_entropy: 3.5
+      - name: slack-token
+        regex: '\b(xox[abprs]-[0-9A-Za-z\-]{10,72})\b'
+        keywords: [xoxa-, xoxb-, xoxp-, xoxr-, xoxs-]
+        confidence: 0.9
+        min_entropy: 3
+      - name: jwt
+        regex: '\b(eyJ[0-9A-Za-z_\-]{10,}\.eyJ[0-9A-Za-z_\-]{10,}\.[0-9A-Za-z_\-]{20,})'
+        keywords: [eyJ]
+        confidence: 0.8
+        min_entropy: 4
+
+  - id: secret_key
+    label: Secret key
+    category: secret
+    class: credential
+    patterns: [secret key, client secret, secret access key, signing key, signing secret, app secret, api secret, webhook secret, jwt secret, shared secret, master key, encryption key, hmac key, hmac secret]
+    weak: [secret]
+    exclude: [name, arn, ref, path, env, file, filename, version, manager, header, id]
+
+  - id: private_key
+    label: Private key
+    category: secret
+    class: credential
+    patterns: [private key, priv key, privkey]
+    exclude: [path, file, filename, id, env, name, alias]
+    values:
+      - name: private-key-block
+        regex: '(-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED |PGP )?PRIVATE KEY(?: BLOCK)?-----)'
+        keywords: [PRIVATE KEY]
+        confidence: 0.9
+
+  - id: session_token
+    label: Session token
+    category: secret
+    class: credential
+    patterns: [session token, session id, session cookie, session key, session secret, sessionid]
+    exclude: [timeout, ttl, expiry, expires, name, duration, length, header, store, storage, manager]

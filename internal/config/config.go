@@ -103,7 +103,13 @@ func Default() *Config {
 			MinConfidence:  0.55,
 			FailOnLiterals: &t,
 			Classes: map[string]ClassPolicy{
-				"credential": {SafeTransforms: []string{"masked", "redacted", "encrypted", "tokenized", "hashed", "sha256", "sha512"}},
+				// Credentials exist to be sent to the services they unlock, so
+				// network calls are not violations; logs, analytics and
+				// storage are. Hashing a password is the point of hashing.
+				"credential": {
+					FailOn:         []string{"third_party", "log", "storage", "ipc"},
+					SafeTransforms: []string{"masked", "redacted", "encrypted", "tokenized", "hashed", "sha256", "sha512"},
+				},
 			},
 		},
 	}
@@ -208,10 +214,12 @@ policy:
   # Drop whole classes of data: pii, phi (health), pci (cardholder data),
   # credential (passwords, tokens, keys).
   ignore_classes: []
-  # Per-class overrides of fail_on and safe_transforms. A hashed password
-  # or token is fine; a hashed phone number is not.
+  # Per-class overrides of fail_on and safe_transforms. Credentials are
+  # meant to be sent to the services they unlock (network), and a hashed
+  # password is fine; a hashed phone number is not.
   classes:
     credential:
+      fail_on: [third_party, log, storage, ipc]
       safe_transforms: [masked, redacted, encrypted, tokenized, hashed, sha256, sha512]
   allow: []
   #  - sink: sdk.sentry.set_user

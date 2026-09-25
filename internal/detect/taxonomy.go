@@ -61,6 +61,12 @@ type ValuePattern struct {
 	// value itself; otherwise the whole match is.
 	Regex      string  `json:"regex" yaml:"regex"`
 	Confidence float64 `json:"confidence" yaml:"confidence"`
+	// Keywords are substrings one of which a line must contain before the
+	// regex runs (case-sensitive). They keep scanning fast.
+	Keywords []string `json:"keywords,omitempty" yaml:"keywords"`
+	// MinEntropy is the minimum Shannon entropy, in bits per character,
+	// of the value; it rules out placeholders such as "sk_live_xxxxxxxx".
+	MinEntropy float64 `json:"min_entropy,omitempty" yaml:"min_entropy"`
 }
 
 // Taxonomy is a set of classes and the data types in them.
@@ -132,8 +138,16 @@ func (t Taxonomy) Validate() error {
 			if v.Name == "" || v.Confidence <= 0 || v.Confidence > 1 {
 				errs = append(errs, fmt.Errorf("%s: value pattern %q needs a name and a confidence in (0, 1]", where, v.Name))
 			}
-			if _, err := regexp.Compile(v.Regex); err != nil || v.Regex == "" {
+			if re, err := regexp.Compile(v.Regex); err != nil || v.Regex == "" {
 				errs = append(errs, fmt.Errorf("%s: value pattern %s: bad regex: %v", where, v.Name, err))
+			} else if re.NumSubexp() > 1 {
+				errs = append(errs, fmt.Errorf("%s: value pattern %s: use (?:...) groups; only the value may be captured", where, v.Name))
+			}
+			if len(v.Keywords) == 0 {
+				errs = append(errs, fmt.Errorf("%s: value pattern %s needs keywords (substrings every match contains)", where, v.Name))
+			}
+			if v.MinEntropy < 0 || v.MinEntropy > 8 {
+				errs = append(errs, fmt.Errorf("%s: value pattern %s: min_entropy must be in [0, 8]", where, v.Name))
 			}
 		}
 	}
