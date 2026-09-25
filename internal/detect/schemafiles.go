@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/GoNetTools/pii-scanner/internal/ir"
+	"github.com/GoNetTools/datawarden/internal/ir"
 )
 
 var (
@@ -57,7 +57,10 @@ func ParseProto(path string, src []byte) []*ir.TypeDecl {
 					Name: strings.Join(parts, "."),
 					Kind: "proto",
 					Lang: "proto",
-					Pos: ir.Pos{File: path, Line: i + 1},
+					Pos:  ir.Pos{
+						File: path,
+						Line: i + 1,
+					},
 				}
 				out = append(out, fr.decl)
 			}
@@ -85,7 +88,7 @@ func ParseProto(path string, src []byte) []*ir.TypeDecl {
 						Type: m[1],
 						Pos: ir.Pos{
 							File: path,
-							Line: i + 1
+							Line: i + 1,
 						},
 						Tags: map[string]string{},
 					}
