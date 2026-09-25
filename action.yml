@@ -1,22 +1,22 @@
-name: piiflow
-description: Find personal data (PII) flowing to logs, analytics/crash SDKs and third parties. Uploads SARIF and comments on pull requests.
-author: The piiflow Authors
+name: datawarden
+description: Find sensitive data (PII, PHI, card data, credentials) flowing to logs, analytics/crash SDKs and third parties. Uploads SARIF and comments on pull requests.
+author: The datawarden Authors
 branding:
   icon: shield
   color: blue
 
 inputs:
   version:
-    description: piiflow release to install (e.g. v0.1.0), or "latest". The archive is verified against the release's checksums.txt.
+    description: datawarden release to install (e.g. v0.1.0), or "latest". The archive is verified against the release's checksums.txt.
     default: latest
   repository:
-    description: GitHub repository that publishes piiflow releases.
+    description: GitHub repository that publishes datawarden releases.
     default: GoNetTools/pii-scanner
   path:
     description: Directory to scan (repository root by default).
     default: .
   args:
-    description: Extra arguments for `piiflow scan`.
+    description: Extra arguments for `datawarden scan`.
     default: ""
   diff:
     description: On pull requests, scan only changed files and their callers ("true"/"false").
@@ -42,7 +42,7 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Install piiflow
+    - name: Install datawarden
       shell: bash
       env:
         VERSION: ${{ inputs.version }}
@@ -53,9 +53,9 @@ runs:
         os=$(uname -s | tr '[:upper:]' '[:lower:]')
         case "$(uname -m)" in x86_64|amd64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; *) echo "unsupported arch $(uname -m)"; exit 2 ;; esac
         case "$os" in mingw*|msys*|cygwin*) os=windows ;; esac
-        asset="piiflow_${os}_${arch}.tar.gz"; [ "$os" = windows ] && asset="piiflow_${os}_${arch}.zip"
+        asset="datawarden_${os}_${arch}.tar.gz"; [ "$os" = windows ] && asset="datawarden_${os}_${arch}.zip"
         if [ "$VERSION" = latest ]; then base="https://github.com/$REPO/releases/latest/download"; else base="https://github.com/$REPO/releases/download/$VERSION"; fi
-        dir="$RUNNER_TEMP/piiflow-bin"; mkdir -p "$dir"
+        dir="$RUNNER_TEMP/datawarden-bin"; mkdir -p "$dir"
         curl -sSfL --retry 3 -H "Authorization: Bearer $GH_TOKEN" "$base/$asset" -o "$dir/$asset"
         curl -sSfL --retry 3 -H "Authorization: Bearer $GH_TOKEN" "$base/checksums.txt" -o "$dir/checksums.txt"
         # Verify the archive against the release's checksums before running it.
@@ -67,15 +67,15 @@ runs:
         )
         if [ "$os" = windows ]; then (cd "$dir" && unzip -oq "$asset"); else tar -xzf "$dir/$asset" -C "$dir"; fi
         echo "$dir" >> "$GITHUB_PATH"
-        "$dir/piiflow" version
+        "$dir/datawarden" version
 
     - name: Restore analysis cache
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
-        path: ${{ inputs.path }}/.piiflow/cache
-        key: piiflow-${{ runner.os }}-${{ github.base_ref || github.ref_name }}-${{ github.sha }}
+        path: ${{ inputs.path }}/.datawarden/cache
+        key: datawarden-${{ runner.os }}-${{ github.base_ref || github.ref_name }}-${{ github.sha }}
         restore-keys: |
-          piiflow-${{ runner.os }}-${{ github.base_ref || github.ref_name }}-
+          datawarden-${{ runner.os }}-${{ github.base_ref || github.ref_name }}-
 
     - name: Scan
       id: scan
@@ -87,16 +87,16 @@ runs:
         EXTRA_ARGS: ${{ inputs.args }}
       run: |
         set +e
-        args=(scan . --sarif "$RUNNER_TEMP/piiflow.sarif" --markdown "$RUNNER_TEMP/piiflow.md")
+        args=(scan . --sarif "$RUNNER_TEMP/datawarden.sarif" --markdown "$RUNNER_TEMP/datawarden.md")
         if [ -n "$BASE_REF" ] && [ "$USE_DIFF" = "true" ]; then
           git fetch --no-tags --quiet origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF" || true
           args+=(--diff "origin/$BASE_REF")
         fi
         # shellcheck disable=SC2086
-        piiflow "${args[@]}" $EXTRA_ARGS
+        datawarden "${args[@]}" $EXTRA_ARGS
         code=$?
         echo "exit-code=$code" >> "$GITHUB_OUTPUT"
-        if [ -f "$RUNNER_TEMP/piiflow.md" ]; then cat "$RUNNER_TEMP/piiflow.md" >> "$GITHUB_STEP_SUMMARY"; fi
+        if [ -f "$RUNNER_TEMP/datawarden.md" ]; then cat "$RUNNER_TEMP/datawarden.md" >> "$GITHUB_STEP_SUMMARY"; fi
         if [ "$code" -ge 2 ]; then exit "$code"; fi
         exit 0
 
@@ -104,26 +104,26 @@ runs:
       if: github.event_name == 'push'
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
-        path: ${{ inputs.path }}/.piiflow/cache
-        key: piiflow-${{ runner.os }}-${{ github.ref_name }}-${{ github.sha }}
+        path: ${{ inputs.path }}/.datawarden/cache
+        key: datawarden-${{ runner.os }}-${{ github.ref_name }}-${{ github.sha }}
 
     - name: Upload SARIF
       if: inputs.sarif == 'true' && always() && steps.scan.outputs.exit-code != '2'
       uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
       with:
-        sarif_file: ${{ runner.temp }}/piiflow.sarif
-        category: piiflow
+        sarif_file: ${{ runner.temp }}/datawarden.sarif
+        category: datawarden
 
     - name: Comment on pull request
       if: inputs.comment == 'true' && github.event_name == 'pull_request' && steps.scan.outputs.exit-code != '2'
       shell: bash
       env:
         GITHUB_TOKEN: ${{ inputs.token }}
-      run: piiflow comment --only-if-new "$RUNNER_TEMP/piiflow.md" || echo "::warning::could not post the piiflow comment (fork PRs have a read-only token)"
+      run: datawarden comment --only-if-new "$RUNNER_TEMP/datawarden.md" || echo "::warning::could not post the datawarden comment (fork PRs have a read-only token)"
 
     - name: Fail on new violations
       if: inputs.fail-on-new == 'true' && steps.scan.outputs.exit-code == '1'
       shell: bash
       run: |
-        echo "::error::piiflow found new personal-data flows or committed PII (see the job summary)."
+        echo "::error::datawarden found new sensitive-data flows or committed sensitive values (see the job summary)."
         exit 1

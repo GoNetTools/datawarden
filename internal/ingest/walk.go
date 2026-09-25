@@ -1,4 +1,4 @@
-// Copyright 2026 The piiflow Authors
+// Copyright 2026 The datawarden Authors
 // SPDX-License-Identifier: Apache-2.0
 
 package ingest
@@ -18,7 +18,7 @@ import (
 // File is a repository file selected for scanning.
 type File struct {
 	Rel  string // slash-separated, relative to the repository root
-	Lang string // a lang name; "" for files piiflow does not parse
+	Lang string // a lang name; "" for files datawarden does not parse
 	Test bool   // test/fixture source file
 	Size int64
 }
@@ -116,7 +116,7 @@ func Select(fsys fs.FS, all []File, paths []string) []File {
 type Lister struct{}
 
 // List walks fsys, skipping the default ignore patterns and those in the
-// repository's .piiflowignore.
+// repository's .datawardenignore.
 func (Lister) List(fsys fs.FS) ([]File, error) {
 	m, err := LoadMatcher(fsys)
 	if err != nil {

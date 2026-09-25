@@ -1,26 +1,29 @@
-# piiflow architecture
+# datawarden architecture
 
-This document explains how piiflow is put together: the pipeline a scan goes through, the packages and the rules that keep them independent, the data model they share, and where to extend it. The [README](../README.md) covers usage; [CONTRIBUTING](../CONTRIBUTING.md) has the step-by-step checklists for adding a rule or a language.
+This document explains how datawarden is put together: the pipeline a scan goes through, the packages and the rules that keep them independent, the data model they share, and where to extend it. The [README](../README.md) covers usage; [CONTRIBUTING](../CONTRIBUTING.md) has the step-by-step checklists for adding a rule or a language.
 
 ## Contents
 
-- [What piiflow does](#what-piiflow-does)
+- [What datawarden does](#what-datawarden-does)
 - [The scan pipeline](#the-scan-pipeline)
 - [Packages and layers](#packages-and-layers)
 - [Design rules](#design-rules)
 - [Interfaces and who implements them](#interfaces-and-who-implements-them)
 - [Data model](#data-model)
+- [The taxonomy: data types and classes](#the-taxonomy-data-types-and-classes)
 - [The taint analysis](#the-taint-analysis)
 - [Scan modes and the cache](#scan-modes-and-the-cache)
 - [Extension points](#extension-points)
 - [How it is tested](#how-it-is-tested)
 
-## What piiflow does
+## What datawarden does
 
-piiflow is a static analyzer. It reads a repository without running it and reports two kinds of findings:
+datawarden is a static analyzer. It reads a repository without running it and reports two kinds of findings:
 
-- **Flows:** personal data (a *source*: a variable named `email`, a field tagged `pii:"phone"`, the result of `telephony.getLine1Number()`) reaching a place it should not go (a *sink*: a logger, a crash reporter, an analytics SDK, a third-party HTTP API, device storage).
-- **Literals:** real-looking personal data committed to the repository (a valid phone number, card number or citizen ID in a fixture or seed file).
+- **Flows:** sensitive data (a *source*: a variable named `email` or `accessToken`, a field tagged `pii:"phone"`, the result of `telephony.getLine1Number()`) reaching a place it should not go (a *sink*: a logger, a crash reporter, an analytics SDK, a third-party HTTP API, device storage).
+- **Literals:** real-looking sensitive values committed to the repository (a valid phone number, card number or citizen ID in a fixture or seed file; a cloud access key or a token in a config file).
+
+What counts as sensitive is data, not code: the [taxonomy](#the-taxonomy-data-types-and-classes) groups data types into classes (personal data, health information, cardholder data, credentials), and the analysis, the policy and the reports treat a new type or class like the built-in ones.
 
 Four languages are analysed (Go, Kotlin, Java, TypeScript/JavaScript). Each is converted into one shared intermediate representation (IR), so the analysis, the rules and the reports are written once.
 
@@ -32,7 +35,7 @@ flowchart TD
     SESSION --> RUN["scan.Scanner.Run(Request)"]
 
     subgraph SCANNER ["scan.Scanner"]
-        RUN --> LIST["FileLister.List<br/>default ignores + .piiflowignore"]
+        RUN --> LIST["FileLister.List<br/>default ignores + .datawardenignore"]
         LIST --> SELECT["select targets<br/>full · paths · diff (changed + callers)"]
         SELECT --> LIT["LiteralDetector<br/>committed values"]
         SELECT --> FE["Frontends<br/>source files → IR"]
@@ -49,8 +52,8 @@ flowchart TD
     BASE --> OUT["Reporter: text · JSON · SARIF · Markdown · GitLab<br/>DataMapper: DPIA · JSON · CSV · Mermaid"]
 ```
 
-1. **Session.** The command finds the repository root, loads `.piiflow.yaml` and the rules (built-in plus the repository's `.piiflow/rules/`).
-2. **File selection.** The scanner lists files (skipping build output, dependencies and `.piiflowignore` patterns) and decides what to analyse: everything, the paths given, or in PR mode the changed files plus their callers from the cached call graph.
+1. **Session.** The command finds the repository root, loads `.datawarden.yaml` and the rules (built-in plus the repository's `.datawarden/rules/`).
+2. **File selection.** The scanner lists files (skipping build output, dependencies and `.datawardenignore` patterns) and decides what to analyse: everything, the paths given, or in PR mode the changed files plus their callers from the cached call graph.
 3. **Literal scan.** Text files are checked for committed personal data by validating detectors (Luhn, IBAN checksum, CCCD structure, phone prefixes) and nearby labels.
 4. **Lowering.** Each language's frontend converts its files into IR functions and type declarations.
 5. **Schema.** Declared types, protobuf messages and SQL tables become schema hints: "field `Customer.Contact` holds a phone number".
@@ -62,8 +65,8 @@ flowchart TD
 ```mermaid
 flowchart TB
     subgraph ENTRY ["Entry points"]
-        CMDP["cmd/piiflow"]
-        BENCH["cmd/piiflow-bench"]
+        CMDP["cmd/datawarden"]
+        BENCH["cmd/datawarden-bench"]
     end
     subgraph ROOT ["Composition root"]
         APP["internal/app"]
@@ -110,7 +113,7 @@ flowchart TB
 
 | Layer | Packages | Role |
 |---|---|---|
-| Entry points | `cmd/piiflow`, `cmd/piiflow-bench` | `main`: build the app with `app.New` and run it. |
+| Entry points | `cmd/datawarden`, `cmd/datawarden-bench` | `main`: build the app with `app.New` and run it. |
 | Composition root | `internal/app` | The only place that chooses concrete implementations and connects them. |
 | Orchestration | `internal/cli`, `internal/scan` | Commands, flags and exit codes; the scan pipeline. They know *what* happens, not *how*. |
 | Components | `frontend/*`, `analysis`, `detect`, `rules`, `policy`, `baseline`, `report`, `datamap`, `cache`, `ingest`, `config`, `cicomment`, `ruletest`, `eval` | One job each, behind interfaces their consumers declare. |
@@ -133,10 +136,10 @@ What each component does:
 | `datamap` | The personal-data inventory (DPIA, JSON, CSV, Mermaid). |
 | `cache` | Function summaries, call graph and schema between runs, keyed by file content. |
 | `ingest` | File walking, ignore patterns, file selection, git queries. |
-| `config` | `.piiflow.yaml`: parsing, defaults, validation. |
+| `config` | `.datawarden.yaml`: parsing, defaults, validation. |
 | `cicomment` | Creating or updating the PR/MR comment on GitHub or GitLab. |
 | `ruletest` | `ruleid:`/`ok:` annotations in example code, checked against findings. |
-| `eval` | Precision, recall and F1 of a labelled corpus; used by `piiflow-bench`. |
+| `eval` | Precision, recall and F1 of a labelled corpus; used by `datawarden-bench`. |
 
 ## Design rules
 
@@ -239,13 +242,13 @@ classDiagram
 ```
 
 - **Five operations.** `assign` (copies, concatenation, conversions, container construction), `load` and `store` (fields and constant map keys), `call`, `return`. Anything else a language has lowers to these.
-- **Callee names are qualified** the way rules are written: `importpath.Type.Method` for Go, `package.Class.method` for Kotlin/Java, `<module>.<export>` for TypeScript. `Target` is set when the callee is code piiflow analyses, so its summary can be applied.
+- **Callee names are qualified** the way rules are written: `importpath.Type.Method` for Go, `package.Class.method` for Kotlin/Java, `<module>.<export>` for TypeScript. `Target` is set when the callee is code datawarden analyses, so its summary can be applied.
 - **Positions are slash-separated and root-relative** on every platform.
 
 ### Findings (`internal/finding`)
 
-- `Flow`: data type, source and sink positions, the path between them, sink rule, destination (kind, host, vendor), transforms applied (masked, hashed, ...), confidence, enclosing function; after policy and baseline, `Violation`, `Severity`, `Allowed`, `Baselined` and a line-independent `Fingerprint`.
-- `Literal`: data type, position, masked value, value hash, detector, confidence; the same policy and baseline fields.
+- `Flow`: data type and its class, source and sink positions, the path between them, sink rule, destination (kind, host, vendor), transforms applied (masked, hashed, ...), confidence, enclosing function; after policy and baseline, `Violation`, `Severity`, `Allowed`, `Baselined` and a line-independent `Fingerprint`.
+- `Literal`: data type and class, position, masked value, value hash, detector, confidence; the same policy and baseline fields.
 
 ### Rules (`internal/rules`)
 
@@ -257,16 +260,38 @@ YAML rules of three kinds, each matched against IR calls:
 
 Built-in rules are embedded in the binary; a repository adds, replaces or disables them by id.
 
+## The taxonomy: data types and classes
+
+`internal/detect/builtin/datatypes.yaml` is embedded in the binary and parsed strictly by `detect.ParseTaxonomy`. It declares:
+
+- **Classes**: `pii`, `phi`, `pci`, `credential`. A class has a label, a description and optionally `severity: high`.
+- **Data types**: each has a class, a category for the data map, identifier `patterns` and `weak` patterns, `exclude` words, flags that raise severity (`sensitive`, `severity: high`) and `values`, regular expressions for committed values (with `keywords` that must appear on the line before the regex runs, a confidence and a minimum entropy).
+
+```mermaid
+flowchart LR
+    Y["datatypes.yaml"] --> T["detect.Taxonomy<br/>(validated)"]
+    T --> C["detect.Classifier"]
+    C -->|names, keys, getters| A["analysis.Engine"]
+    C -->|schema hints| S["detect.Schemas"]
+    C -->|value patterns, labels| L["detect.LiteralScanner"]
+    C -->|Lookup, Class| P["policy"]
+    C -->|labels, classes| R["report, datamap"]
+```
+
+The classifier is the only component that reads the taxonomy; everything else asks it through small interfaces (`policy.Catalog` has `Lookup(id)` and `Class(id)`). The policy uses the class to set a finding's `Class`, to raise severity for high-severity classes, to drop `ignore_classes`, and to apply per-class `fail_on` and `safe_transforms` overrides: by default credentials may go over the network and may be hashed, personal data may not. Reports tag SARIF rules with the class and the data map has a class column. Adding a class therefore touches only the YAML.
+
+A data type that is not in the taxonomy (a custom type named by a repository's source rule or a `pii:"loyalty_card"` tag) is still reported, as class `pii` and category `custom`.
+
 ## The taint analysis
 
 `analysis.Engine` works per function and composes results through summaries.
 
 1. **Seeding.** A variable becomes a source when its name classifies as personal data (`phoneNumber`, not `phoneFormatter`), when its type has personal-data fields (a `User` value), when it is loaded from a field the schema marks, when it is stored under a key that names it (`{"email": v}`), when it comes from a getter (`getEmail()`), or when a source rule matches the call that produced it.
-2. **Propagation.** Facts flow through assignments, field stores and loads, calls and returns. Unknown library calls pass their arguments' facts to the result, with a small confidence decay; transform rules and names like `maskEmail` record a transform instead.
+2. **Propagation.** Facts flow through assignments, field stores and loads, calls and returns. Unknown library calls pass their arguments' facts to the result, with a small confidence decay; transform rules and names like `maskEmail` record a transform instead. Network sinks are the exception: their result is the remote's response, not the request, so a login call's reply does not carry the password.
 3. **Summaries.** Each function gets a summary: which parameter reaches which sink, the return value, or another parameter. Callers apply the summaries of their callees; strongly connected components (recursion) iterate to a fixed point. This is how a value is followed through helpers several calls deep.
 4. **Flows.** When a fact reaches a sink argument, a flow is emitted with confidence = source × propagation × rule match.
 
-Everything downstream is policy, not analysis: `policy` turns flows into violations (destination kinds that fail the build, minimum confidence, safe transforms, allow-list entries).
+Everything downstream is policy, not analysis: `policy` turns flows into violations (destination kinds that fail the build, minimum confidence, safe transforms, allow-list entries, each overridable per class).
 
 ## Scan modes and the cache
 
@@ -283,12 +308,13 @@ The cache stores function summaries, the call graph and schema declarations keye
 
 | To add | Do this | Guarded by |
 |---|---|---|
-| **A rule** for an SDK | YAML entry in `internal/rules/builtin/` (or `.piiflow/rules/` in your repository), plus an annotated example | `TestBuiltinRuleConventions`, `TestRuleExamples`, `piiflow rules test` |
+| **A rule** for an SDK | YAML entry in `internal/rules/builtin/` (or `.datawarden/rules/` in your repository), plus an annotated example | `TestBuiltinRuleConventions`, `TestRuleExamples`, `datawarden rules test` |
 | **A language** | entry in `internal/lang`, a frontend, registration in `app.NewComponents`, the 15 conformance programs, rules with examples | `TestEveryLanguageIsWired`, `TestFrontendConformance`, `TestRuleExamples` |
-| **A data type or identifier word** | `internal/detect/taxonomy.go`, table-driven cases in `detect_test.go` | `TestBuiltinRuleConventions` (source rules must use known types) |
+| **A data type, a class or a secret pattern** | an entry in `internal/detect/builtin/datatypes.yaml`, cases in `detect_test.go` or `secrets_test.go`, a labelled leak in a fixture | `TestBuiltinTaxonomy`, `TestTaxonomyValidation`, `TestBuiltinRuleConventions` (source rules must use known types), `datawarden-bench -check` |
+| **A negative-context or transform word** | `internal/detect/names.go` | `detect_test.go` |
 | **An output format** | a case in `report.Write` (or a new `Reporter` implementation wired in `app`) | report tests |
 | **A service or replacement component** | an interface where it is used, a field to inject it, the wiring in `internal/app` | `TestComponentsTalkThroughInterfaces` |
-| **A labelled benchmark case** | a directory under `testdata/` and its labels in `testdata/eval.yaml` | `piiflow-bench -check` in CI |
+| **A labelled benchmark case** | a directory under `testdata/` and its labels in `testdata/eval.yaml` | `datawarden-bench -check` in CI |
 
 The full checklists for rules and languages are in [CONTRIBUTING](../CONTRIBUTING.md#add-or-fix-a-rule).
 
@@ -307,4 +333,5 @@ flowchart LR
 - **End-to-end tests** scan the fixtures in `testdata/` with the production wiring.
 - **Accuracy** is measured on the labelled corpus (`testdata/eval.yaml`, including the vulnerable-by-design `testdata/vulnshop`). CI fails when a case drops below its minimum precision or recall.
 - **Structure tests** keep the architecture from eroding: interface-only communication, every language wired, rule conventions, a consistent language table.
+- **Coverage** is measured across packages (`go test -coverpkg=./internal/... ./...`, about 87%); CI fails below 85%.
 - **Benchmarks** (`make bench`) cover the engine's scaling, the detectors and end-to-end scans; `--cpuprofile`/`--memprofile` profile real runs.

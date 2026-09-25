@@ -1,4 +1,4 @@
-// Copyright 2026 The piiflow Authors
+// Copyright 2026 The datawarden Authors
 // SPDX-License-Identifier: Apache-2.0
 
 package cli
@@ -35,7 +35,7 @@ func (a *App) newReport(res *scan.Result, flows []*finding.Flow, lits []*finding
 		lits = []*finding.Literal{}
 	}
 	return &report.Report{
-		Tool: "piiflow", Version: a.Version, Mode: res.Mode, DiffBase: diffBase, Commit: res.Commit, Started: res.Started,
+		Tool: "datawarden", Version: a.Version, Mode: res.Mode, DiffBase: diffBase, Commit: res.Commit, Started: res.Started,
 		Duration: res.Duration.Round(time.Millisecond).String(), FilesScanned: res.FilesScanned, FilesAnalyzed: res.FilesAnalyzed,
 		Functions: res.Functions, ChangedFiles: res.ChangedFiles, CallerFiles: res.CallerFiles,
 		Flows: flows, Literals: lits, Warnings: res.Warnings, Rules: rs, Catalog: a.Catalog, Links: a.Links,
@@ -79,16 +79,16 @@ func (a *App) runScan(ctx context.Context, args []string) (int, error) {
 	mdOut := fs.String("markdown", "", "also write a Markdown summary to `file`")
 	jsonOut := fs.String("json", "", "also write a JSON report to `file`")
 	glOut := fs.String("gitlab", "", "also write a GitLab SAST report to `file`")
-	baselinePath := fs.String("baseline", "", "baseline file (default from config: .piiflow/baseline.json)")
+	baselinePath := fs.String("baseline", "", "baseline file (default from config: .datawarden/baseline.json)")
 	noBaseline := fs.Bool("no-baseline", false, "ignore the baseline: every violation counts as new")
-	literalsOnly := fs.Bool("literals-only", false, "run only the committed-PII literal detector (fast; for pre-commit)")
+	literalsOnly := fs.Bool("literals-only", false, "run only the committed-value detector (fast; for pre-commit)")
 	staged := fs.Bool("staged", false, "with --literals-only: scan the staged (git index) content of staged files")
 	callerDepth := fs.Int("caller-depth", 2, "with --diff: how many levels of callers to include")
 	all := fs.Bool("all", false, "text output: also show flows accepted by policy")
 	minConf := fs.Float64("min-confidence", 0, "override policy.min_confidence")
 	noFail := fs.Bool("no-fail", false, "exit 0 even when there are new violations")
 	fs.Usage = func() {
-		fmt.Fprintln(a.Stderr, "Usage: piiflow scan [paths...] [flags]")
+		fmt.Fprintln(a.Stderr, "Usage: datawarden scan [paths...] [flags]")
 		fs.PrintDefaults()
 	}
 	pos, err := parseInterspersed(fs, args)
@@ -163,7 +163,7 @@ func (a *App) runBaseline(ctx context.Context, args []string) error {
 	c.register(fs)
 	var prof profile
 	prof.register(fs)
-	out := fs.String("output", "", "baseline file to write (default from config: .piiflow/baseline.json)")
+	out := fs.String("output", "", "baseline file to write (default from config: .datawarden/baseline.json)")
 	pos, err := parseInterspersed(fs, args)
 	if err != nil {
 		return err
@@ -194,7 +194,7 @@ func (a *App) runBaseline(ctx context.Context, args []string) error {
 		return err
 	}
 	rel, _ := filepath.Rel(s.root, path)
-	fmt.Fprintf(a.Stdout, "piiflow: wrote %d accepted finding(s) to %s — commit it so CI only reports new ones\n", entries, filepath.ToSlash(rel))
+	fmt.Fprintf(a.Stdout, "datawarden: wrote %d accepted finding(s) to %s — commit it so CI only reports new ones\n", entries, filepath.ToSlash(rel))
 	for _, w := range res.Warnings {
 		fmt.Fprintf(a.Stderr, "warning: %s\n", w)
 	}
@@ -323,7 +323,7 @@ func (a *App) runComment(args []string) error {
 		return err
 	}
 	if len(pos) != 1 {
-		return errors.New("usage: piiflow comment <markdown-file> (from scan --markdown)")
+		return errors.New("usage: datawarden comment <markdown-file> (from scan --markdown)")
 	}
 	if a.Commenter == nil {
 		return errors.New("posting comments is not configured")
@@ -336,19 +336,19 @@ func (a *App) runComment(args []string) error {
 	if err != nil {
 		return err
 	}
-	if *onlyIfNew && strings.Contains(string(body), "no new PII leaks") {
-		fmt.Fprintln(a.Stdout, "piiflow: no new findings; comment skipped")
+	if *onlyIfNew && strings.Contains(string(body), "no new sensitive-data leaks") {
+		fmt.Fprintln(a.Stdout, "datawarden: no new findings; comment skipped")
 		return nil
 	}
 	what, err := a.Commenter.Post(string(body))
 	if isNotInReview(err) {
-		fmt.Fprintln(a.Stdout, "piiflow: not a pull/merge request; comment skipped")
+		fmt.Fprintln(a.Stdout, "datawarden: not a pull/merge request; comment skipped")
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(a.Stdout, "piiflow: %s review comment\n", what)
+	fmt.Fprintf(a.Stdout, "datawarden: %s review comment\n", what)
 	return nil
 }
 

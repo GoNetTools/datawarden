@@ -1,4 +1,4 @@
-// Copyright 2026 The piiflow Authors
+// Copyright 2026 The datawarden Authors
 // SPDX-License-Identifier: Apache-2.0
 
 //go:build cgo

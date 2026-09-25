@@ -1,4 +1,4 @@
-// Copyright 2026 The piiflow Authors
+// Copyright 2026 The datawarden Authors
 // SPDX-License-Identifier: Apache-2.0
 
 package detect
@@ -96,15 +96,31 @@ type compiledPattern struct {
 // and holds no global state, so tests and callers can supply their own
 // data types.
 type Classifier struct {
+	classes  map[string]Class
 	types    []DataType
 	byID     map[string]*DataType
 	patterns []compiledPattern
+	values   []compiledValue
 	vocab    map[string]bool
 }
 
-// NewClassifier compiles a taxonomy.
-func NewClassifier(types []DataType) *Classifier {
-	c := &Classifier{types: append([]DataType(nil), types...), byID: map[string]*DataType{}, vocab: map[string]bool{}}
+// compiledValue is a data type's value pattern, ready to scan with.
+type compiledValue struct {
+	dt *DataType
+	ValuePattern
+	re *regexp.Regexp
+}
+
+// NewClassifier compiles a taxonomy's data types. Classes default to the
+// built-in ones; pass classes to use your own.
+func NewClassifier(types []DataType, classes ...Class) *Classifier {
+	if len(classes) == 0 {
+		classes = DefaultClasses()
+	}
+	c := &Classifier{classes: map[string]Class{}, types: append([]DataType(nil), types...), byID: map[string]*DataType{}, vocab: map[string]bool{}}
+	for _, cl := range classes {
+		c.classes[cl.ID] = cl
+	}
 	for i := range c.types {
 		dt := &c.types[i]
 		c.byID[dt.ID] = dt
@@ -122,6 +138,13 @@ func NewClassifier(types []DataType) *Classifier {
 		for _, p := range dt.Weak {
 			add(p, true)
 		}
+		for _, v := range dt.Values {
+			// Taxonomy.Validate compiles every regex; NewClassifier is
+			// also given hand-built types, so skip bad ones here.
+			if re, err := regexp.Compile(v.Regex); err == nil {
+				c.values = append(c.values, compiledValue{dt: dt, ValuePattern: v, re: re})
+			}
+		}
 	}
 	// Longer patterns first so "email address" beats "address".
 	sort.SliceStable(c.patterns, func(i, j int) bool { return len(c.patterns[i].toks) > len(c.patterns[j].toks) })
@@ -137,7 +160,26 @@ func (c *Classifier) Lookup(id string) DataType {
 	if dt, ok := c.byID[id]; ok {
 		return *dt
 	}
-	return DataType{ID: id, Label: strings.ReplaceAll(id, "_", " "), Category: "custom"}
+	return DataType{ID: id, Label: strings.ReplaceAll(id, "_", " "), Class: "pii", Category: "custom"}
+}
+
+// Class describes a class of data (pii, phi, pci, credential). Unknown
+// ids get a synthetic class, like custom data types.
+func (c *Classifier) Class(id string) Class {
+	if cl, ok := c.classes[id]; ok {
+		return cl
+	}
+	return Class{ID: id, Label: strings.ReplaceAll(id, "_", " ")}
+}
+
+// Classes returns the classes the classifier knows, sorted by id.
+func (c *Classifier) Classes() []Class {
+	out := make([]Class, 0, len(c.classes))
+	for _, cl := range c.classes {
+		out = append(out, cl)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
 }
 
 // Known reports whether id is part of the taxonomy.

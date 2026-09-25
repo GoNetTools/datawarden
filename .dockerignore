@@ -1,7 +1,7 @@
 .git
 .github
 .scratch
-.piiflow/cache
+.datawarden/cache
 bin
 dist
 *.sarif

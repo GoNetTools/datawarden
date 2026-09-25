@@ -1,4 +1,4 @@
-# Copyright 2026 The piiflow Authors
+# Copyright 2026 The datawarden Authors
 # SPDX-License-Identifier: Apache-2.0
 #
 # Publishes a release when a version tag is pushed:
@@ -85,7 +85,7 @@ jobs:
         if: matrix.cc == ''
         shell: bash
         env:
-          BIN: dist/bin/${{ matrix.goos }}_${{ matrix.goarch }}/piiflow
+          BIN: dist/bin/${{ matrix.goos }}_${{ matrix.goarch }}/datawarden
         run: |
           version="$("$BIN" version)"
           echo "$version"
@@ -152,7 +152,7 @@ jobs:
       - id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
-          images: ghcr.io/${{ github.repository_owner }}/piiflow
+          images: ghcr.io/${{ github.repository_owner }}/datawarden
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}

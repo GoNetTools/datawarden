@@ -1,4 +1,4 @@
-// Copyright 2026 The piiflow Authors
+// Copyright 2026 The datawarden Authors
 // SPDX-License-Identifier: Apache-2.0
 
 package ingest
@@ -42,9 +42,9 @@ func TestMatcher(t *testing.T) {
 		{"src/main/legacy/Old.java", false, true},
 		{"logo.png", false, true},
 		{"go.sum", false, true},
-		{".piiflow/cache/piiflow-cache.json", false, true},
-		{".piiflow/rules/examples/src/telemetry.ts", false, true},
-		{".piiflow/rules/acme.yaml", false, false},
+		{".datawarden/cache/datawarden-cache.json", false, true},
+		{".datawarden/rules/examples/src/telemetry.ts", false, true},
+		{".datawarden/rules/acme.yaml", false, false},
 	}
 	for _, c := range cases {
 		if got := m.Ignored(c.path, c.dir); got != c.want {
@@ -72,7 +72,7 @@ func TestWalkSelectAndHash(t *testing.T) {
 		"web/node_modules/x/index.js": {Data: []byte("x")},
 		"web/src/app.test.ts":         {Data: []byte("t")},
 		"docs/logo.png":               {Data: []byte{0x89}},
-		".piiflowignore":              {Data: []byte("docs/\n")},
+		".datawardenignore":           {Data: []byte("docs/\n")},
 	}
 	m, err := LoadMatcher(fsys)
 	if err != nil {
@@ -86,7 +86,7 @@ func TestWalkSelectAndHash(t *testing.T) {
 	for _, f := range files {
 		got = append(got, f.Rel)
 	}
-	want := []string{".piiflowignore", "app/src/main/A.kt", "main.go", "web/src/app.test.ts"}
+	want := []string{".datawardenignore", "app/src/main/A.kt", "main.go", "web/src/app.test.ts"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("walk = %v, want %v", got, want)
 	}

@@ -1,7 +1,7 @@
-// Copyright 2026 The piiflow Authors
+// Copyright 2026 The datawarden Authors
 // SPDX-License-Identifier: Apache-2.0
 
-// Package cicomment creates or updates the piiflow summary comment on a
+// Package cicomment creates or updates the datawarden summary comment on a
 // GitHub pull request or GitLab merge request, so CI templates need no
 // extra tools (gh, jq) to post it.
 //
@@ -21,7 +21,7 @@ import (
 )
 
 // Marker identifies the comment to update.
-const Marker = "<!-- piiflow-report -->"
+const Marker = "<!-- datawarden-report -->"
 
 // ErrNotInReview is returned when not running for a PR/MR.
 var ErrNotInReview = errors.New("not running for a pull/merge request")
@@ -146,9 +146,9 @@ func (c Client) postGitLab(body string) (string, error) {
 	if mr == "" {
 		return "", ErrNotInReview
 	}
-	token := c.Getenv("PIIFLOW_GITLAB_TOKEN")
+	token := c.Getenv("DATAWARDEN_GITLAB_TOKEN")
 	if token == "" {
-		return "", errors.New("set PIIFLOW_GITLAB_TOKEN (a project access token with api scope) to post merge request notes")
+		return "", errors.New("set DATAWARDEN_GITLAB_TOKEN (a project access token with api scope) to post merge request notes")
 	}
 	hdr := map[string]string{"PRIVATE-TOKEN": token}
 	base := fmt.Sprintf("%s/projects/%s/merge_requests/%s/notes", api, url.PathEscape(project), mr)

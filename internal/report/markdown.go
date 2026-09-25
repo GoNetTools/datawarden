@@ -1,4 +1,4 @@
-// Copyright 2026 The piiflow Authors
+// Copyright 2026 The datawarden Authors
 // SPDX-License-Identifier: Apache-2.0
 
 package report
@@ -12,14 +12,14 @@ import (
 )
 
 // CommentMarker lets CI find and update its previous PR comment.
-const CommentMarker = "<!-- piiflow-report -->"
+const CommentMarker = "<!-- datawarden-report -->"
 
 // CILinks returns a link builder for GitHub Actions or GitLab CI based on
 // their environment variables, or nil outside CI. getenv is injected
 // (os.Getenv in production).
 func CILinks(getenv func(string) string) func(p ir.Pos) string {
 	if srv, repo, sha := getenv("GITHUB_SERVER_URL"), getenv("GITHUB_REPOSITORY"), getenv("GITHUB_SHA"); srv != "" && repo != "" && sha != "" {
-		if h := getenv("PIIFLOW_HEAD_SHA"); h != "" {
+		if h := getenv("DATAWARDEN_HEAD_SHA"); h != "" {
 			sha = h
 		}
 		return func(p ir.Pos) string { return fmt.Sprintf("%s/%s/blob/%s/%s#L%d", srv, repo, sha, p.File, p.Line) }
@@ -51,9 +51,9 @@ func Markdown(w io.Writer, r *Report) error {
 	b.WriteString(CommentMarker + "\n")
 	switch n := c.NewFlows + c.NewLiterals; {
 	case n == 0:
-		b.WriteString("### piiflow: no new PII leaks\n\n")
+		b.WriteString("### datawarden: no new sensitive-data leaks\n\n")
 	default:
-		fmt.Fprintf(&b, "### piiflow: %d new PII finding(s)\n\n", n)
+		fmt.Fprintf(&b, "### datawarden: %d new sensitive-data finding(s)\n\n", n)
 	}
 	scope := fmt.Sprintf("%s scan", r.Mode)
 	if r.DiffBase != "" {
@@ -114,7 +114,7 @@ func Markdown(w io.Writer, r *Report) error {
 		b.WriteString("\n</details>\n\n")
 	}
 	if c.NewFlows+c.NewLiterals > 0 {
-		b.WriteString("<sub>Fix the flow (drop, mask or tokenize the data), allow it in `.piiflow.yaml` (`policy.allow`), or accept the current state with `piiflow baseline` and commit `.piiflow/baseline.json`.</sub>\n")
+		b.WriteString("<sub>Fix the flow (drop, mask or tokenize the data), allow it in `.datawarden.yaml` (`policy.allow`), or accept the current state with `datawarden baseline` and commit `.datawarden/baseline.json`.</sub>\n")
 	}
 	_, err := io.WriteString(w, b.String())
 	return err

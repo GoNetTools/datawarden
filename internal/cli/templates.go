@@ -1,4 +1,4 @@
-// Copyright 2026 The piiflow Authors
+// Copyright 2026 The datawarden Authors
 // SPDX-License-Identifier: Apache-2.0
 
 package cli
@@ -7,11 +7,11 @@ import "github.com/GoNetTools/pii-scanner/internal/config"
 
 var initTemplates = []struct{ name, body string }{
 	{config.FileName, config.Template},
-	{".piiflowignore", ignoreTemplate},
-	{".piiflow/rules/example.yaml", exampleRules},
+	{".datawardenignore", ignoreTemplate},
+	{".datawarden/rules/example.yaml", exampleRules},
 }
 
-const ignoreTemplate = `# Paths piiflow should not scan (gitignore syntax).
+const ignoreTemplate = `# Paths datawarden should not scan (gitignore syntax).
 # Built-in defaults already skip node_modules/, vendor/, build/, dist/,
 # binaries, images and lock files; re-include one with "!pattern".
 

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Copyright 2026 The piiflow Authors
+# Copyright 2026 The datawarden Authors
 # SPDX-License-Identifier: Apache-2.0
 #
-# Prints the license texts of everything compiled into the piiflow binary
+# Prints the license texts of everything compiled into the datawarden binary
 # (the Go standard library and every module dependency, for all release
 # platforms). Release archives and the container image ship the output as
 # THIRD_PARTY_LICENSES.txt. Fails if a dependency has no license file.
@@ -14,13 +14,13 @@ targets="linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64"
 
 paths=$(for t in $targets; do
   GOOS=${t%/*} GOARCH=${t#*/} CGO_ENABLED=1 \
-    go list -deps -f '{{with .Module}}{{.Path}}{{end}}' ./cmd/piiflow
+    go list -deps -f '{{with .Module}}{{.Path}}{{end}}' ./cmd/datawarden
 done | sort -u | grep -vx "$main" || true)
 
 rule() { printf '%s\n' "================================================================================"; }
 
-echo "The piiflow binary and container image include the following third-party software."
-echo "piiflow itself is licensed under the Apache License 2.0 (see LICENSE and NOTICE)."
+echo "The datawarden binary and container image include the following third-party software."
+echo "datawarden itself is licensed under the Apache License 2.0 (see LICENSE and NOTICE)."
 echo
 
 goroot=$(go env GOROOT)

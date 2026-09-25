@@ -1,4 +1,4 @@
-// Copyright 2026 The piiflow Authors
+// Copyright 2026 The datawarden Authors
 // SPDX-License-Identifier: Apache-2.0
 
 // Package platform holds the production adapters that touch the operating
@@ -50,11 +50,11 @@ func (OS) IsDir(p string) bool {
 }
 
 // FindRoot implements cli.Workspace: the nearest directory with .git or
-// .piiflow.yaml, or dir itself.
+// .datawarden.yaml, or dir itself.
 func (OS) FindRoot(dir string) string {
 	d := dir
 	for {
-		for _, marker := range []string{".git", ".piiflow.yaml"} {
+		for _, marker := range []string{".git", ".datawarden.yaml"} {
 			if _, err := os.Stat(filepath.Join(d, marker)); err == nil {
 				return d
 			}

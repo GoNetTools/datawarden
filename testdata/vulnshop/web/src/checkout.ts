@@ -46,6 +46,15 @@ export function trackStore() {
   });
 }
 
+export async function signIn(email: string, password: string) {
+  const res = await fetch("https://api.vulnshop.example/v1/session", { method: "POST", body: JSON.stringify({ email, password }) });
+  const { accessToken } = await res.json();
+  // LEAK: the access token in localStorage, readable by any injected script.
+  localStorage.setItem("session", accessToken);
+  // SAFE: the token sent to the API it was issued for.
+  await fetch("https://api.vulnshop.example/v1/me", { headers: { Authorization: `Bearer ${accessToken}` } });
+}
+
 function maskCard(n: string): string {
   return "**** " + n.slice(-4);
 }

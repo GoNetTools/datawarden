@@ -1,4 +1,4 @@
-// Copyright 2026 The piiflow Authors
+// Copyright 2026 The datawarden Authors
 // SPDX-License-Identifier: Apache-2.0
 
 package detect
@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"math"
 	"math/big"
 	"regexp"
 	"strconv"
@@ -27,7 +28,7 @@ type LiteralHit struct {
 	Detector string  `json:"detector"`
 }
 
-// LiteralScanner finds PII literals in text.
+// LiteralScanner finds sensitive values (literals) in text.
 type LiteralScanner struct {
 	// Classifier recognises labels next to values ("cccd": ...).
 	Classifier *Classifier
@@ -72,7 +73,7 @@ var testCards = set("4111111111111111", "4242424242424242", "4012888888881881", 
 
 var docIBANs = set("GB82WEST12345698765432", "DE89370400440532013000", "GB33BUKB20201555555555", "FR1420041010050500013M02606", "NL91ABNA0417164300")
 
-// Scan returns PII literals found in content.
+// Scan returns the sensitive values found in content.
 func (s *LiteralScanner) Scan(content []byte) []LiteralHit {
 	if looksBinary(content) {
 		return nil
@@ -95,6 +96,9 @@ func (s *LiteralScanner) Scan(content []byte) []LiteralHit {
 		}
 		if len(line) > 4096 { // minified bundles, base64 blobs
 			continue
+		}
+		if s.Classifier != nil {
+			hits = s.Classifier.scanValues(hits, string(line), lineNo, minConf)
 		}
 		if !bytes.ContainsAny(line, "0123456789@") {
 			continue
@@ -464,7 +468,7 @@ func validCCCD(d string, now time.Time) bool {
 }
 
 func valueHash(dt, v string) string {
-	h := sha256.Sum256([]byte("piiflow-literal\x00" + dt + "\x00" + strings.ToLower(v)))
+	h := sha256.Sum256([]byte("datawarden-literal\x00" + dt + "\x00" + strings.ToLower(v)))
 	return hex.EncodeToString(h[:12])
 }
 
@@ -488,4 +492,81 @@ func MaskValue(dt, v string) string {
 		}
 		return string(r[:keepHead]) + strings.Repeat("*", len(r)-keepHead-keepTail) + string(r[len(r)-keepTail:])
 	}
+}
+
+// scanValues runs the taxonomy's value patterns (committed secrets and
+// other values recognised by shape) over one line.
+func (c *Classifier) scanValues(hits []LiteralHit, line string, lineNo int, minConf float64) []LiteralHit {
+	for _, v := range c.values {
+		if v.Confidence < minConf || !containsAny(line, v.Keywords) {
+			continue
+		}
+		for _, m := range v.re.FindAllStringSubmatchIndex(line, -1) {
+			start, end := m[0], m[1]
+			if len(m) >= 4 && m[2] >= 0 {
+				start, end = m[2], m[3]
+			}
+			val := line[start:end]
+			if placeholderSecret(val) || entropy(val) < v.MinEntropy {
+				continue
+			}
+			hits = append(hits, LiteralHit{DataType: v.dt.ID, Line: lineNo, Col: start + 1, Masked: maskSecret(val),
+				Hash: valueHash(v.dt.ID, val), Conf: round2(v.Confidence), Detector: v.Name})
+		}
+	}
+	return hits
+}
+
+func containsAny(s string, subs []string) bool {
+	for _, sub := range subs {
+		if strings.Contains(s, sub) {
+			return true
+		}
+	}
+	return false
+}
+
+// placeholderSecret reports documentation and template values:
+// AKIAIOSFODNN7EXAMPLE, sk_live_XXXXXXXX, ${API_KEY}, <your-token>.
+func placeholderSecret(v string) bool {
+	if strings.Contains(v, "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c") { // the jwt.io sample token
+		return true
+	}
+	u := strings.ToUpper(v)
+	for _, w := range []string{"EXAMPLE", "XXXX", "0000000", "1234567", "ABCDEFG", "YOUR", "REPLACE", "DUMMY", "PLACEHOLDER", "REDACTED", "CHANGEME", "${", "{{", "<", "*"} {
+		if strings.Contains(u, w) {
+			return true
+		}
+	}
+	return false
+}
+
+// entropy is the Shannon entropy of s in bits per byte.
+func entropy(s string) float64 {
+	if s == "" {
+		return 0
+	}
+	var freq [256]int
+	for i := 0; i < len(s); i++ {
+		freq[s[i]]++
+	}
+	e := 0.0
+	n := float64(len(s))
+	for _, f := range freq {
+		if f > 0 {
+			p := float64(f) / n
+			e -= p * math.Log2(p)
+		}
+	}
+	return e
+}
+
+// maskSecret keeps a secret's first four characters, which name its kind
+// ("AKIA", "ghp_"), and nothing of the secret itself.
+func maskSecret(v string) string {
+	r := []rune(v)
+	if len(r) <= 8 {
+		return "********"
+	}
+	return string(r[:4]) + "********"
 }

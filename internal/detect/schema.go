@@ -1,4 +1,4 @@
-// Copyright 2026 The piiflow Authors
+// Copyright 2026 The datawarden Authors
 // SPDX-License-Identifier: Apache-2.0
 
 package detect
@@ -51,7 +51,7 @@ var nameTags = []string{"column", "gorm", "db", "bson", "json", "yaml", "xml", "
 	"@Column", "@SerializedName", "@JsonProperty", "@Json", "@ColumnInfo", "@Field", "@JsonAlias", "@SerialName", "@Property"}
 
 // Tags/annotations that explicitly mark PII.
-var piiTags = []string{"pii", "piiflow", "@PII", "@Pii", "@PersonalData", "@Sensitive", "@SensitiveData"}
+var piiTags = []string{"pii", "datawarden", "@PII", "@Pii", "@PersonalData", "@Sensitive", "@SensitiveData"}
 
 // Schemas parses schema files and builds indexes with a classifier. It is
 // the production implementation of the scanner's schema dependency.

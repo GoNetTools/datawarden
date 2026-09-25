@@ -1,9 +1,10 @@
-// Copyright 2026 The piiflow Authors
+// Copyright 2026 The datawarden Authors
 // SPDX-License-Identifier: Apache-2.0
 
 package policy
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/GoNetTools/pii-scanner/internal/config"
@@ -44,7 +45,60 @@ func TestApply(t *testing.T) {
 type fakeCatalog map[string]bool
 
 func (f fakeCatalog) Lookup(id string) detect.DataType {
-	return detect.DataType{ID: id, Sensitive: f[id]}
+	return detect.DataType{ID: id, Class: "pii", Sensitive: f[id]}
+}
+
+func (fakeCatalog) Class(id string) detect.Class { return detect.Class{ID: id} }
+
+// classCatalog puts every data type in the class named by its prefix
+// ("credential.password" is a credential).
+type classCatalog struct{}
+
+func (classCatalog) Lookup(id string) detect.DataType {
+	class, _, _ := strings.Cut(id, ".")
+	return detect.DataType{ID: id, Class: class}
+}
+
+func (classCatalog) Class(id string) detect.Class {
+	if id == "credential" {
+		return detect.Class{ID: id, Severity: High}
+	}
+	return detect.Class{ID: id}
+}
+
+func TestClassPolicies(t *testing.T) {
+	c := config.Default()
+	c.Policy.IgnoreClasses = []string{"internal"}
+	c.Policy.Classes["pii"] = config.ClassPolicy{FailOn: []string{"third_party"}}
+	mk := func(dt, kind string, xf ...string) *finding.Flow {
+		return &finding.Flow{DataType: dt, SinkRule: "r", Dest: finding.Destination{Kind: kind}, Confidence: 0.9, Transforms: xf}
+	}
+	flows := []*finding.Flow{
+		mk("credential.password", "log", "sha256"), // hashing a credential is safe
+		mk("pii.phone", "network", "sha256"),       // not a pii fail_on kind
+		mk("pii.phone", "third_party", "sha256"),   // hashing pii is not safe
+		mk("credential.token", "log"),              // credential class is high
+		mk("internal.id", "third_party"),           // ignored class
+	}
+	lits := []*finding.Literal{{DataType: "credential.key"}, {DataType: "internal.id"}, {DataType: "pii.email"}}
+	got, gotL := Evaluator{Config: c, Catalog: classCatalog{}}.Apply(flows, lits)
+	if len(got) != 4 || len(gotL) != 2 {
+		t.Fatalf("ignore_classes: %d flows, %d literals", len(got), len(gotL))
+	}
+	want := []struct {
+		violation bool
+		sev       string
+		allowed   string
+	}{{false, High, "transform: sha256"}, {false, Medium, ""}, {true, High, ""}, {true, High, ""}}
+	for i, w := range want {
+		f := got[i]
+		if f.Violation != w.violation || f.Severity != w.sev || f.Allowed != w.allowed || f.Class != strings.SplitN(f.DataType, ".", 2)[0] {
+			t.Errorf("flow %d (%s): violation=%v sev=%s allowed=%q class=%s", i, f.DataType, f.Violation, f.Severity, f.Allowed, f.Class)
+		}
+	}
+	if gotL[0].Class != "credential" || gotL[0].Severity != High || gotL[1].Severity != Medium {
+		t.Errorf("literals: %+v %+v", gotL[0], gotL[1])
+	}
 }
 
 func TestSeverityComesFromCatalog(t *testing.T) {

@@ -1,13 +1,13 @@
-# Copyright 2026 The piiflow Authors
+# Copyright 2026 The datawarden Authors
 # SPDX-License-Identifier: Apache-2.0
 #
-# Labelled corpus for measuring piiflow's accuracy:
+# Labelled corpus for measuring datawarden's accuracy:
 #
-#   go run ./cmd/piiflow-bench            # precision, recall, F1, sweep, timings
-#   go run ./cmd/piiflow-bench -check     # also fail below min_precision/min_recall
+#   go run ./cmd/datawarden-bench            # precision, recall, F1, sweep, timings
+#   go run ./cmd/datawarden-bench -check     # also fail below min_precision/min_recall
 #
 # Labels are the ground truth: what a careful reviewer reading the fixture
-# would report, not what piiflow reports today. A known miss stays labelled
+# would report, not what datawarden reports today. A known miss stays labelled
 # (it shows up as a false negative) and min_recall is set to today's score,
 # so the gate catches regressions and the miss stays visible.
 #
@@ -101,6 +101,8 @@ cases:
       - {data_type: phone, sink_rule: log.go.fmt_print, function: api.Server.Support}
       - {data_type: phone, sink_rule: log.go.stdlib, function: api.Server.Support, note: "SHA-256 of a phone number is reversible"}
       - {data_type: person_name, sink_rule: log.go.stdlib, function: api.Server.Welcome$1, note: "from a goroutine"}
+      - {data_type: password, sink_rule: log.go.stdlib, function: api.Server.Login}
+      - {data_type: medical_record_number, sink_rule: sdk.go.sentry.scope, function: api.Server.Refill}
       # TypeScript checkout
       - {data_type: email, sink_rule: sdk.ts.sentry.set_user, function: placeOrder}
       - {data_type: phone, sink_rule: sdk.ts.posthog, function: placeOrder}
@@ -108,6 +110,7 @@ cases:
       - {data_type: address, sink_rule: log.ts.console, function: placeOrder}
       - {data_type: phone, sink_rule: net.ts.fetch, function: placeOrder}
       - {data_type: location, sink_rule: net.ts.beacon, function: trackStore}
+      - {data_type: access_token, sink_rule: storage.ts.web_storage, function: signIn}
       # Kotlin and Java Android
       - {data_type: email, sink_rule: sdk.firebase.analytics.user_id, function: CheckoutActivity.onSignedIn}
       - {data_type: phone, sink_rule: log.android.timber, function: CheckoutActivity.onOtpRequested}
@@ -124,5 +127,7 @@ cases:
          note: "known miss: CCCD needs a label on its own line; in CSV the label is the header row"}
       - {data_type: credit_card, file: seed/customers.csv, line: 2}
       - {data_type: bank_account, file: seed/customers.csv, line: 2}
+      - {data_type: api_key, file: backend/deploy/staging.env, line: 4}
+      - {data_type: access_token, file: backend/deploy/staging.env, line: 5}
     # Known false positive, left unlabelled on purpose: the web checkout's
     # localStorage.setItem("emailOptIn", "true") is reported as an email.

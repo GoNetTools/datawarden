@@ -1,7 +1,8 @@
-// Copyright 2026 The piiflow Authors
+// Copyright 2026 The datawarden Authors
 // SPDX-License-Identifier: Apache-2.0
 
-// Command piiflow finds personal data (PII) flowing from sources to sinks
+// Command datawarden finds sensitive data (PII, PHI, card data, credentials)
+// flowing from sources to sinks
 // such as logs, analytics/crash SDKs and third-party APIs.
 package main
 

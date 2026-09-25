@@ -1,4 +1,4 @@
-// Copyright 2026 The piiflow Authors
+// Copyright 2026 The datawarden Authors
 // SPDX-License-Identifier: Apache-2.0
 
 package app
@@ -15,7 +15,7 @@ import (
 )
 
 // BenchmarkScan runs a full, uncached scan of each fixture end to end, the
-// way `piiflow scan --no-cache` does. The Go fixture includes `go list`.
+// way `datawarden scan --no-cache` does. The Go fixture includes `go list`.
 func BenchmarkScan(b *testing.B) {
 	langs := NewComponents(time.Now).Frontends.Languages()
 	for _, fx := range []struct{ name, lang string }{{"goapp", "go"}, {"android", "kotlin"}, {"web", "typescript"}} {

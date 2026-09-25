@@ -1,0 +1,2 @@
+# vulnshop's own API is first party; every other host is a vendor.
+first_party_domains: [vulnshop.example]

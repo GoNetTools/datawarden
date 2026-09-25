@@ -1,4 +1,4 @@
-// Copyright 2026 The piiflow Authors
+// Copyright 2026 The datawarden Authors
 // SPDX-License-Identifier: Apache-2.0
 
 package cli
@@ -13,7 +13,7 @@ import (
 )
 
 // runRulesTest checks annotated example code against the repository's
-// effective rules: `piiflow rules test .piiflow/rules/examples`. The
+// effective rules: `datawarden rules test .datawarden/rules/examples`. The
 // examples directory is scanned as its own repository root with the
 // current repository's rules and policy.
 func (a *App) runRulesTest(ctx context.Context, args []string) (int, error) {
@@ -21,7 +21,7 @@ func (a *App) runRulesTest(ctx context.Context, args []string) (int, error) {
 	var c common
 	c.register(fs)
 	fs.Usage = func() {
-		fmt.Fprint(a.Stderr, `Usage: piiflow rules test DIR [flags]
+		fmt.Fprint(a.Stderr, `Usage: datawarden rules test DIR [flags]
 
 Scans DIR with the repository's rules and policy and checks the annotations
 in its files. A comment line applies to the next line:
@@ -93,7 +93,7 @@ Every violation in DIR must be annotated. Go examples need a go.mod in DIR.
 	if len(untested) > 0 {
 		fmt.Fprintf(a.Stdout, "repository rules without a ruleid example: %s\n", strings.Join(untested, ", "))
 	}
-	fmt.Fprintf(a.Stdout, "piiflow: %d annotation(s), %d failure(s), %d known gap(s)\n", len(anns), len(out.Failures), len(out.Known))
+	fmt.Fprintf(a.Stdout, "datawarden: %d annotation(s), %d failure(s), %d known gap(s)\n", len(anns), len(out.Failures), len(out.Known))
 	if len(out.Failures) > 0 {
 		return ExitViolation, nil
 	}

@@ -58,8 +58,13 @@ func (s *Server) Signup(w http.ResponseWriter, r *http.Request) {
 // Login checks credentials.
 func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 	email := r.FormValue("email")
+	password := r.FormValue("password")
 	// LEAK: failed-login log with the email address.
 	slog.Warn("login failed", "user", email)
+	// LEAK: the password in a debug log.
+	log.Printf("debug login attempt pw=%q", password)
+	// SAFE: a digest of the password, not the password.
+	log.Printf("login attempt digest %x", sha256.Sum256([]byte(password)))
 	// LEAK: client IP address sent to a third-party geo lookup.
 	_, _ = http.Get("https://geo.partner.example/lookup?ip=" + r.RemoteAddr)
 	w.WriteHeader(http.StatusUnauthorized)
@@ -67,6 +72,11 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 
 // Charge takes a card payment.
 func (s *Server) Charge(p model.Payment) error {
+	apiKey := os.Getenv("PSP_API_KEY")
+	req, _ := http.NewRequest(http.MethodPost, "https://api.psp.example/v1/charges", nil)
+	// SAFE: an API key sent to the service it unlocks.
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	_, _ = http.DefaultClient.Do(req)
 	if err := declined(p); err != nil {
 		// LEAK: card number wrapped into an error, then logged.
 		wrapped := fmt.Errorf("charge failed for card %s: %w", p.CardNumber, err)
@@ -103,6 +113,14 @@ func (s *Server) Welcome(c model.Customer) {
 		// LEAK: full name logged from a goroutine.
 		log.Printf("sending welcome mail to %s", c.FullName)
 	}()
+}
+
+// Refill reorders a prescription at the pharmacy counter.
+func (s *Server) Refill(patientMRN string, sku string) {
+	// LEAK: a medical record number (health data) to Sentry.
+	sentry.CaptureMessage("refill failed for mrn " + patientMRN)
+	// SAFE: the product only.
+	log.Printf("refill requested for %s", sku)
 }
 
 func sendOTP(phone string) {

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Copyright 2026 The piiflow Authors
+# Copyright 2026 The datawarden Authors
 # SPDX-License-Identifier: Apache-2.0
 #
 # Builds one release binary with cgo, so all frontends (Go, Kotlin, Java,
@@ -9,7 +9,7 @@
 #
 # The target is GOOS/GOARCH from the environment (default: this machine);
 # set CC for cross builds (e.g. CC="clang -arch x86_64" on an arm64 Mac).
-# Writes <outdir>/<goos>_<goarch>/piiflow[.exe] (default outdir: dist/bin).
+# Writes <outdir>/<goos>_<goarch>/datawarden[.exe] (default outdir: dist/bin).
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
@@ -37,5 +37,5 @@ esac
 
 dest="$out/${goos}_${goarch}"
 mkdir -p "$dest"
-CGO_ENABLED=1 go build -trimpath -tags "$tags" -ldflags "$ldflags" -o "$dest/piiflow$ext" ./cmd/piiflow
-echo "$dest/piiflow$ext"
+CGO_ENABLED=1 go build -trimpath -tags "$tags" -ldflags "$ldflags" -o "$dest/datawarden$ext" ./cmd/datawarden
+echo "$dest/datawarden$ext"

@@ -1,16 +1,16 @@
-# Contributing to piiflow
+# Contributing to datawarden
 
 Thanks for helping. Bug reports, false-positive and missed-leak reports, new sink rules and new language frontends are all welcome.
 
 By taking part you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md). Security problems go through the private process in [SECURITY.md](SECURITY.md), not public issues.
 
-## Never commit or paste real personal data
+## Never commit or paste real personal data or live secrets
 
-This is a PII scanner, so issues, pull requests and fixtures are full of phone numbers, ID numbers and emails. **Use synthetic values only.**
+This is a sensitive-data scanner, so issues, pull requests and fixtures are full of phone numbers, ID numbers, card numbers, tokens and emails. **Use synthetic values only.**
 
 - Invent values that still pass validation: an unallocated phone number with a valid carrier prefix, a CCCD with a valid province code, a card number that passes Luhn, `@example.com` emails.
-- Put fixture files under `testdata/` (excluded in `.piiflowignore`) so piiflow's own CI scan does not flag them.
-- When you paste piiflow output into an issue, the values are already masked. Keep them that way.
+- Put fixture files under `testdata/` (excluded in `.datawardenignore`) so datawarden's own CI scan does not flag them.
+- When you paste datawarden output into an issue, the values are already masked. Keep them that way.
 
 ## Development setup
 
@@ -21,10 +21,10 @@ You need:
 - `git`, for `--diff` mode and its tests.
 
 ```sh
-git clone https://github.com/GoNetTools/pii-scanner && cd pii-scanner
+git clone https://github.com/GoNetTools/pii-scanner && cd datawarden
 go test ./...                    # everything (cgo)
 CGO_ENABLED=0 go test ./...      # Go frontend + literal detector only
-go build -o bin/piiflow ./cmd/piiflow && ./bin/piiflow scan testdata/web --root testdata/web --no-baseline
+go build -o bin/datawarden ./cmd/datawarden && ./bin/datawarden scan testdata/web --root testdata/web --no-baseline
 ```
 
 `make` wraps the common commands (`make test test-nocgo vet lint build`).
@@ -52,7 +52,7 @@ scripts/check-headers.sh                                        # SPDX header on
 
 ### Report a false positive or a missed leak
 
-Use the issue templates. The most useful report is a **minimal snippet** (synthetic data) plus the piiflow output line, which names the rule (`[sdk.ts.sentry.set_user]`), data type and confidence.
+Use the issue templates. The most useful report is a **minimal snippet** (synthetic data) plus the datawarden output line, which names the rule (`[sdk.ts.sentry.set_user]`), data type and confidence.
 
 ### Add or fix a rule
 
@@ -72,15 +72,21 @@ Built-in rules are YAML files in `internal/rules/builtin/` (`go.yaml`, `jvm.yaml
 3. **Run** `go test ./internal/app -run TestRuleExamples`. It also fails when any built-in rule has no example.
 4. If a fixture under `testdata/` exercises the rule, label the flow in `testdata/eval.yaml`.
 
-A rule for one repository's own SDK belongs in that repository's `.piiflow/rules/*.yaml`. Test it the same way: put annotated examples in `.piiflow/rules/examples/` (scans never report that directory) and run `piiflow rules test .piiflow/rules/examples`.
+A rule for one repository's own SDK belongs in that repository's `.datawarden/rules/*.yaml`. Test it the same way: put annotated examples in `.datawarden/rules/examples/` (scans never report that directory) and run `datawarden rules test .datawarden/rules/examples`.
 
 ### Keep the accuracy corpus honest
 
-`testdata/eval.yaml` labels what a reviewer would report in each fixture, not what piiflow reports today. When you add or change a fixture, label every real leak in it, including ones piiflow misses (add a `note`), and use `ambiguous` only for flows that are genuinely acceptable either way. `go run ./cmd/piiflow-bench -check` (`make eval`) prints precision, recall and every miss and false positive. Raise `min_precision`/`min_recall` when your change improves them; lowering one needs a reason in the pull request.
+`testdata/eval.yaml` labels what a reviewer would report in each fixture, not what datawarden reports today. When you add or change a fixture, label every real leak in it, including ones datawarden misses (add a `note`), and use `ambiguous` only for flows that are genuinely acceptable either way. `go run ./cmd/datawarden-bench -check` (`make eval`) prints precision, recall and every miss and false positive. Raise `min_precision`/`min_recall` when your change improves them; lowering one needs a reason in the pull request.
 
-### Add a data type or identifier name
+### Add a data type, a class or a secret pattern
 
-The taxonomy (identifier words, negative context words, transforms) is in `internal/detect/taxonomy.go`; the literal validators are in `internal/detect/literal.go`. Add table-driven cases to `internal/detect/detect_test.go`.
+What datawarden looks for is data: [`internal/detect/builtin/datatypes.yaml`](internal/detect/builtin/datatypes.yaml). It is read strictly (unknown keys, undeclared classes, duplicate ids, bad regexes and upper-case patterns are errors) and checked by `TestBuiltinTaxonomy`.
+
+- **A data type** is an entry under `data_types:` with an `id`, `label`, `class`, `category` and at least one of `patterns` (identifier words, as space-separated lower-case tokens: `date of birth` matches `dateOfBirth`, `date_of_birth`, `DOB`...), `weak` (ambiguous abbreviations, scored lower) or `values`. `exclude` lists words that rule the type out (`remote` in `remoteAddress`); `sensitive: true` or `severity: high` raises its findings to high.
+- **A class** is an entry under `classes:`. Give it `severity: high` if every finding of it should be high. Users can then set `policy.classes.<id>` and `policy.ignore_classes` for it with no code change.
+- **A committed-value pattern** (a provider's API key format) goes under the type's `values:` with a `name` (shown as the detector), a `regex` (at most one capture group, the value), `keywords` (substrings every match contains; the regex only runs on lines that have one), a `confidence` and, for random-looking secrets, `min_entropy` (bits per character, 3 to 4.5 is typical). Placeholders (`EXAMPLE`, `xxxx`, `${VAR}`) are skipped for every pattern.
+
+Add cases for the new names and values to `internal/detect/detect_test.go` or `secrets_test.go`, including look-alikes that must not match. Build secret-shaped test strings from pieces (`"sk_" + "live_" + ...`) so that no complete credential is committed; push protection blocks them. Negative context words and transform words shared by all types (`validator`, `masked`, `hashed`) are in `internal/detect/names.go`. Finally, plant the new type in a fixture and label it in `testdata/eval.yaml` so the accuracy report covers it.
 
 ### Add a language
 
@@ -94,12 +100,12 @@ A new language touches five places, and a test checks each one:
 
 ## Pull requests
 
-- Keep each pull request to one change, with tests. CI must be green on Linux, macOS and Windows.
+- Keep each pull request to one change, with tests. CI must be green on Linux, macOS and Windows, and total statement coverage must stay at or above 85%.
 - Add a line under **Unreleased** in [CHANGELOG.md](CHANGELOG.md) for user-visible changes.
 - New Go files start with the license header:
 
   ```go
-  // Copyright 2026 The piiflow Authors
+  // Copyright 2026 The datawarden Authors
   // SPDX-License-Identifier: Apache-2.0
   ```
 
@@ -109,4 +115,14 @@ A new language touches five places, and a test checks each one:
 
 1. Move the **Unreleased** entries in `CHANGELOG.md` under the new version and merge that to `main`.
 2. Tag and push: `git tag -a v0.2.0 -m v0.2.0 && git push origin v0.2.0`.
-3. The `release` workflow tests the tag, builds the binaries (linux/macOS/windows, amd64/arm64), publishes the GitHub Release with checksums, pushes `ghcr.io/gonettools/piiflow`, and moves the `v0` tag that `uses: GoNetTools/pii-scanner@v0` resolves to. Tags with a suffix (`v0.2.0-rc.1`) become pre-releases and leave `v0` and `latest` alone.
+3. The `release` workflow tests the tag, builds the binaries (linux/macOS/windows, amd64/arm64), publishes the GitHub Release with checksums, pushes `ghcr.io/gonettools/datawarden`, and moves the `v0` tag that `uses: GoNetTools/pii-scanner@v0` resolves to. Tags with a suffix (`v0.2.0-rc.1`) become pre-releases and leave `v0` and `latest` alone.
+
+## Renaming the repository to datawarden (maintainers)
+
+The tool is called datawarden, but the repository, the Go module path and the GitHub Action reference still use `GoNetTools/pii-scanner`. When the repository is renamed:
+
+1. **Rename on GitHub** (Settings → General → Repository name). GitHub redirects the old URLs, clones and `uses: GoNetTools/pii-scanner@v0` to the new name, so existing users keep working.
+2. **Change the module path** in one commit: `go mod edit -module github.com/GoNetTools/datawarden`, then replace the import prefix everywhere (`git grep -l 'github.com/GoNetTools/pii-scanner' | xargs sed -i 's#github.com/GoNetTools/pii-scanner#github.com/GoNetTools/datawarden#g'`), then `gofmt -l cmd internal` and `go build ./...`. The release build reads the module path from `go list -m`, so its `-X .../internal/app.Version` flag follows on its own.
+3. **Update the remaining references**: `git grep -n pii-scanner` should then list only the badges and links in `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, `NOTICE`, `CHANGELOG.md`, `Dockerfile` (the image source label), `.github/ISSUE_TEMPLATE/config.yml`, `.github/workflows/release.yml` (a comment), `action.yml` and `examples/github/datawarden.yml`. Replace them, and change `uses: GoNetTools/pii-scanner@v0` to `uses: GoNetTools/datawarden@v0` in the README and the example workflow.
+4. **Check**: `go test ./...`, `go run ./cmd/datawarden-bench -check`, `go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12`, and `git grep -n pii-scanner` returns nothing but the CHANGELOG's history.
+5. **Release** a new minor version so `go install github.com/GoNetTools/datawarden/cmd/datawarden@latest` resolves, and note the new module path in the CHANGELOG. The old module path keeps serving the versions already published.

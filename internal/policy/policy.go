@@ -1,4 +1,4 @@
-// Copyright 2026 The piiflow Authors
+// Copyright 2026 The datawarden Authors
 // SPDX-License-Identifier: Apache-2.0
 
 // Package policy decides which findings are violations and how severe
@@ -22,12 +22,10 @@ const (
 	Low    = "low"
 )
 
-// Identity documents are high severity even when committed as literals.
-var identityTypes = map[string]bool{"vn_cccd": true, "national_id": true, "us_ssn": true, "passport": true, "drivers_license": true, "tax_id": true, "insurance_id": true}
-
 // Catalog describes data types (implemented by *detect.Classifier).
 type Catalog interface {
 	Lookup(id string) detect.DataType
+	Class(id string) detect.Class
 }
 
 // Evaluator applies a repository's policy.
@@ -36,27 +34,45 @@ type Evaluator struct {
 	Catalog Catalog
 }
 
-// Apply filters flows and literals by the config, then sets Violation,
-// Severity and Allowed on what remains.
+// Apply filters flows and literals by the config, then sets Class,
+// Violation, Severity and Allowed on what remains. A class's entry in
+// policy.classes overrides fail_on and safe_transforms for its data.
 func (e Evaluator) Apply(flows []*finding.Flow, lits []*finding.Literal) ([]*finding.Flow, []*finding.Literal) {
 	c := e.Config
 	p := c.Policy
 	ignore := toSet(p.IgnoreDataTypes)
-	failOn := toSet(p.FailOn)
-	safe := toSet(p.SafeTransforms)
+	ignoreClass := toSet(p.IgnoreClasses)
+	failOn := map[string]map[string]bool{"": toSet(p.FailOn)}
+	safe := map[string]map[string]bool{"": toSet(p.SafeTransforms)}
+	for class, cp := range p.Classes {
+		if cp.FailOn != nil {
+			failOn[class] = toSet(cp.FailOn)
+		}
+		if cp.SafeTransforms != nil {
+			safe[class] = toSet(cp.SafeTransforms)
+		}
+	}
+	forClass := func(m map[string]map[string]bool, class string) map[string]bool {
+		if s, ok := m[class]; ok {
+			return s
+		}
+		return m[""]
+	}
 
 	var outF []*finding.Flow
 	for _, f := range flows {
-		if ignore[f.DataType] || f.Confidence < c.MinConfidence {
+		dt := e.Catalog.Lookup(f.DataType)
+		if ignore[f.DataType] || ignoreClass[dt.Class] || f.Confidence < c.MinConfidence {
 			continue
 		}
-		f.Severity = e.flowSeverity(f)
+		f.Class = dt.Class
+		f.Severity = e.flowSeverity(f, dt)
 		f.Violation = false
 		f.Allowed = ""
 		switch {
-		case !failOn[f.Dest.Kind] || f.Dest.FirstParty:
+		case !forClass(failOn, dt.Class)[f.Dest.Kind] || f.Dest.FirstParty:
 		case f.Confidence < p.MinConfidence:
-		case anySafe(f.Transforms, safe):
+		case anySafe(f.Transforms, forClass(safe, dt.Class)):
 			f.Allowed = "transform: " + strings.Join(f.Transforms, ",")
 		default:
 			if a := matchAllow(p.Allow, f); a != nil {
@@ -72,11 +88,13 @@ func (e Evaluator) Apply(flows []*finding.Flow, lits []*finding.Literal) ([]*fin
 	}
 	var keptL []*finding.Literal
 	for _, l := range lits {
-		if ignore[l.DataType] {
+		dt := e.Catalog.Lookup(l.DataType)
+		if ignore[l.DataType] || ignoreClass[dt.Class] {
 			continue
 		}
+		l.Class = dt.Class
 		l.Severity = Medium
-		if identityTypes[l.DataType] || e.Catalog.Lookup(l.DataType).Sensitive {
+		if e.raised(dt) {
 			l.Severity = High
 		}
 		l.Violation = p.FailOnLiterals == nil || *p.FailOnLiterals
@@ -85,7 +103,14 @@ func (e Evaluator) Apply(flows []*finding.Flow, lits []*finding.Literal) ([]*fin
 	return outF, keptL
 }
 
-func (e Evaluator) flowSeverity(f *finding.Flow) string {
+// raised reports whether findings of dt are high severity wherever they
+// go: special-category data, identity documents (severity: high in the
+// taxonomy) and classes marked high (health, cardholder data, credentials).
+func (e Evaluator) raised(dt detect.DataType) bool {
+	return dt.Sensitive || dt.Severity == High || e.Catalog.Class(dt.Class).Severity == High
+}
+
+func (e Evaluator) flowSeverity(f *finding.Flow, dt detect.DataType) string {
 	sev := Medium
 	switch f.Dest.Kind {
 	case "third_party":
@@ -93,8 +118,7 @@ func (e Evaluator) flowSeverity(f *finding.Flow) string {
 	case "first_party":
 		sev = Low
 	}
-	dt := e.Catalog.Lookup(f.DataType)
-	if (dt.Sensitive || identityTypes[f.DataType]) && sev == Medium {
+	if e.raised(dt) && sev == Medium {
 		sev = High
 	}
 	return sev

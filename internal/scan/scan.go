@@ -1,4 +1,4 @@
-// Copyright 2026 The piiflow Authors
+// Copyright 2026 The datawarden Authors
 // SPDX-License-Identifier: Apache-2.0
 
 // Package scan is the pipeline: ingest, frontends, detectors, analysis and
@@ -75,7 +75,7 @@ type Analyzer interface {
 	Analyze(ctx context.Context, funcs []*ir.Func, in analysis.Input) (*analysis.Result, error)
 }
 
-// LiteralDetector finds PII values in text (*detect.LiteralScanner).
+// LiteralDetector finds sensitive values in text (*detect.LiteralScanner).
 type LiteralDetector interface {
 	Scan(content []byte) []detect.LiteralHit
 }
@@ -91,7 +91,7 @@ type SchemaParser interface {
 // (ingest.Lister).
 type FileLister interface {
 	// List returns the files not excluded by the default ignore patterns
-	// and the repository's .piiflowignore.
+	// and the repository's .datawardenignore.
 	List(fsys fs.FS) ([]ingest.File, error)
 	// Select keeps the files named by root-relative files or directories.
 	Select(fsys fs.FS, all []ingest.File, paths []string) []ingest.File
@@ -175,7 +175,7 @@ func (s *Scanner) Run(ctx context.Context, req Request) (*Result, error) {
 		return nil, err
 	}
 
-	// Committed PII values.
+	// Committed sensitive values.
 	if *cfg.Literals.Enabled || req.LiteralsOnly {
 		res.Literals, err = s.scanLiterals(ctx, req, literalTargets)
 		if err != nil {
@@ -252,7 +252,7 @@ func (s *Scanner) selectTargets(ctx context.Context, req Request, all []ingest.F
 		}
 		literalTargets = changedFiles
 		if req.Cache.Empty() {
-			res.Warnings = append(res.Warnings, "no cached call graph for --diff (run a full scan or `piiflow baseline` on the base branch and cache .piiflow/cache); analyzing the whole repository, reporting only new findings")
+			res.Warnings = append(res.Warnings, "no cached call graph for --diff (run a full scan or `datawarden baseline` on the base branch and cache .datawarden/cache); analyzing the whole repository, reporting only new findings")
 			req.logf("diff: no call graph cache, falling back to a full analysis")
 			break
 		}

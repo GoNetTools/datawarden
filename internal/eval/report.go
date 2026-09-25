@@ -1,4 +1,4 @@
-// Copyright 2026 The piiflow Authors
+// Copyright 2026 The datawarden Authors
 // SPDX-License-Identifier: Apache-2.0
 
 package eval
@@ -108,7 +108,7 @@ func WriteText(w io.Writer, r *Result) error {
 func WriteMarkdown(w io.Writer, r *Result) error {
 	b := &errWriter{w: w}
 	o := r.Total
-	b.printf("## piiflow accuracy\n\n")
+	b.printf("## datawarden accuracy\n\n")
 	b.printf("**Precision %.2f · recall %.2f · F1 %.2f** (%d TP, %d FP, %d FN", o.Precision(), o.Recall(), o.F1(), o.TP, o.FP, o.FN)
 	if o.Ambiguous > 0 {
 		b.printf(", %d ambiguous", o.Ambiguous)

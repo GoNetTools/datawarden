@@ -1,4 +1,4 @@
-// Copyright 2026 The piiflow Authors
+// Copyright 2026 The datawarden Authors
 // SPDX-License-Identifier: Apache-2.0
 
 package platform
@@ -36,7 +36,7 @@ func TestFileBlob(t *testing.T) {
 func TestOSWorkspace(t *testing.T) {
 	root := t.TempDir()
 	o := OS{Git: ExecGit}
-	if err := o.WriteFile(filepath.Join(root, ".piiflow.yaml"), []byte("version: 1\n")); err != nil {
+	if err := o.WriteFile(filepath.Join(root, ".datawarden.yaml"), []byte("version: 1\n")); err != nil {
 		t.Fatal(err)
 	}
 	if err := o.WriteFile(filepath.Join(root, "src", "a.go"), []byte("package a")); err != nil {
@@ -57,4 +57,29 @@ func TestOSWorkspace(t *testing.T) {
 func readFS(r scan.Repo, name string) (string, error) {
 	b, err := fs.ReadFile(r.FS, name)
 	return string(b), err
+}
+
+func TestOSGetwdAndIsDir(t *testing.T) {
+	var o OS
+	wd, err := o.Getwd()
+	if err != nil || wd == "" {
+		t.Fatalf("Getwd: %q %v", wd, err)
+	}
+	dir := t.TempDir()
+	file := filepath.Join(dir, "f.txt")
+	if err := o.WriteFile(file, []byte("x")); err != nil {
+		t.Fatal(err)
+	}
+	if !o.IsDir(dir) || o.IsDir(file) || o.IsDir(filepath.Join(dir, "missing")) {
+		t.Error("IsDir")
+	}
+	if abs, err := o.Abs("rel"); err != nil || !filepath.IsAbs(abs) {
+		t.Errorf("Abs: %q %v", abs, err)
+	}
+	if b, err := o.ReadFile(file); err != nil || string(b) != "x" {
+		t.Errorf("ReadFile: %q %v", b, err)
+	}
+	if got := o.FindRoot(dir); got != dir {
+		t.Errorf("FindRoot without markers returns the directory itself: %s", got)
+	}
 }

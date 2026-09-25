@@ -3,5 +3,5 @@
 #   cp scripts/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
 # Scans the staged content of staged files for committed personal data.
 # Bypass once with: git commit --no-verify
-command -v piiflow >/dev/null 2>&1 || { echo "piiflow not installed; skipping PII check" >&2; exit 0; }
-exec piiflow scan --staged --no-cache
+command -v datawarden >/dev/null 2>&1 || { echo "datawarden not installed; skipping PII check" >&2; exit 0; }
+exec datawarden scan --staged --no-cache

@@ -1,4 +1,4 @@
-// Copyright 2026 The piiflow Authors
+// Copyright 2026 The datawarden Authors
 // SPDX-License-Identifier: Apache-2.0
 
 // Package analysis runs an inter-procedural taint analysis over IR.
@@ -542,8 +542,10 @@ func (a *analyzer) call(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 	label := calleeLabel(c)
 
 	// Sinks.
+	remote := false
 	for _, hit := range a.opts.Rules.Match(fn.Lang, rules.KindSink, c) {
 		r := hit.Rule
+		remote = remote || r.Category == "network"
 		dest := a.dest(r, fn, in, recvOff)
 		for i := recvOff; i < len(in.Args); i++ {
 			if !r.Arg.Selects(i - recvOff) {
@@ -665,6 +667,12 @@ func (a *analyzer) call(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 			continue
 		}
 		for _, f := range factsOf(i) {
+			if remote {
+				// A network call answers with the remote's response,
+				// which is not derived from what was sent: a login
+				// request's reply is not the password.
+				continue
+			}
 			changed = st.add(in.Dst, derive(f, in.Pos, 0.95, nameXf)) || changed
 			if i >= recvOff && recvOff == 1 && !c.Construct && isMutator(c.Name) {
 				changed = st.add(in.Args[0], derive(f, in.Pos, 0.9)) || changed

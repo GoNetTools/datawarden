@@ -1,4 +1,4 @@
-// Copyright 2026 The piiflow Authors
+// Copyright 2026 The datawarden Authors
 // SPDX-License-Identifier: Apache-2.0
 
 package report
@@ -20,7 +20,7 @@ func (c catalog) Lookup(id string) detect.DataType { return detect.DataType{ID: 
 
 func sample() *Report {
 	return &Report{
-		Tool: "piiflow", Version: "t", Mode: "full", Started: time.Date(2026, 9, 24, 0, 0, 0, 0, time.UTC), Duration: "2s",
+		Tool: "datawarden", Version: "t", Mode: "full", Started: time.Date(2026, 9, 24, 0, 0, 0, 0, time.UTC), Duration: "2s",
 		Flows: []*finding.Flow{{DataType: "vn_cccd", SinkRule: "r", Dest: finding.Destination{Kind: "log"}, Violation: true, Severity: "high",
 			Sink: ir.Pos{File: "a.go", Line: 4}, Path: []ir.Pos{{File: "a.go", Line: 1}, {File: "a.go", Line: 4}}, Fingerprint: "fp"}},
 		Catalog: catalog{"vn_cccd": "Căn cước công dân"},

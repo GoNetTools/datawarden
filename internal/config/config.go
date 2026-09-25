@@ -1,7 +1,7 @@
-// Copyright 2026 The piiflow Authors
+// Copyright 2026 The datawarden Authors
 // SPDX-License-Identifier: Apache-2.0
 
-// Package config loads .piiflow.yaml.
+// Package config loads .datawarden.yaml.
 package config
 
 import (
@@ -17,7 +17,7 @@ import (
 )
 
 // FileName is the default config file name at the repository root.
-const FileName = ".piiflow.yaml"
+const FileName = ".datawarden.yaml"
 
 // Allow suppresses matching flows as accepted by policy.
 type Allow struct {
@@ -37,20 +37,34 @@ type Policy struct {
 	SafeTransforms []string `yaml:"safe_transforms" json:"safe_transforms"`
 	// MinConfidence is the minimum confidence for a flow to be a violation.
 	MinConfidence float64 `yaml:"min_confidence" json:"min_confidence"`
-	// FailOnLiterals makes committed PII literals violations.
+	// FailOnLiterals makes committed sensitive values violations.
 	FailOnLiterals *bool `yaml:"fail_on_literals" json:"fail_on_literals"`
 	// IgnoreDataTypes drops these data types entirely.
 	IgnoreDataTypes []string `yaml:"ignore_data_types" json:"ignore_data_types,omitempty"`
-	Allow           []Allow  `yaml:"allow" json:"allow,omitempty"`
+	// IgnoreClasses drops every data type of these classes (pii, phi,
+	// pci, credential).
+	IgnoreClasses []string `yaml:"ignore_classes" json:"ignore_classes,omitempty"`
+	// Classes override fail_on and safe_transforms for one class of data:
+	// hashing a password is the right thing to do, hashing a phone number
+	// is not.
+	Classes map[string]ClassPolicy `yaml:"classes" json:"classes,omitempty"`
+	Allow   []Allow                `yaml:"allow" json:"allow,omitempty"`
 }
 
-// Literals configures the committed-PII literal detector.
+// ClassPolicy overrides the policy for one class of data. Empty fields
+// keep the general policy.
+type ClassPolicy struct {
+	FailOn         []string `yaml:"fail_on" json:"fail_on,omitempty"`
+	SafeTransforms []string `yaml:"safe_transforms" json:"safe_transforms,omitempty"`
+}
+
+// Literals configures the committed-value (literal) detector.
 type Literals struct {
 	Enabled       *bool   `yaml:"enabled" json:"enabled"`
 	MinConfidence float64 `yaml:"min_confidence" json:"min_confidence"`
 }
 
-// Config is .piiflow.yaml.
+// Config is .datawarden.yaml.
 type Config struct {
 	Version int `yaml:"version" json:"version"`
 	// Languages restricts analysis (default: every supported language found).
@@ -59,7 +73,7 @@ type Config struct {
 	IncludeTests bool `yaml:"include_tests" json:"include_tests"`
 	// FirstPartyDomains turns network sinks to these hosts into first-party.
 	FirstPartyDomains []string `yaml:"first_party_domains" json:"first_party_domains,omitempty"`
-	// Rules are extra rule files or directories (default .piiflow/rules).
+	// Rules are extra rule files or directories (default .datawarden/rules).
 	Rules    []string `yaml:"rules" json:"rules,omitempty"`
 	Baseline string   `yaml:"baseline" json:"baseline"`
 	CacheDir string   `yaml:"cache_dir" json:"cache_dir"`
@@ -78,9 +92,9 @@ func Default() *Config {
 	t := true
 	return &Config{
 		Version:       1,
-		Rules:         []string{".piiflow/rules"},
-		Baseline:      ".piiflow/baseline.json",
-		CacheDir:      ".piiflow/cache",
+		Rules:         []string{".datawarden/rules"},
+		Baseline:      ".datawarden/baseline.json",
+		CacheDir:      ".datawarden/cache",
 		MinConfidence: 0.35,
 		Literals:      Literals{Enabled: &t, MinConfidence: 0.6},
 		Policy: Policy{
@@ -88,6 +102,15 @@ func Default() *Config {
 			SafeTransforms: []string{"masked", "redacted", "encrypted", "tokenized", "anonymized"},
 			MinConfidence:  0.55,
 			FailOnLiterals: &t,
+			Classes: map[string]ClassPolicy{
+				// Credentials exist to be sent to the services they unlock, so
+				// network calls are not violations; logs, analytics and
+				// storage are. Hashing a password is the point of hashing.
+				"credential": {
+					FailOn:         []string{"third_party", "log", "storage", "ipc"},
+					SafeTransforms: []string{"masked", "redacted", "encrypted", "tokenized", "hashed", "sha256", "sha512"},
+				},
+			},
 		},
 	}
 }
@@ -130,6 +153,13 @@ func (c *Config) validate() error {
 			return fmt.Errorf("%s: policy.fail_on: unknown destination kind %q", c.Path, k)
 		}
 	}
+	for class, cp := range c.Policy.Classes {
+		for _, k := range cp.FailOn {
+			if !kinds[k] {
+				return fmt.Errorf("%s: policy.classes.%s.fail_on: unknown destination kind %q", c.Path, class, k)
+			}
+		}
+	}
 	for _, l := range c.Languages {
 		if !lang.IsCode(l) {
 			return fmt.Errorf("%s: languages: unsupported language %q (supported: %s)", c.Path, l, strings.Join(lang.CodeNames(), ", "))
@@ -146,8 +176,8 @@ func Abs(root, p string) string {
 	return filepath.Join(root, filepath.FromSlash(p))
 }
 
-// Template is written by `piiflow init`.
-const Template = `# piiflow configuration. All keys are optional.
+// Template is written by `datawarden init`.
+const Template = `# datawarden configuration. All keys are optional.
 version: 1
 
 # Languages to analyze for flows (default: all supported that are present).
@@ -162,10 +192,10 @@ first_party_domains: []
 
 # Extra rule files/directories; rules with the same id replace built-ins,
 # and "- {id: <id>, disabled: true}" turns one off.
-rules: [.piiflow/rules]
+rules: [.datawarden/rules]
 
-baseline: .piiflow/baseline.json
-cache_dir: .piiflow/cache
+baseline: .datawarden/baseline.json
+cache_dir: .datawarden/cache
 
 literals:
   enabled: true
@@ -181,6 +211,16 @@ policy:
   min_confidence: 0.55
   fail_on_literals: true
   ignore_data_types: []
+  # Drop whole classes of data: pii, phi (health), pci (cardholder data),
+  # credential (passwords, tokens, keys).
+  ignore_classes: []
+  # Per-class overrides of fail_on and safe_transforms. Credentials are
+  # meant to be sent to the services they unlock (network), and a hashed
+  # password is fine; a hashed phone number is not.
+  classes:
+    credential:
+      fail_on: [third_party, log, storage, ipc]
+      safe_transforms: [masked, redacted, encrypted, tokenized, hashed, sha256, sha512]
   allow: []
   #  - sink: sdk.sentry.set_user
   #    data_types: [email]

@@ -1,4 +1,4 @@
-// Copyright 2026 The piiflow Authors
+// Copyright 2026 The datawarden Authors
 // SPDX-License-Identifier: Apache-2.0
 
 package baseline
@@ -50,5 +50,35 @@ func TestRoundTrip(t *testing.T) {
 	unseen := l.Mark(flows, lits)
 	if !flows[0].Baselined || !lits[0].Baselined || flows[1].Baselined || len(unseen) != 0 {
 		t.Errorf("mark: %+v %+v unseen=%v", flows[0], lits[0], unseen)
+	}
+}
+
+func TestCodec(t *testing.T) {
+	now := time.Date(2026, 9, 24, 0, 0, 0, 0, time.UTC)
+	flows := []*finding.Flow{{DataType: "email", SinkRule: "log.go.stdlib", Function: "p.f", Violation: true, Sink: ir.Pos{File: "a.go", Line: 3}}}
+	lits := []*finding.Literal{{DataType: "phone", Pos: ir.Pos{File: "s.csv", Line: 2}, ValueHash: "h", Violation: true}}
+	var c Codec
+	data, n, err := c.Encode(flows, lits, "abc", now)
+	if err != nil || n != 2 || !strings.Contains(string(data), `"commit": "abc"`) {
+		t.Fatalf("Encode: %d %v\n%s", n, err, data)
+	}
+
+	fresh := []*finding.Flow{{DataType: "email", SinkRule: "log.go.stdlib", Function: "p.f", Violation: true, Sink: ir.Pos{File: "a.go", Line: 30}}}
+	size, unseen, err := c.Mark(data, fresh, nil)
+	if err != nil || size != 2 || len(unseen) != 1 || !fresh[0].Baselined || fresh[0].Fingerprint == "" {
+		t.Errorf("Mark: size=%d unseen=%v err=%v flow=%+v", size, unseen, err, fresh[0])
+	}
+	for _, empty := range [][]byte{nil, []byte("  \n")} {
+		f := []*finding.Flow{{DataType: "email", Violation: true}}
+		if size, _, err := c.Mark(empty, f, nil); err != nil || size != 0 || f[0].Baselined || f[0].Fingerprint == "" {
+			t.Errorf("empty baseline: %d %v %+v", size, err, f[0])
+		}
+	}
+	if _, _, err := c.Mark([]byte("not json"), nil, nil); err == nil {
+		t.Error("corrupt baseline accepted")
+	}
+	var nilBaseline *Baseline
+	if nilBaseline.Len() != 0 || nilBaseline.Has("x") {
+		t.Error("nil baseline")
 	}
 }
