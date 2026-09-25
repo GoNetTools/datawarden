@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -121,9 +122,16 @@ func (c *fakeCommenter) Post(body string) (string, error) {
 }
 
 var (
-	testRoot = filepath.Join(string(filepath.Separator), "repo")
+	testRoot = absPath("repo")
 	testNow  = time.Date(2026, 9, 24, 8, 30, 0, 0, time.UTC)
 )
+
+// absPath is an absolute path on every platform: /elem... on Unix,
+// C:\elem... (the temp directory's volume) on Windows, where \elem is
+// not absolute.
+func absPath(elem ...string) string {
+	return filepath.Join(append([]string{filepath.VolumeName(os.TempDir()) + string(filepath.Separator)}, elem...)...)
+}
 
 func sentryFlow() []*finding.Flow {
 	return []*finding.Flow{{
@@ -391,7 +399,7 @@ func TestSessionFlags(t *testing.T) {
 	} {
 		h2 := newHarness(nil)
 		if name == "rules outside the repo" {
-			h2 = newHarness(map[string]string{".datawarden.yaml": "rules: [" + filepath.ToSlash(filepath.Join(string(filepath.Separator), "elsewhere")) + "]\n"})
+			h2 = newHarness(map[string]string{".datawarden.yaml": "rules: [" + filepath.ToSlash(absPath("elsewhere")) + "]\n"})
 		}
 		if code := h2.run(args...); code != ExitError {
 			t.Errorf("%s: exit %d", name, code)
@@ -401,7 +409,7 @@ func TestSessionFlags(t *testing.T) {
 
 func TestErrorsExitTwo(t *testing.T) {
 	h := newHarness(nil)
-	outside := filepath.Join(string(filepath.Separator), "elsewhere", "x.go")
+	outside := absPath("elsewhere", "x.go")
 	if code := h.run("scan", outside, "--no-cache"); code != ExitError || !strings.Contains(h.errb.String(), "outside the repository") {
 		t.Errorf("path outside repo: exit %d %s", code, h.errb)
 	}

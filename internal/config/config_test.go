@@ -4,6 +4,7 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 	"testing/fstest"
@@ -33,7 +34,8 @@ func TestLoad(t *testing.T) {
 }
 
 func TestAbsAndLoader(t *testing.T) {
-	root := filepath.Join(string(filepath.Separator), "repo")
+	// \repo is not absolute on Windows; the temp directory's volume makes it so.
+	root := filepath.Join(filepath.VolumeName(os.TempDir())+string(filepath.Separator), "repo")
 	if Abs(root, "") != "" || Abs(root, root) != root || Abs(root, "a/b") != filepath.Join(root, "a", "b") {
 		t.Error("Abs")
 	}
