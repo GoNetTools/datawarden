@@ -60,7 +60,11 @@ type Catalog interface {
 
 // Counts summarises the report.
 type Counts struct {
-	NewFlows, NewLiterals, BaselinedFlows, BaselinedLiterals, Accepted int
+	NewFlows int
+	NewLiterals int
+	BaselinedFlows int
+	BaselinedLiterals int
+	Accepted int
 }
 
 // Counts computes summary numbers.
@@ -166,7 +170,9 @@ func (r *Report) dataType(id string) detect.DataType {
 	return r.Catalog.Lookup(id)
 }
 
-func (r *Report) dtLabel(id string) string { return r.dataType(id).Label }
+func (r *Report) dtLabel(id string) string {
+	return r.dataType(id).Label
+}
 
 func (r *Report) message(f *finding.Flow) string {
 	msg := fmt.Sprintf("%s from %s reaches %s via %s", r.dtLabel(f.DataType), f.SourceDesc, destLabel(f.Dest), f.SinkCall)
@@ -184,4 +190,6 @@ func (r *Report) literalMessage(l *finding.Literal) string {
 type Writer struct{}
 
 // Write renders r in format (see Write).
-func (Writer) Write(w io.Writer, format string, r *Report) error { return Write(w, format, r) }
+func (Writer) Write(w io.Writer, format string, r *Report) error {
+	return Write(w, format, r)
+}

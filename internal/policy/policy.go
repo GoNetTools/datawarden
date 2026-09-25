@@ -198,5 +198,8 @@ type Policies struct {
 
 // Apply evaluates findings under cfg (see Evaluator.Apply).
 func (p Policies) Apply(cfg *config.Config, flows []*finding.Flow, lits []*finding.Literal) ([]*finding.Flow, []*finding.Literal) {
-	return Evaluator{Config: cfg, Catalog: p.Catalog}.Apply(flows, lits)
+	return Evaluator{
+		Config: cfg,
+		Catalog: p.Catalog,
+	}.Apply(flows, lits)
 }

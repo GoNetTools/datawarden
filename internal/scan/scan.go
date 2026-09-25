@@ -158,7 +158,12 @@ func (s *Scanner) Run(ctx context.Context, req Request) (*Result, error) {
 	}
 	cfg := req.Config
 	repo := req.Repo
-	res := &Result{Mode: ModeFull, FilesAnalyzed: map[string]int{}, Commit: repo.VCS.HeadCommit(ctx), Started: start}
+	res := &Result{
+		Mode: ModeFull, 
+		FilesAnalyzed: map[string]int{}, 
+		Commit: repo.VCS.HeadCommit(ctx), 
+		Started: start
+	}
 
 	all, err := s.Files.List(repo.FS)
 	if err != nil {
@@ -216,9 +221,16 @@ func (s *Scanner) Run(ctx context.Context, req Request) (*Result, error) {
 func (s *Scanner) validate(req Request) error {
 	var missing []string
 	for name, ok := range map[string]bool{
-		"Scanner.Files": s.Files != nil, "Scanner.Frontends": s.Frontends != nil, "Scanner.Analyzer": s.Analyzer != nil, "Scanner.Literals": s.Literals != nil,
-		"Scanner.Schemas": s.Schemas != nil, "Scanner.Clock": s.Clock != nil, "Request.Repo.FS": req.Repo.FS != nil,
-		"Request.Repo.VCS": req.Repo.VCS != nil, "Request.Cache": req.Cache != nil, "Request.Config": req.Config != nil,
+		"Scanner.Files": s.Files != nil,
+		"Scanner.Frontends": s.Frontends != nil,
+		"Scanner.Analyzer": s.Analyzer != nil,
+		"Scanner.Literals": s.Literals != nil,
+		"Scanner.Schemas": s.Schemas != nil,
+		"Scanner.Clock": s.Clock != nil,
+		"Request.Repo.FS": req.Repo.FS != nil,
+		"Request.Repo.VCS": req.Repo.VCS != nil,
+		"Request.Cache": req.Cache != nil,
+		"Request.Config": req.Config != nil,
 		"Request.Rules": req.Rules != nil,
 	} {
 		if !ok {
@@ -352,7 +364,13 @@ func (s *Scanner) lower(ctx context.Context, req Request, targets []ingest.File,
 		}
 		groups[f.Lang] = append(groups[f.Lang], f.Rel)
 	}
-	fopts := frontend.Options{Root: req.Repo.Root, FS: req.Repo.FS, BuildTags: cfg.GoBuildTags, Logf: req.Logf, KnownFunc: req.Cache.Has}
+	fopts := frontend.Options{
+		Root: req.Repo.Root,
+		FS: req.Repo.FS,
+		BuildTags: cfg.GoBuildTags,
+		Logf: req.Logf,
+		KnownFunc: req.Cache.Has
+	}
 	prog := &ir.Module{}
 	var lowered []string
 	langNames := make([]string, 0, len(groups))
