@@ -101,6 +101,9 @@ func (p *program) parse(ctx context.Context, rels []string, lang *sitter.Languag
 			continue
 		}
 		f := &srcFile{rel: rel, src: src, tree: tree, root: tree.RootNode(), imports: map[string]string{}}
+		if n, line := syntaxErrors(f.root); n > 0 {
+			p.warnf("%s:%d: %d syntax error(s) the parser could not read; the code around them is analysed as far as it could be recovered", rel, line, n)
+		}
 		p.files = append(p.files, f)
 		p.collectConsts(f, f.root)
 	}
@@ -962,6 +965,9 @@ func (b *builder) finish() *ir.Func {
 
 // ---- tree helpers ----
 
+// named returns the named children of n. An ERROR node (syntax the
+// grammar could not parse) is transparent: its children take its place, so
+// declarations and statements inside it are still lowered.
 func named(n *sitter.Node) []*sitter.Node {
 	if n == nil {
 		return nil
@@ -969,9 +975,38 @@ func named(n *sitter.Node) []*sitter.Node {
 	cnt := int(n.NamedChildCount())
 	out := make([]*sitter.Node, 0, cnt)
 	for i := 0; i < cnt; i++ {
-		out = append(out, n.NamedChild(i))
+		c := n.NamedChild(i)
+		if c.Type() == "ERROR" {
+			out = append(out, named(c)...)
+			continue
+		}
+		out = append(out, c)
 	}
 	return out
+}
+
+// syntaxErrors counts the ERROR and missing nodes under n and returns the
+// first one's line.
+func syntaxErrors(n *sitter.Node) (count, line int) {
+	var walk func(*sitter.Node)
+	walk = func(c *sitter.Node) {
+		if c.IsError() || c.IsMissing() {
+			if count == 0 {
+				line = int(c.StartPoint().Row) + 1
+			}
+			count++
+			if c.IsMissing() {
+				return
+			}
+		}
+		for i := 0; i < int(c.ChildCount()); i++ {
+			walk(c.Child(i))
+		}
+	}
+	if n != nil && n.HasError() {
+		walk(n)
+	}
+	return count, line
 }
 
 // fieldChildren returns the children of n stored under a field name, for

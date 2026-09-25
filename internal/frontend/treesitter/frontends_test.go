@@ -7,6 +7,7 @@ package treesitter
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"testing/fstest"
 
@@ -261,5 +262,17 @@ def f(flag):
 		if c[name] != nil {
 			t.Errorf("%s: dead arm was lowered", name)
 		}
+	}
+}
+
+// Code inside syntax the grammar cannot parse is still lowered, and the
+// file gets a warning instead of being dropped silently.
+func TestSyntaxErrorsAreRecoveredAndReported(t *testing.T) {
+	m := lower(t, NewKotlin, map[string]string{"a/G.kt": "package a\nclass M { companion object { fun s(t: String) { println(t) } } }\nfun d(email: String) { log(email) }\n"})
+	if calls(m)["log"] == nil {
+		t.Error("the function after the syntax error was dropped")
+	}
+	if len(m.Warnings) != 1 || !strings.Contains(m.Warnings[0], "a/G.kt:2: ") || !strings.Contains(m.Warnings[0], "syntax error") {
+		t.Errorf("warnings = %q", m.Warnings)
 	}
 }
