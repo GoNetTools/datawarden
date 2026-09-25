@@ -1,4 +1,4 @@
-// Copyright 2026 The pii-scanner Authors
+// Copyright 2026 The datawarden Authors
 // SPDX-License-Identifier: Apache-2.0
 
 package app
@@ -128,7 +128,7 @@ func TestLiteralsOnly(t *testing.T) {
 
 func TestErrorsExit2(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, ".pii-scanner.yaml"), []byte("policy:\n  fail_on: [nowhere]\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, ".datawarden.yaml"), []byte("policy:\n  fail_on: [nowhere]\n"), 0o644)
 	if code, _, _ := run(t, "scan", "--root", dir); code != cli.ExitError {
 		t.Errorf("bad config: exit %d", code)
 	}
@@ -160,7 +160,7 @@ func TestInit(t *testing.T) {
 	if code, _, errs := run(t, "init", "--root", dir); code != cli.ExitClean {
 		t.Fatalf("init: %s", errs)
 	}
-	for _, f := range []string{".pii-scanner.yaml", ".pii-scannerignore", ".pii-scanner/rules/example.yaml"} {
+	for _, f := range []string{".datawarden.yaml", ".datawardenignore", ".datawarden/rules/example.yaml"} {
 		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
 			t.Errorf("missing %s", f)
 		}

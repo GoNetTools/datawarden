@@ -1,5 +1,5 @@
-# Copy to .github/workflows/pii-scanner.yml in the repository to scan.
-name: pii-scanner
+# Copy to .github/workflows/datawarden.yml in the repository to scan.
+name: datawarden
 
 on:
   pull_request:
@@ -12,7 +12,7 @@ permissions:
   pull-requests: write     # summary comment
 
 jobs:
-  pii-scanner:
+  datawarden:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

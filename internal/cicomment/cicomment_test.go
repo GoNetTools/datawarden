@@ -1,4 +1,4 @@
-// Copyright 2026 The pii-scanner Authors
+// Copyright 2026 The datawarden Authors
 // SPDX-License-Identifier: Apache-2.0
 
 package cicomment
@@ -55,7 +55,7 @@ func TestGitHubCreatesThenUpdates(t *testing.T) {
 			"GITHUB_API_URL": srv.URL, "GITHUB_EVENT_PATH": "/event.json"}),
 		ReadFile: func(string) ([]byte, error) { return []byte(`{"pull_request":{"number":12}}`), nil },
 	}
-	what, err := c.Post("### pii-scanner")
+	what, err := c.Post("### datawarden")
 	if err != nil || what != "created" || forge.calls[1] != "POST /repos/acme/app/issues/12/comments" {
 		t.Fatalf("create: %v %s %v", err, what, forge.calls)
 	}
@@ -79,10 +79,10 @@ func TestGitLabNeedsTokenAndMR(t *testing.T) {
 		t.Errorf("no MR: %v", err)
 	}
 	vars["CI_MERGE_REQUEST_IID"] = "5"
-	if _, err := c.Post("x"); err == nil || !strings.Contains(err.Error(), "PII_SCANNER_GITLAB_TOKEN") {
+	if _, err := c.Post("x"); err == nil || !strings.Contains(err.Error(), "DATAWARDEN_GITLAB_TOKEN") {
 		t.Errorf("missing token: %v", err)
 	}
-	vars["PII_SCANNER_GITLAB_TOKEN"] = "glpat"
+	vars["DATAWARDEN_GITLAB_TOKEN"] = "glpat"
 	what, err := c.Post("x")
 	if err != nil || what != "updated" || !strings.HasPrefix(forge.calls[len(forge.calls)-1], "PUT /projects/group%2Fapp/merge_requests/5/notes/42") {
 		t.Errorf("gitlab update: %v %s %v", err, what, forge.calls)

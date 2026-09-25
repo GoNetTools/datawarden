@@ -1,4 +1,4 @@
-// Copyright 2026 The pii-scanner Authors
+// Copyright 2026 The datawarden Authors
 // SPDX-License-Identifier: Apache-2.0
 
 // Package ir defines the small, language-neutral intermediate representation

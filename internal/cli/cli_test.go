@@ -1,4 +1,4 @@
-// Copyright 2026 The pii-scanner Authors
+// Copyright 2026 The datawarden Authors
 // SPDX-License-Identifier: Apache-2.0
 
 package cli
@@ -198,7 +198,7 @@ func TestExitCodesFollowBaseline(t *testing.T) {
 	if code := h.run("baseline"); code != ExitClean {
 		t.Fatalf("baseline: exit %d %s", code, h.errb)
 	}
-	bl := h.file(".pii-scanner/baseline.json")
+	bl := h.file(".datawarden/baseline.json")
 	if !strings.Contains(bl, `"generated": "2026-09-24T08:30:00Z"`) || !strings.Contains(bl, `"function": "com.acme.Repo.save"`) {
 		t.Errorf("baseline file:\n%s", bl)
 	}
@@ -219,7 +219,7 @@ func TestReportWriteFailureExits2(t *testing.T) {
 	h.ws.writeErr = errors.New("disk full")
 	for _, args := range [][]string{
 		{"scan", "--output", "report.json", "--format", "json"},
-		{"scan", "--sarif", "pii-scanner.sarif"},
+		{"scan", "--sarif", "datawarden.sarif"},
 	} {
 		// The scan finds a new violation, so a swallowed write error would exit 1.
 		if code := h.run(args...); code != ExitError || !strings.Contains(h.errb.String(), "disk full") {
@@ -230,14 +230,14 @@ func TestReportWriteFailureExits2(t *testing.T) {
 
 func TestReportsAreWrittenThroughTheWorkspace(t *testing.T) {
 	h := newHarness(nil)
-	h.run("scan", "--sarif", "out/pii-scanner.sarif", "--markdown", "pr.md", "--format", "json")
+	h.run("scan", "--sarif", "out/datawarden.sarif", "--markdown", "pr.md", "--format", "json")
 	var sarif struct {
 		Runs []struct {
 			Results []struct{ RuleID string } `json:"results"`
 		} `json:"runs"`
 	}
-	if err := json.Unmarshal([]byte(h.file("out/pii-scanner.sarif")), &sarif); err != nil || len(sarif.Runs[0].Results) != 1 {
-		t.Fatalf("sarif: %v %s", err, h.file("out/pii-scanner.sarif"))
+	if err := json.Unmarshal([]byte(h.file("out/datawarden.sarif")), &sarif); err != nil || len(sarif.Runs[0].Results) != 1 {
+		t.Fatalf("sarif: %v %s", err, h.file("out/datawarden.sarif"))
 	}
 	md := h.file("pr.md")
 	if !strings.Contains(md, "Phone number") || !strings.Contains(md, "(https://example.test/app/Repo.kt)") {
@@ -307,8 +307,8 @@ func TestRulesTestChecksAnnotations(t *testing.T) {
 
 	// Repository rules without an example are listed.
 	h = newHarness(map[string]string{
-		".pii-scanner/rules/acme.yaml": "- id: sdk.acme.track\n  lang: kotlin\n  call: com.acme.Track.send\n  dest: {kind: third_party}\n",
-		"examples/app/Repo.kt":         annotated,
+		".datawarden/rules/acme.yaml": "- id: sdk.acme.track\n  lang: kotlin\n  call: com.acme.Track.send\n  dest: {kind: third_party}\n",
+		"examples/app/Repo.kt":        annotated,
 	})
 	if code := h.run("rules", "test", "examples"); code != ExitClean || !strings.Contains(h.out.String(), "repository rules without a ruleid example: sdk.acme.track") {
 		t.Errorf("untested repository rule: exit %d\n%s", code, h.out)
@@ -328,7 +328,7 @@ func TestRulesTestChecksAnnotations(t *testing.T) {
 
 func TestRequestIsBuiltFromFlagsConfigAndRepo(t *testing.T) {
 	h := newHarness(map[string]string{
-		".pii-scanner.yaml":       "first_party_domains: [api.acme.vn]\nrules: [policy/rules]\n",
+		".datawarden.yaml":        "first_party_domains: [api.acme.vn]\nrules: [policy/rules]\n",
 		"policy/rules/extra.yaml": "- id: sdk.acme.track\n  lang: kotlin\n  call: com.acme.Track.send\n  dest: {kind: third_party}\n",
 		"src/api/user.ts":         "",
 	})
@@ -354,10 +354,10 @@ func TestSessionFlags(t *testing.T) {
 		"custom.yaml":          "policy:\n  min_confidence: 0.7\n",
 		"services/api/main.go": "package main",
 		"rules-in-root/x.yaml": "- id: sdk.acme.x\n  lang: go\n  call: acme.X\n  dest: {kind: log}\n",
-		".pii-scanner.yaml":    "rules: [" + filepath.ToSlash(filepath.Join(testRoot, "rules-in-root")) + "]\n",
+		".datawarden.yaml":     "rules: [" + filepath.ToSlash(filepath.Join(testRoot, "rules-in-root")) + "]\n",
 	})
 
-	// --root picks the repository; --config replaces .pii-scanner.yaml.
+	// --root picks the repository; --config replaces .datawarden.yaml.
 	if code := h.run("scan", "--root", other, "--config", "custom.yaml", "--no-cache", "--no-fail"); code != ExitClean {
 		t.Fatalf("exit %d: %s", code, h.errb)
 	}
@@ -391,7 +391,7 @@ func TestSessionFlags(t *testing.T) {
 	} {
 		h2 := newHarness(nil)
 		if name == "rules outside the repo" {
-			h2 = newHarness(map[string]string{".pii-scanner.yaml": "rules: [" + filepath.ToSlash(filepath.Join(string(filepath.Separator), "elsewhere")) + "]\n"})
+			h2 = newHarness(map[string]string{".datawarden.yaml": "rules: [" + filepath.ToSlash(filepath.Join(string(filepath.Separator), "elsewhere")) + "]\n"})
 		}
 		if code := h2.run(args...); code != ExitError {
 			t.Errorf("%s: exit %d", name, code)
@@ -421,7 +421,7 @@ func TestErrorsExitTwo(t *testing.T) {
 }
 
 func TestCommentUsesInjectedCommenter(t *testing.T) {
-	h := newHarness(map[string]string{"pr.md": "### pii-scanner: 1 new PII finding(s)", "clean.md": "### pii-scanner: no new PII leaks"})
+	h := newHarness(map[string]string{"pr.md": "### datawarden: 1 new sensitive-data finding(s)", "clean.md": "### datawarden: no new sensitive-data leaks"})
 	if code := h.run("comment", "pr.md"); code != ExitClean || !strings.Contains(h.out.String(), "created") || len(h.commenter.bodies) != 1 {
 		t.Errorf("post: exit %d %s", code, h.out)
 	}
@@ -440,16 +440,16 @@ func TestCommentUsesInjectedCommenter(t *testing.T) {
 
 func TestInitMapAndVersion(t *testing.T) {
 	h := newHarness(nil)
-	if code := h.run("init"); code != ExitClean || h.file(".pii-scanner.yaml") == "" || h.file(".pii-scannerignore") == "" {
+	if code := h.run("init"); code != ExitClean || h.file(".datawarden.yaml") == "" || h.file(".datawardenignore") == "" {
 		t.Fatalf("init: %d %s", code, h.errb)
 	}
-	if h.run("init"); !strings.Contains(h.out.String(), "exists  .pii-scanner.yaml") {
+	if h.run("init"); !strings.Contains(h.out.String(), "exists  .datawarden.yaml") {
 		t.Errorf("init should not overwrite:\n%s", h.out)
 	}
 	if code := h.run("map", "--format", "json", "--output", "map.json"); code != ExitClean || !strings.Contains(h.file("map.json"), `"generated": "2026-09-24T08:30:00Z"`) {
 		t.Errorf("map: %d %s", code, h.file("map.json"))
 	}
-	if h.run("version"); !strings.Contains(h.out.String(), "pii-scanner test (frontends: go, kotlin)") {
+	if h.run("version"); !strings.Contains(h.out.String(), "datawarden test (frontends: go, kotlin)") {
 		t.Errorf("version: %s", h.out)
 	}
 }

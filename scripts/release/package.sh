@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Copyright 2026 The pii-scanner Authors
+# Copyright 2026 The datawarden Authors
 # SPDX-License-Identifier: Apache-2.0
 #
 # Packages the binaries from build.sh into release archives.
 #
 #   scripts/release/package.sh <bindir> <outdir>
 #
-# <bindir> holds <goos>_<goarch>/pii-scanner[.exe] directories. Writes
-# pii-scanner_<goos>_<goarch>.tar.gz (.zip for Windows), each with the binary,
+# <bindir> holds <goos>_<goarch>/datawarden[.exe] directories. Writes
+# datawarden_<goos>_<goarch>.tar.gz (.zip for Windows), each with the binary,
 # LICENSE, NOTICE, THIRD_PARTY_LICENSES.txt, README.md and CHANGELOG.md, plus
 # checksums.txt. Asset names carry no version so that
 # releases/latest/download/<asset> always works (the GitHub Action uses it).
@@ -34,12 +34,12 @@ for dir in "$bindir"/*_*/; do
   target=$(basename "$dir")
   stage="$work/$target"
   mkdir -p "$stage"
-  cp "$dir"/pii-scanner* "$stage/"
-  chmod 0755 "$stage"/pii-scanner*
+  cp "$dir"/datawarden* "$stage/"
+  chmod 0755 "$stage"/datawarden*
   cp "$root/LICENSE" "$root/NOTICE" "$root/README.md" "$root/CHANGELOG.md" "$work/THIRD_PARTY_LICENSES.txt" "$stage/"
   find "$stage" -exec touch -h -d "@$SOURCE_DATE_EPOCH" {} +
   files=$(cd "$stage" && ls | sort)
-  name="pii-scanner_${target}"
+  name="datawarden_${target}"
   case "$target" in
     windows_*)
       # shellcheck disable=SC2086 # file names contain no spaces
@@ -59,6 +59,6 @@ if [ "$found" -eq 0 ]; then
 fi
 
 cd "$out"
-assets=(pii-scanner_*.tar.gz pii-scanner_*.zip)
+assets=(datawarden_*.tar.gz datawarden_*.zip)
 sha256sum "${assets[@]}" > checksums.txt
 cat checksums.txt

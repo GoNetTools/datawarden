@@ -1,4 +1,4 @@
-// Copyright 2026 The pii-scanner Authors
+// Copyright 2026 The datawarden Authors
 // SPDX-License-Identifier: Apache-2.0
 
 package detect
@@ -27,7 +27,7 @@ type LiteralHit struct {
 	Detector string  `json:"detector"`
 }
 
-// LiteralScanner finds PII literals in text.
+// LiteralScanner finds sensitive values (literals) in text.
 type LiteralScanner struct {
 	// Classifier recognises labels next to values ("cccd": ...).
 	Classifier *Classifier
@@ -72,7 +72,7 @@ var testCards = set("4111111111111111", "4242424242424242", "4012888888881881", 
 
 var docIBANs = set("GB82WEST12345698765432", "DE89370400440532013000", "GB33BUKB20201555555555", "FR1420041010050500013M02606", "NL91ABNA0417164300")
 
-// Scan returns PII literals found in content.
+// Scan returns the sensitive values found in content.
 func (s *LiteralScanner) Scan(content []byte) []LiteralHit {
 	if looksBinary(content) {
 		return nil
@@ -464,7 +464,7 @@ func validCCCD(d string, now time.Time) bool {
 }
 
 func valueHash(dt, v string) string {
-	h := sha256.Sum256([]byte("pii-scanner-literal\x00" + dt + "\x00" + strings.ToLower(v)))
+	h := sha256.Sum256([]byte("datawarden-literal\x00" + dt + "\x00" + strings.ToLower(v)))
 	return hex.EncodeToString(h[:12])
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2026 The pii-scanner Authors
+// Copyright 2026 The datawarden Authors
 // SPDX-License-Identifier: Apache-2.0
 
 package app
@@ -12,7 +12,7 @@ import (
 )
 
 // On a push build there is no pull request: the adapter reports the CLI's
-// sentinel, so `pii-scanner comment` skips posting instead of failing.
+// sentinel, so `datawarden comment` skips posting instead of failing.
 // Other errors pass through.
 func TestCommenterMapsNotInReview(t *testing.T) {
 	push := map[string]string{"GITHUB_ACTIONS": "true", "GITHUB_TOKEN": "t", "GITHUB_REPOSITORY": "acme/app"}

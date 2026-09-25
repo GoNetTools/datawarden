@@ -1,17 +1,17 @@
 # pre-commit (https://pre-commit.com) hooks. Only the literal-value
 # detector runs at commit time; full tracing belongs in CI.
-- id: pii-scanner
-  name: pii-scanner (committed personal data)
+- id: datawarden
+  name: datawarden (committed personal data)
   description: Blocks commits that add real personal data (VN phone numbers, CCCD, emails, card numbers, IBANs) to files.
-  entry: pii-scanner scan --literals-only --no-cache
+  entry: datawarden scan --literals-only --no-cache
   language: golang
   types: [text]
   pass_filenames: true
   require_serial: true
 
-- id: pii-scanner-docker
-  name: pii-scanner (committed personal data, Docker)
-  entry: ghcr.io/gonettools/pii-scanner:latest scan --literals-only --no-cache
+- id: datawarden-docker
+  name: datawarden (committed personal data, Docker)
+  entry: ghcr.io/gonettools/datawarden:latest scan --literals-only --no-cache
   language: docker_image
   types: [text]
   pass_filenames: true

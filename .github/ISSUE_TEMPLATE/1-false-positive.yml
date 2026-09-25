@@ -1,5 +1,5 @@
 name: False positive
-description: pii-scanner reported a flow or value that is not personal data, or not a leak.
+description: datawarden reported a flow or value that is not personal data, or not a leak.
 labels: ["false positive", "triage"]
 body:
   - type: markdown
@@ -9,8 +9,8 @@ body:
   - type: input
     id: version
     attributes:
-      label: pii-scanner version
-      description: Output of `pii-scanner version`.
+      label: datawarden version
+      description: Output of `datawarden version`.
     validations:
       required: true
   - type: dropdown
@@ -24,7 +24,7 @@ body:
     id: finding
     attributes:
       label: The finding
-      description: The pii-scanner output for it (text report lines, or the SARIF result). It includes the rule id, data type and confidence.
+      description: The datawarden output for it (text report lines, or the SARIF result). It includes the rule id, data type and confidence.
       render: text
     validations:
       required: true

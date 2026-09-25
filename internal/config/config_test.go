@@ -1,4 +1,4 @@
-// Copyright 2026 The pii-scanner Authors
+// Copyright 2026 The datawarden Authors
 // SPDX-License-Identifier: Apache-2.0
 
 package config
@@ -11,14 +11,14 @@ import (
 
 func TestLoad(t *testing.T) {
 	fsys := fstest.MapFS{
-		".pii-scanner.yaml": {Data: []byte("first_party_domains: [api.acme.vn]\npolicy:\n  fail_on: [third_party]\n")},
-		"bad.yaml":          {Data: []byte("policy:\n  fail_on: [moon]\n")},
+		".datawarden.yaml": {Data: []byte("first_party_domains: [api.acme.vn]\npolicy:\n  fail_on: [third_party]\n")},
+		"bad.yaml":         {Data: []byte("policy:\n  fail_on: [moon]\n")},
 	}
 	c, err := Load(fsys, FileName, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(c.FirstPartyDomains) != 1 || len(c.Policy.FailOn) != 1 || *c.Literals.Enabled != true || c.Baseline != ".pii-scanner/baseline.json" {
+	if len(c.FirstPartyDomains) != 1 || len(c.Policy.FailOn) != 1 || *c.Literals.Enabled != true || c.Baseline != ".datawarden/baseline.json" {
 		t.Errorf("merged config: %+v", c)
 	}
 	if c, err := Load(fstest.MapFS{}, FileName, false); err != nil || c.Path != "" {

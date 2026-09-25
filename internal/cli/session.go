@@ -1,4 +1,4 @@
-// Copyright 2026 The pii-scanner Authors
+// Copyright 2026 The datawarden Authors
 // SPDX-License-Identifier: Apache-2.0
 
 package cli
@@ -26,7 +26,7 @@ type common struct {
 
 func (c *common) register(fs *flag.FlagSet) {
 	fs.StringVar(&c.root, "root", "", "repository root (default: git top-level of the scanned path)")
-	fs.StringVar(&c.configPath, "config", "", "config file (default <root>/.pii-scanner.yaml)")
+	fs.StringVar(&c.configPath, "config", "", "config file (default <root>/.datawarden.yaml)")
 	fs.BoolVar(&c.noCache, "no-cache", false, "do not read or write the summary cache")
 	fs.BoolVar(&c.verbose, "verbose", false, "log progress to stderr")
 }
@@ -110,7 +110,7 @@ func (a *App) open(c *common, positional []string) (*session, error) {
 		return nil, err
 	}
 	if c.verbose {
-		s.logf = func(format string, args ...any) { fmt.Fprintf(a.Stderr, "pii-scanner: "+format+"\n", args...) }
+		s.logf = func(format string, args ...any) { fmt.Fprintf(a.Stderr, "datawarden: "+format+"\n", args...) }
 	}
 	return s, nil
 }
@@ -165,7 +165,7 @@ func (a *App) markBaseline(path string, flows []*finding.Flow, lits []*finding.L
 }
 
 // parseInterspersed allows flags after positional arguments
-// ("pii-scanner scan . --diff origin/main").
+// ("datawarden scan . --diff origin/main").
 func parseInterspersed(fs *flag.FlagSet, args []string) ([]string, error) {
 	var flags, pos []string
 	for i := 0; i < len(args); i++ {

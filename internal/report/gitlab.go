@@ -1,4 +1,4 @@
-// Copyright 2026 The pii-scanner Authors
+// Copyright 2026 The datawarden Authors
 // SPDX-License-Identifier: Apache-2.0
 
 package report
@@ -88,7 +88,7 @@ func uuidFrom(s string) string {
 func GitLab(w io.Writer, r *Report) error {
 	r.Sort()
 	const tf = "2006-01-02T15:04:05"
-	tool := glTool{ID: "pii-scanner", Name: "pii-scanner", Version: r.Version, Vendor: glVendor{Name: "pii-scanner"}, URL: "https://github.com/GoNetTools/pii-scanner"}
+	tool := glTool{ID: "datawarden", Name: "datawarden", Version: r.Version, Vendor: glVendor{Name: "datawarden"}, URL: "https://github.com/GoNetTools/pii-scanner"}
 	start := r.Started
 	end, _ := time.ParseDuration(r.Duration)
 	rep := glReport{
@@ -97,7 +97,7 @@ func GitLab(w io.Writer, r *Report) error {
 			StartTime: start.UTC().Format(tf), EndTime: start.Add(end).UTC().Format(tf)},
 		Vulnerabilities: []glVuln{},
 	}
-	ref := glScannerRef{ID: "pii-scanner", Name: "pii-scanner"}
+	ref := glScannerRef{ID: "datawarden", Name: "datawarden"}
 	for _, f := range r.Flows {
 		if !f.Violation || f.Baselined {
 			continue
@@ -108,7 +108,7 @@ func GitLab(w io.Writer, r *Report) error {
 			Description: r.message(f) + fmt.Sprintf(". Source: %s. Function: %s. Confidence %.2f.", f.Source, f.Function, f.Confidence),
 			Severity:    glSeverity(f.Severity), Scanner: ref,
 			Location:    glLocation{File: f.Sink.File, StartLine: f.Sink.Line, EndLine: f.Sink.Line},
-			Identifiers: []glIdentifier{{Type: "pii_scanner_rule", Name: "pii-scanner " + f.SinkRule, Value: f.SinkRule}, {Type: "pii_scanner_fingerprint", Name: "fingerprint", Value: f.Fingerprint}},
+			Identifiers: []glIdentifier{{Type: "datawarden_rule", Name: "datawarden " + f.SinkRule, Value: f.SinkRule}, {Type: "datawarden_fingerprint", Name: "fingerprint", Value: f.Fingerprint}},
 		})
 	}
 	for _, l := range r.Literals {
@@ -121,7 +121,7 @@ func GitLab(w io.Writer, r *Report) error {
 			Description: r.literalMessage(l),
 			Severity:    glSeverity(l.Severity), Scanner: ref,
 			Location:    glLocation{File: l.Pos.File, StartLine: l.Pos.Line, EndLine: l.Pos.Line},
-			Identifiers: []glIdentifier{{Type: "pii_scanner_rule", Name: "pii-scanner pii-literal/" + l.DataType, Value: "pii-literal/" + l.DataType}, {Type: "pii_scanner_fingerprint", Name: "fingerprint", Value: l.Fingerprint}},
+			Identifiers: []glIdentifier{{Type: "datawarden_rule", Name: "datawarden pii-literal/" + l.DataType, Value: "pii-literal/" + l.DataType}, {Type: "datawarden_fingerprint", Name: "fingerprint", Value: l.Fingerprint}},
 		})
 	}
 	enc := json.NewEncoder(w)

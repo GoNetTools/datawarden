@@ -1,5 +1,5 @@
 name: Missed leak
-description: Personal data reaches a log, SDK, third party or storage and pii-scanner does not report it.
+description: Personal data reaches a log, SDK, third party or storage and datawarden does not report it.
 labels: ["false negative", "triage"]
 body:
   - type: markdown
@@ -9,8 +9,8 @@ body:
   - type: input
     id: version
     attributes:
-      label: pii-scanner version
-      description: Output of `pii-scanner version`.
+      label: datawarden version
+      description: Output of `datawarden version`.
     validations:
       required: true
   - type: dropdown

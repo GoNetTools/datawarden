@@ -1,4 +1,4 @@
-# Copyright 2026 The pii-scanner Authors
+# Copyright 2026 The datawarden Authors
 # SPDX-License-Identifier: Apache-2.0
 
 name: ci
@@ -137,7 +137,7 @@ jobs:
           CGO_ENABLED: "1"
         run: |
           code=0
-          go run ./cmd/pii-scanner-bench -runs 3 -check -json eval.json -markdown eval.md || code=$?
+          go run ./cmd/datawarden-bench -runs 3 -check -json eval.json -markdown eval.md || code=$?
           if [ -f eval.md ]; then cat eval.md >> "$GITHUB_STEP_SUMMARY"; fi
           exit "$code"
       - name: Benchmarks run
@@ -151,7 +151,7 @@ jobs:
           path: eval.json
           retention-days: 30
 
-  # pii-scanner scans itself: the fixtures must fail, the project must be clean.
+  # datawarden scans itself: the fixtures must fail, the project must be clean.
   scan-self:
     runs-on: ubuntu-24.04
     permissions:
@@ -169,13 +169,13 @@ jobs:
       - name: Build
         run: |
           bash scripts/release/build.sh "ci-${GITHUB_SHA::12}" "$RUNNER_TEMP/bin"
-          echo "PII_SCANNER=$RUNNER_TEMP/bin/linux_amd64/pii-scanner" >> "$GITHUB_ENV"
+          echo "DATAWARDEN=$RUNNER_TEMP/bin/linux_amd64/datawarden" >> "$GITHUB_ENV"
       - name: Fixtures report their planted leaks (exit 1)
         run: |
-          "$PII_SCANNER" version
+          "$DATAWARDEN" version
           for fixture in goapp android web; do
             code=0
-            "$PII_SCANNER" scan "testdata/$fixture" --root "testdata/$fixture" --no-baseline --no-cache > /dev/null || code=$?
+            "$DATAWARDEN" scan "testdata/$fixture" --root "testdata/$fixture" --no-baseline --no-cache > /dev/null || code=$?
             if [ "$code" -ne 1 ]; then
               echo "::error::testdata/$fixture: exit code $code, want 1"
               exit 1
@@ -185,18 +185,18 @@ jobs:
         env:
           BASE_REF: ${{ github.base_ref }}
         run: |
-          args=(scan . --sarif pii-scanner.sarif --markdown pii-scanner.md)
+          args=(scan . --sarif datawarden.sarif --markdown datawarden.md)
           if [ -n "$BASE_REF" ]; then args+=(--diff "origin/$BASE_REF"); fi
           code=0
-          "$PII_SCANNER" "${args[@]}" || code=$?
-          cat pii-scanner.md >> "$GITHUB_STEP_SUMMARY"
+          "$DATAWARDEN" "${args[@]}" || code=$?
+          cat datawarden.md >> "$GITHUB_STEP_SUMMARY"
           exit "$code"
       - name: Upload SARIF to code scanning
-        if: always() && github.event_name == 'push' && hashFiles('pii-scanner.sarif') != ''
+        if: always() && github.event_name == 'push' && hashFiles('datawarden.sarif') != ''
         uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
-          sarif_file: pii-scanner.sarif
-          category: pii-scanner
+          sarif_file: datawarden.sarif
+          category: datawarden
 
   docker:
     runs-on: ubuntu-24.04
@@ -220,14 +220,14 @@ jobs:
           context: .
           platforms: linux/amd64
           load: true
-          tags: pii-scanner:ci
+          tags: datawarden:ci
           build-args: VERSION=ci
           cache-from: type=gha
       - name: Smoke test the image
         run: |
-          docker run --rm pii-scanner:ci version
+          docker run --rm datawarden:ci version
           code=0
-          docker run --rm -v "$PWD/testdata/web:/src" pii-scanner:ci scan . --no-baseline --no-cache > /dev/null || code=$?
+          docker run --rm -v "$PWD/testdata/web:/src" datawarden:ci scan . --no-baseline --no-cache > /dev/null || code=$?
           if [ "$code" -ne 1 ]; then
             echo "::error::image scan of testdata/web: exit code $code, want 1"
             exit 1

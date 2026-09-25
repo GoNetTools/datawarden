@@ -1,10 +1,10 @@
-# pii-scanner architecture
+# datawarden architecture
 
-This document explains how pii-scanner is put together: the pipeline a scan goes through, the packages and the rules that keep them independent, the data model they share, and where to extend it. The [README](../README.md) covers usage; [CONTRIBUTING](../CONTRIBUTING.md) has the step-by-step checklists for adding a rule or a language.
+This document explains how datawarden is put together: the pipeline a scan goes through, the packages and the rules that keep them independent, the data model they share, and where to extend it. The [README](../README.md) covers usage; [CONTRIBUTING](../CONTRIBUTING.md) has the step-by-step checklists for adding a rule or a language.
 
 ## Contents
 
-- [What pii-scanner does](#what-pii-scanner-does)
+- [What datawarden does](#what-datawarden-does)
 - [The scan pipeline](#the-scan-pipeline)
 - [Packages and layers](#packages-and-layers)
 - [Design rules](#design-rules)
@@ -15,9 +15,9 @@ This document explains how pii-scanner is put together: the pipeline a scan goes
 - [Extension points](#extension-points)
 - [How it is tested](#how-it-is-tested)
 
-## What pii-scanner does
+## What datawarden does
 
-pii-scanner is a static analyzer. It reads a repository without running it and reports two kinds of findings:
+datawarden is a static analyzer. It reads a repository without running it and reports two kinds of findings:
 
 - **Flows:** personal data (a *source*: a variable named `email`, a field tagged `pii:"phone"`, the result of `telephony.getLine1Number()`) reaching a place it should not go (a *sink*: a logger, a crash reporter, an analytics SDK, a third-party HTTP API, device storage).
 - **Literals:** real-looking personal data committed to the repository (a valid phone number, card number or citizen ID in a fixture or seed file).
@@ -32,7 +32,7 @@ flowchart TD
     SESSION --> RUN["scan.Scanner.Run(Request)"]
 
     subgraph SCANNER ["scan.Scanner"]
-        RUN --> LIST["FileLister.List<br/>default ignores + .pii-scannerignore"]
+        RUN --> LIST["FileLister.List<br/>default ignores + .datawardenignore"]
         LIST --> SELECT["select targets<br/>full · paths · diff (changed + callers)"]
         SELECT --> LIT["LiteralDetector<br/>committed values"]
         SELECT --> FE["Frontends<br/>source files → IR"]
@@ -49,8 +49,8 @@ flowchart TD
     BASE --> OUT["Reporter: text · JSON · SARIF · Markdown · GitLab<br/>DataMapper: DPIA · JSON · CSV · Mermaid"]
 ```
 
-1. **Session.** The command finds the repository root, loads `.pii-scanner.yaml` and the rules (built-in plus the repository's `.pii-scanner/rules/`).
-2. **File selection.** The scanner lists files (skipping build output, dependencies and `.pii-scannerignore` patterns) and decides what to analyse: everything, the paths given, or in PR mode the changed files plus their callers from the cached call graph.
+1. **Session.** The command finds the repository root, loads `.datawarden.yaml` and the rules (built-in plus the repository's `.datawarden/rules/`).
+2. **File selection.** The scanner lists files (skipping build output, dependencies and `.datawardenignore` patterns) and decides what to analyse: everything, the paths given, or in PR mode the changed files plus their callers from the cached call graph.
 3. **Literal scan.** Text files are checked for committed personal data by validating detectors (Luhn, IBAN checksum, CCCD structure, phone prefixes) and nearby labels.
 4. **Lowering.** Each language's frontend converts its files into IR functions and type declarations.
 5. **Schema.** Declared types, protobuf messages and SQL tables become schema hints: "field `Customer.Contact` holds a phone number".
@@ -62,8 +62,8 @@ flowchart TD
 ```mermaid
 flowchart TB
     subgraph ENTRY ["Entry points"]
-        CMDP["cmd/pii-scanner"]
-        BENCH["cmd/pii-scanner-bench"]
+        CMDP["cmd/datawarden"]
+        BENCH["cmd/datawarden-bench"]
     end
     subgraph ROOT ["Composition root"]
         APP["internal/app"]
@@ -110,7 +110,7 @@ flowchart TB
 
 | Layer | Packages | Role |
 |---|---|---|
-| Entry points | `cmd/pii-scanner`, `cmd/pii-scanner-bench` | `main`: build the app with `app.New` and run it. |
+| Entry points | `cmd/datawarden`, `cmd/datawarden-bench` | `main`: build the app with `app.New` and run it. |
 | Composition root | `internal/app` | The only place that chooses concrete implementations and connects them. |
 | Orchestration | `internal/cli`, `internal/scan` | Commands, flags and exit codes; the scan pipeline. They know *what* happens, not *how*. |
 | Components | `frontend/*`, `analysis`, `detect`, `rules`, `policy`, `baseline`, `report`, `datamap`, `cache`, `ingest`, `config`, `cicomment`, `ruletest`, `eval` | One job each, behind interfaces their consumers declare. |
@@ -133,10 +133,10 @@ What each component does:
 | `datamap` | The personal-data inventory (DPIA, JSON, CSV, Mermaid). |
 | `cache` | Function summaries, call graph and schema between runs, keyed by file content. |
 | `ingest` | File walking, ignore patterns, file selection, git queries. |
-| `config` | `.pii-scanner.yaml`: parsing, defaults, validation. |
+| `config` | `.datawarden.yaml`: parsing, defaults, validation. |
 | `cicomment` | Creating or updating the PR/MR comment on GitHub or GitLab. |
 | `ruletest` | `ruleid:`/`ok:` annotations in example code, checked against findings. |
-| `eval` | Precision, recall and F1 of a labelled corpus; used by `pii-scanner-bench`. |
+| `eval` | Precision, recall and F1 of a labelled corpus; used by `datawarden-bench`. |
 
 ## Design rules
 
@@ -239,7 +239,7 @@ classDiagram
 ```
 
 - **Five operations.** `assign` (copies, concatenation, conversions, container construction), `load` and `store` (fields and constant map keys), `call`, `return`. Anything else a language has lowers to these.
-- **Callee names are qualified** the way rules are written: `importpath.Type.Method` for Go, `package.Class.method` for Kotlin/Java, `<module>.<export>` for TypeScript. `Target` is set when the callee is code pii-scanner analyses, so its summary can be applied.
+- **Callee names are qualified** the way rules are written: `importpath.Type.Method` for Go, `package.Class.method` for Kotlin/Java, `<module>.<export>` for TypeScript. `Target` is set when the callee is code datawarden analyses, so its summary can be applied.
 - **Positions are slash-separated and root-relative** on every platform.
 
 ### Findings (`internal/finding`)
@@ -283,12 +283,12 @@ The cache stores function summaries, the call graph and schema declarations keye
 
 | To add | Do this | Guarded by |
 |---|---|---|
-| **A rule** for an SDK | YAML entry in `internal/rules/builtin/` (or `.pii-scanner/rules/` in your repository), plus an annotated example | `TestBuiltinRuleConventions`, `TestRuleExamples`, `pii-scanner rules test` |
+| **A rule** for an SDK | YAML entry in `internal/rules/builtin/` (or `.datawarden/rules/` in your repository), plus an annotated example | `TestBuiltinRuleConventions`, `TestRuleExamples`, `datawarden rules test` |
 | **A language** | entry in `internal/lang`, a frontend, registration in `app.NewComponents`, the 15 conformance programs, rules with examples | `TestEveryLanguageIsWired`, `TestFrontendConformance`, `TestRuleExamples` |
 | **A data type or identifier word** | `internal/detect/taxonomy.go`, table-driven cases in `detect_test.go` | `TestBuiltinRuleConventions` (source rules must use known types) |
 | **An output format** | a case in `report.Write` (or a new `Reporter` implementation wired in `app`) | report tests |
 | **A service or replacement component** | an interface where it is used, a field to inject it, the wiring in `internal/app` | `TestComponentsTalkThroughInterfaces` |
-| **A labelled benchmark case** | a directory under `testdata/` and its labels in `testdata/eval.yaml` | `pii-scanner-bench -check` in CI |
+| **A labelled benchmark case** | a directory under `testdata/` and its labels in `testdata/eval.yaml` | `datawarden-bench -check` in CI |
 
 The full checklists for rules and languages are in [CONTRIBUTING](../CONTRIBUTING.md#add-or-fix-a-rule).
 

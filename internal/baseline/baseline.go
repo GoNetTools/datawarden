@@ -1,4 +1,4 @@
-// Copyright 2026 The pii-scanner Authors
+// Copyright 2026 The datawarden Authors
 // SPDX-License-Identifier: Apache-2.0
 
 // Package baseline fingerprints findings and records accepted ones.
@@ -31,7 +31,7 @@ func FlowFingerprint(f *finding.Flow) string {
 	return hash("flow", f.DataType, f.SinkRule, f.Dest.Host+"|"+f.Dest.Kind, f.Function)
 }
 
-// LiteralFingerprint identifies a committed PII value in a file.
+// LiteralFingerprint identifies a committed sensitive value in a file.
 func LiteralFingerprint(l *finding.Literal) string {
 	return hash("literal", l.DataType, l.Pos.File, l.ValueHash)
 }

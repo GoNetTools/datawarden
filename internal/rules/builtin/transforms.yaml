@@ -1,6 +1,6 @@
 # Transform rules: calls whose result is a protected form of the input.
 # Whether a transform makes a flow acceptable is decided by
-# policy.safe_transforms in .pii-scanner.yaml, not here.
+# policy.safe_transforms in .datawarden.yaml, not here.
 
 - id: xform.go.sha256
   kind: transform

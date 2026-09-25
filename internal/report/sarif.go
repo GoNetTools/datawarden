@@ -1,4 +1,4 @@
-// Copyright 2026 The pii-scanner Authors
+// Copyright 2026 The datawarden Authors
 // SPDX-License-Identifier: Apache-2.0
 
 package report
@@ -152,7 +152,7 @@ func SARIF(w io.Writer, r *Report) error {
 			Level:               level(f.Severity, f.Baselined),
 			Message:             sarifText{Text: r.message(f)},
 			Locations:           []sarifLocation{loc(f.Sink, "")},
-			PartialFingerprints: map[string]string{"pii-scanner/v1": f.Fingerprint},
+			PartialFingerprints: map[string]string{"datawarden/v1": f.Fingerprint},
 			CodeFlows:           []sarifCodeFlow{{ThreadFlows: []sarifThreadFlow{{Locations: steps}}}},
 			BaselineState:       state,
 			Properties: map[string]any{
@@ -169,10 +169,10 @@ func SARIF(w io.Writer, r *Report) error {
 		if _, ok := ruleMeta[id]; !ok {
 			dt := r.dataType(l.DataType)
 			ruleMeta[id] = sarifRule{
-				ID: id, Name: "CommittedPII" + camel(l.DataType),
+				ID: id, Name: "CommittedSensitiveValue" + camel(l.DataType),
 				ShortDescription:     sarifText{Text: dt.Label + " committed to the repository"},
 				FullDescription:      sarifText{Text: "A value that validates as " + strings.ToLower(dt.Label) + " is stored in the repository. Replace real personal data in fixtures and samples with synthetic values."},
-				Help:                 sarifText{Text: "Replace the value with synthetic test data (for Vietnamese phone numbers and CCCD numbers, generate values that fail validation or use documented test ranges). If it is intentional, accept it with `pii-scanner baseline`."},
+				Help:                 sarifText{Text: "Replace the value with synthetic test data (for Vietnamese phone numbers and CCCD numbers, generate values that fail validation or use documented test ranges). If it is intentional, accept it with `datawarden baseline`."},
 				DefaultConfiguration: map[string]any{"level": level(l.Severity, false)},
 				Properties:           map[string]any{"tags": []string{"security", "privacy", "pii"}, "security-severity": securitySeverity[l.Severity], "precision": "high"},
 			}
@@ -184,7 +184,7 @@ func SARIF(w io.Writer, r *Report) error {
 		results = append(results, sarifResult{
 			RuleID: id, Level: level(l.Severity, l.Baselined), Message: sarifText{Text: r.literalMessage(l)},
 			Locations:           []sarifLocation{loc(l.Pos, "")},
-			PartialFingerprints: map[string]string{"pii-scanner/v1": l.Fingerprint},
+			PartialFingerprints: map[string]string{"datawarden/v1": l.Fingerprint},
 			BaselineState:       state,
 			Properties:          map[string]any{"data_type": l.DataType, "confidence": l.Confidence, "detector": l.Detector, "security-severity": securitySeverity[l.Severity]},
 		})
@@ -232,10 +232,10 @@ func flowRule(r *Report, id string, f *finding.Flow) sarifRule {
 		}
 	}
 	return sarifRule{
-		ID: id, Name: "PIIFlow" + camel(f.SinkRule),
+		ID: id, Name: "SensitiveDataFlow" + camel(f.SinkRule),
 		ShortDescription:     sarifText{Text: desc},
 		FullDescription:      sarifText{Text: full},
-		Help:                 sarifText{Text: "Remove the personal data from this call, mask or tokenize it first, or record the processing as accepted (policy.allow in .pii-scanner.yaml, or `pii-scanner baseline`)."},
+		Help:                 sarifText{Text: "Remove the personal data from this call, mask or tokenize it first, or record the processing as accepted (policy.allow in .datawarden.yaml, or `datawarden baseline`)."},
 		DefaultConfiguration: map[string]any{"level": level(f.Severity, false)},
 		Properties:           map[string]any{"tags": []string{"security", "privacy", "pii", f.Dest.Kind}, "security-severity": securitySeverity[f.Severity], "precision": "medium"},
 	}

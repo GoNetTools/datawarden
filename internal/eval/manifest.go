@@ -1,7 +1,7 @@
-// Copyright 2026 The pii-scanner Authors
+// Copyright 2026 The datawarden Authors
 // SPDX-License-Identifier: Apache-2.0
 
-// Package eval measures how well pii-scanner finds leaks in a labelled corpus:
+// Package eval measures how well datawarden finds leaks in a labelled corpus:
 // precision, recall and F1 per case, data type and sink category, a sweep
 // over confidence thresholds, and scan timings.
 //

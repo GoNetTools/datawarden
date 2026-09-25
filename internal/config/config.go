@@ -1,7 +1,7 @@
-// Copyright 2026 The pii-scanner Authors
+// Copyright 2026 The datawarden Authors
 // SPDX-License-Identifier: Apache-2.0
 
-// Package config loads .pii-scanner.yaml.
+// Package config loads .datawarden.yaml.
 package config
 
 import (
@@ -17,7 +17,7 @@ import (
 )
 
 // FileName is the default config file name at the repository root.
-const FileName = ".pii-scanner.yaml"
+const FileName = ".datawarden.yaml"
 
 // Allow suppresses matching flows as accepted by policy.
 type Allow struct {
@@ -37,20 +37,20 @@ type Policy struct {
 	SafeTransforms []string `yaml:"safe_transforms" json:"safe_transforms"`
 	// MinConfidence is the minimum confidence for a flow to be a violation.
 	MinConfidence float64 `yaml:"min_confidence" json:"min_confidence"`
-	// FailOnLiterals makes committed PII literals violations.
+	// FailOnLiterals makes committed sensitive values violations.
 	FailOnLiterals *bool `yaml:"fail_on_literals" json:"fail_on_literals"`
 	// IgnoreDataTypes drops these data types entirely.
 	IgnoreDataTypes []string `yaml:"ignore_data_types" json:"ignore_data_types,omitempty"`
 	Allow           []Allow  `yaml:"allow" json:"allow,omitempty"`
 }
 
-// Literals configures the committed-PII literal detector.
+// Literals configures the committed-value (literal) detector.
 type Literals struct {
 	Enabled       *bool   `yaml:"enabled" json:"enabled"`
 	MinConfidence float64 `yaml:"min_confidence" json:"min_confidence"`
 }
 
-// Config is .pii-scanner.yaml.
+// Config is .datawarden.yaml.
 type Config struct {
 	Version int `yaml:"version" json:"version"`
 	// Languages restricts analysis (default: every supported language found).
@@ -59,7 +59,7 @@ type Config struct {
 	IncludeTests bool `yaml:"include_tests" json:"include_tests"`
 	// FirstPartyDomains turns network sinks to these hosts into first-party.
 	FirstPartyDomains []string `yaml:"first_party_domains" json:"first_party_domains,omitempty"`
-	// Rules are extra rule files or directories (default .pii-scanner/rules).
+	// Rules are extra rule files or directories (default .datawarden/rules).
 	Rules    []string `yaml:"rules" json:"rules,omitempty"`
 	Baseline string   `yaml:"baseline" json:"baseline"`
 	CacheDir string   `yaml:"cache_dir" json:"cache_dir"`
@@ -78,9 +78,9 @@ func Default() *Config {
 	t := true
 	return &Config{
 		Version:       1,
-		Rules:         []string{".pii-scanner/rules"},
-		Baseline:      ".pii-scanner/baseline.json",
-		CacheDir:      ".pii-scanner/cache",
+		Rules:         []string{".datawarden/rules"},
+		Baseline:      ".datawarden/baseline.json",
+		CacheDir:      ".datawarden/cache",
 		MinConfidence: 0.35,
 		Literals:      Literals{Enabled: &t, MinConfidence: 0.6},
 		Policy: Policy{
@@ -146,8 +146,8 @@ func Abs(root, p string) string {
 	return filepath.Join(root, filepath.FromSlash(p))
 }
 
-// Template is written by `pii-scanner init`.
-const Template = `# pii-scanner configuration. All keys are optional.
+// Template is written by `datawarden init`.
+const Template = `# datawarden configuration. All keys are optional.
 version: 1
 
 # Languages to analyze for flows (default: all supported that are present).
@@ -162,10 +162,10 @@ first_party_domains: []
 
 # Extra rule files/directories; rules with the same id replace built-ins,
 # and "- {id: <id>, disabled: true}" turns one off.
-rules: [.pii-scanner/rules]
+rules: [.datawarden/rules]
 
-baseline: .pii-scanner/baseline.json
-cache_dir: .pii-scanner/cache
+baseline: .datawarden/baseline.json
+cache_dir: .datawarden/cache
 
 literals:
   enabled: true

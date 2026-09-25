@@ -1,4 +1,4 @@
-// Copyright 2026 The pii-scanner Authors
+// Copyright 2026 The datawarden Authors
 // SPDX-License-Identifier: Apache-2.0
 
 package report
@@ -43,7 +43,7 @@ func rich() *Report {
 	oldLit := &finding.Literal{DataType: "email", Pos: ir.Pos{File: "seed.csv", Line: 3}, Masked: "t***@x.vn", Detector: "email-format",
 		Confidence: 0.9, Violation: true, Baselined: true, Severity: "medium", Fingerprint: "lit2"}
 	return &Report{
-		Tool: "pii-scanner", Version: "t", Mode: "diff", DiffBase: "origin/main", Commit: "abc123",
+		Tool: "datawarden", Version: "t", Mode: "diff", DiffBase: "origin/main", Commit: "abc123",
 		Started: time.Date(2026, 9, 24, 0, 0, 0, 0, time.UTC), Duration: "1.5s",
 		FilesScanned: 3, FilesAnalyzed: map[string]int{"kotlin": 2, "go": 1}, Functions: 7,
 		ChangedFiles: []string{"app/Repo.kt"}, CallerFiles: []string{"app/Main.kt"},
@@ -78,7 +78,7 @@ func TestTextReport(t *testing.T) {
 	r := rich()
 	out := render(t, "text", r)
 	for _, want := range []string{
-		"pii-scanner t · diff scan vs origin/main · 3 files (go:1 kotlin:2) · 7 functions · 1.5s",
+		"datawarden t · diff scan vs origin/main · 3 files (go:1 kotlin:2) · 7 functions · 1.5s",
 		"changed: 1 files, callers: 1 files",
 		"warning: typescript: 1 file skipped",
 		"NEW      high   email → Sentry / sentry.io (third-party)  [sdk.sentry.set_user]",
@@ -109,7 +109,7 @@ func TestMarkdownReport(t *testing.T) {
 	}
 	r := rich()
 	r.Flows, r.Literals = nil, nil
-	if out := render(t, "markdown", r); !strings.Contains(out, "no new PII leaks") {
+	if out := render(t, "markdown", r); !strings.Contains(out, "no new sensitive-data leaks") {
 		t.Errorf("clean report:\n%s", out)
 	}
 }
@@ -123,7 +123,7 @@ func TestJSONReport(t *testing.T) {
 	if err := json.Unmarshal([]byte(render(t, "json", rich())), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Tool != "pii-scanner" || len(got.Flows) != 4 || len(got.Literals) != 2 || !got.Flows[0].Violation || got.Flows[0].Baselined {
+	if got.Tool != "datawarden" || len(got.Flows) != 4 || len(got.Literals) != 2 || !got.Flows[0].Violation || got.Flows[0].Baselined {
 		t.Errorf("json: %+v", got)
 	}
 }
@@ -154,12 +154,12 @@ func TestSARIFReport(t *testing.T) {
 	for _, r := range run.Tool.Driver.Rules {
 		names[r.Name] = true
 	}
-	if !names["PIIFlowSdkSentrySetUser"] || !names["CommittedPIIPhone"] {
+	if !names["SensitiveDataFlowSdkSentrySetUser"] || !names["CommittedSensitiveValuePhone"] {
 		t.Errorf("rules: %+v", run.Tool.Driver.Rules)
 	}
 	states := map[string]int{}
 	for _, res := range run.Results {
-		if res.PartialFingerprints["pii-scanner/v1"] == "" {
+		if res.PartialFingerprints["datawarden/v1"] == "" {
 			t.Errorf("result without fingerprint: %+v", res)
 		}
 		states[res.BaselineState]++
@@ -187,7 +187,7 @@ func TestGitLabSeverities(t *testing.T) {
 	sev := map[string]bool{}
 	for _, v := range got.Vulnerabilities {
 		sev[v.Severity] = true
-		if v.Identifiers[0].Type != "pii_scanner_rule" {
+		if v.Identifiers[0].Type != "datawarden_rule" {
 			t.Errorf("identifiers: %+v", v.Identifiers)
 		}
 	}
@@ -212,7 +212,7 @@ func TestUnknownFormatAndGitLabLinks(t *testing.T) {
 		t.Error("GitLab links")
 	}
 	head := CILinks(func(k string) string {
-		return map[string]string{"GITHUB_SERVER_URL": "https://github.com", "GITHUB_REPOSITORY": "a/b", "GITHUB_SHA": "merge", "PII_SCANNER_HEAD_SHA": "head"}[k]
+		return map[string]string{"GITHUB_SERVER_URL": "https://github.com", "GITHUB_REPOSITORY": "a/b", "GITHUB_SHA": "merge", "DATAWARDEN_HEAD_SHA": "head"}[k]
 	})
 	if got := head(ir.Pos{File: "x.ts", Line: 1}); got != "https://github.com/a/b/blob/head/x.ts#L1" {
 		t.Errorf("PR head sha: %s", got)

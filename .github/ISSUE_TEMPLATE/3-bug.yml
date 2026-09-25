@@ -5,14 +5,14 @@ body:
   - type: input
     id: version
     attributes:
-      label: pii-scanner version
-      description: Output of `pii-scanner version`.
+      label: datawarden version
+      description: Output of `datawarden version`.
     validations:
       required: true
   - type: dropdown
     id: install
     attributes:
-      label: How do you run pii-scanner?
+      label: How do you run datawarden?
       options: [Release binary, Docker image, go install, GitHub Action, pre-commit, Built from source]
     validations:
       required: true
