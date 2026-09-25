@@ -57,7 +57,7 @@ func ParseProto(path string, src []byte) []*ir.TypeDecl {
 					Name: strings.Join(parts, "."),
 					Kind: "proto",
 					Lang: "proto",
-					Pos:  ir.Pos{
+					Pos: ir.Pos{
 						File: path,
 						Line: i + 1,
 					},
