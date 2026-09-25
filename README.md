@@ -350,13 +350,15 @@ go tool pprof -sample_index=alloc_space mem.out
 
 ### Design: inversion of control
 
-Every package depends on small interfaces, declared where they are used, and receives its collaborators through constructors or struct fields. Only the composition root (`internal/app`) picks concrete implementations, and only `internal/platform` touches the operating system:
+Components talk to each other only through interfaces. Each package declares the small interfaces it needs, next to the code that uses them, and receives its collaborators through struct fields. Only the composition root (`internal/app`) picks concrete implementations, and only `internal/platform` touches the operating system. `TestComponentsTalkThroughInterfaces` type-checks the module and fails on any call from one component into another's concrete code; the shared vocabulary (`ir`, `finding`, `lang`) is the only exception:
 
 ```
 cmd/piiflow ──► internal/app (composition root) ──► cli.App ──► scan.Scanner ──► frontends, analysis, detectors
                      │                                  │              │
                      └─ wires ─► platform.OS            │              └─ reads everything through fs.FS
-                                 platform.ExecGit       └─ Workspace, Scanner, CacheOpener, Commenter, Catalog, Clock
+                                 platform.ExecGit       └─ Workspace, Scanner, CacheOpener, Commenter, Catalog, Clock,
+                                                           ConfigLoader, RuleLoader, Policy, BaselineCodec, Reporter,
+                                                           DataMapper, RuleTester
                                  platform.FileBlob
                                  cicomment.Client{HTTP, Getenv, ReadFile}
                                  frontend.Registry (golang.Register, treesitter.Register)
@@ -365,11 +367,13 @@ cmd/piiflow ──► internal/app (composition root) ──► cli.App ──�
 | Consumer | Depends on (interface) | Production implementation | Test double |
 |---|---|---|---|
 | `cli.App` | `Workspace`, `Scanner`, `CacheOpener`, `Commenter`, `Catalog`, `Clock` | `platform.OS`, `scan.Scanner`, `cache.Open`+`platform.FileBlob`, `cicomment.Client`, `detect.Classifier`, `time.Now` | in-memory workspace, fake scanner and commenter (`internal/cli/cli_test.go`) |
-| `scan.Scanner` | `Frontends`, `Analyzer`, `LiteralDetector`, `SchemaParser`, `VCS`, `Cache`, `Clock`, `fs.FS` | `frontend.Registry`, `analysis.Engine`, `detect.LiteralScanner`, `detect.Schemas`, `ingest.Git`, `cache.Store`, `os.DirFS` | `fstest.MapFS`, fake frontends/VCS/analyzer (`internal/scan/scan_test.go`) |
+| `cli.App` services | `ConfigLoader`, `RuleLoader` (→ `RuleSet`), `Policy`, `BaselineCodec`, `Reporter`, `DataMapper`, `RuleTester` | `config.Loader`, `rules.Load` (adapted in `app`), `policy.Policies`, `baseline.Codec`, `report.Writer`, `datamap.Mapper`, `ruletest.Tester` | the same implementations, or any fake that satisfies the interface |
+| `scan.Scanner` | `FileLister`, `Frontends`, `Analyzer`, `LiteralDetector`, `SchemaParser`, `VCS`, `Cache`, `Clock`, `fs.FS` | `ingest.Lister`, `frontend.Registry`, `analysis.Engine`, `detect.LiteralScanner`, `detect.Schemas`, `ingest.Git`, `cache.Store`, `os.DirFS` | `fstest.MapFS`, fake frontends/VCS/analyzer (`internal/scan/scan_test.go`) |
 | `analysis.Engine` | `RuleMatcher`, `SchemaIndex`, `NameClassifier` | `rules.Set`, `detect.Schema`, `detect.Classifier` | fake rule matcher (`internal/analysis/engine_test.go`) |
 | `ingest.Git` | `Runner` | `platform.ExecGit` | scripted runner (`internal/ingest/ignore_test.go`) |
 | `cache.Store` | `Persister`, `Hasher` | `platform.FileBlob`, `ingest.Hasher` | `cache.Memory`, map hasher |
-| frontends | `frontend.Options.FS`, `golang.PackageLoader` | `os.DirFS`, `packages.Load` | `fstest.MapFS`, fake loader |
+| frontends | `frontend.Registrar`, `frontend.Options.FS`, `golang.PackageLoader` | `frontend.Registry`, `os.DirFS`, `packages.Load` | `fstest.MapFS`, fake loader |
+| `report` | `RuleLookup` | `rules.Set` | nil (no rule metadata) |
 | `cicomment.Client` | `Doer`, `Getenv`, `ReadFile` | `http.Client`, `os.Getenv`, `os.ReadFile` | `httptest` servers |
 | `policy`, `report`, `datamap` | `Catalog`, injected time and link builder | `detect.Classifier`, `time.Now`, `report.CILinks(os.Getenv)` | fixed catalogs and times |
 

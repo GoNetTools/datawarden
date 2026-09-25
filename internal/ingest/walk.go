@@ -6,6 +6,7 @@ package ingest
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"io/fs"
 	"path"
 	"sort"
@@ -109,6 +110,24 @@ func Select(fsys fs.FS, all []File, paths []string) []File {
 		}
 	}
 	return out
+}
+
+// Lister lists and selects repository files: the scanner's FileLister.
+type Lister struct{}
+
+// List walks fsys, skipping the default ignore patterns and those in the
+// repository's .piiflowignore.
+func (Lister) List(fsys fs.FS) ([]File, error) {
+	m, err := LoadMatcher(fsys)
+	if err != nil {
+		return nil, fmt.Errorf("reading %s: %w", IgnoreFile, err)
+	}
+	return Walk(fsys, m)
+}
+
+// Select keeps the files named by paths (see Select).
+func (Lister) Select(fsys fs.FS, all []File, paths []string) []File {
+	return Select(fsys, all, paths)
 }
 
 // Hasher memoizes content hashes of repository files.

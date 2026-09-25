@@ -187,3 +187,14 @@ policy:
   #    reason: DPA with Sentry, EU data region
   #  - dest_host: api.example.vn
 `
+
+// Loader reads configuration: the CLI's ConfigLoader.
+type Loader struct{}
+
+// Load reads name from fsys (see Load).
+func (Loader) Load(fsys fs.FS, name string, required bool) (*Config, error) {
+	return Load(fsys, name, required)
+}
+
+// Parse decodes a configuration document (see Parse).
+func (Loader) Parse(data []byte, origin string) (*Config, error) { return Parse(data, origin) }

@@ -4,7 +4,6 @@
 package cli
 
 import (
-	"bytes"
 	"errors"
 	"flag"
 	"fmt"
@@ -12,9 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/GoNetTools/pii-scanner/internal/baseline"
 	"github.com/GoNetTools/pii-scanner/internal/config"
-	"github.com/GoNetTools/pii-scanner/internal/rules"
+	"github.com/GoNetTools/pii-scanner/internal/finding"
 	"github.com/GoNetTools/pii-scanner/internal/scan"
 )
 
@@ -39,7 +37,7 @@ type session struct {
 	repo  scan.Repo
 	paths []string // root-relative, slash-separated
 	cfg   *config.Config
-	rules *rules.Set
+	rules RuleSet
 	logf  func(string, ...any)
 }
 
@@ -90,11 +88,11 @@ func (a *App) open(c *common, positional []string) (*session, error) {
 		if err != nil {
 			return nil, err
 		}
-		s.cfg, err = config.Parse(b, c.configPath)
+		s.cfg, err = a.Configs.Parse(b, c.configPath)
 		if err != nil {
 			return nil, err
 		}
-	} else if s.cfg, err = config.Load(s.repo.FS, config.FileName, false); err != nil {
+	} else if s.cfg, err = a.Configs.Load(s.repo.FS, config.FileName, false); err != nil {
 		return nil, err
 	}
 
@@ -108,7 +106,7 @@ func (a *App) open(c *common, positional []string) (*session, error) {
 		}
 		rulePaths = append(rulePaths, rel)
 	}
-	if s.rules, err = rules.Load(s.repo.FS, rulePaths...); err != nil {
+	if s.rules, err = a.Rules.Load(s.repo.FS, rulePaths...); err != nil {
 		return nil, err
 	}
 	if c.verbose {
@@ -149,27 +147,21 @@ func (a *App) request(s *session, c *common) scan.Request {
 	}
 }
 
-func (a *App) loadBaseline(path string) (*baseline.Baseline, error) {
-	b, err := a.Workspace.ReadFile(path)
-	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return baseline.Empty(), nil
+// markBaseline marks findings accepted by the baseline file at path (a
+// missing file is an empty baseline) and returns the baseline size and the
+// entries no longer found.
+func (a *App) markBaseline(path string, flows []*finding.Flow, lits []*finding.Literal) (size int, unseen []string, err error) {
+	var data []byte
+	if path != "" {
+		if data, err = a.Workspace.ReadFile(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return 0, nil, err
 		}
-		return nil, err
 	}
-	bl, err := baseline.Decode(bytes.NewReader(b))
+	size, unseen, err = a.Baselines.Mark(data, flows, lits)
 	if err != nil {
-		return nil, fmt.Errorf("baseline %s: %w", path, err)
+		return 0, nil, fmt.Errorf("baseline %s: %w", path, err)
 	}
-	return bl, nil
-}
-
-func (a *App) saveBaseline(path string, b *baseline.Baseline) error {
-	var buf bytes.Buffer
-	if err := b.Encode(&buf); err != nil {
-		return err
-	}
-	return a.Workspace.WriteFile(path, buf.Bytes())
+	return size, unseen, nil
 }
 
 // parseInterspersed allows flags after positional arguments

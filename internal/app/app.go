@@ -9,22 +9,29 @@ package app
 import (
 	"errors"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/GoNetTools/pii-scanner/internal/analysis"
+	"github.com/GoNetTools/pii-scanner/internal/baseline"
 	"github.com/GoNetTools/pii-scanner/internal/cache"
 	"github.com/GoNetTools/pii-scanner/internal/cicomment"
 	"github.com/GoNetTools/pii-scanner/internal/cli"
+	"github.com/GoNetTools/pii-scanner/internal/config"
+	"github.com/GoNetTools/pii-scanner/internal/datamap"
 	"github.com/GoNetTools/pii-scanner/internal/detect"
 	"github.com/GoNetTools/pii-scanner/internal/frontend"
 	"github.com/GoNetTools/pii-scanner/internal/frontend/golang"
 	"github.com/GoNetTools/pii-scanner/internal/frontend/treesitter"
 	"github.com/GoNetTools/pii-scanner/internal/ingest"
 	"github.com/GoNetTools/pii-scanner/internal/platform"
+	"github.com/GoNetTools/pii-scanner/internal/policy"
 	"github.com/GoNetTools/pii-scanner/internal/report"
+	"github.com/GoNetTools/pii-scanner/internal/rules"
+	"github.com/GoNetTools/pii-scanner/internal/ruletest"
 	"github.com/GoNetTools/pii-scanner/internal/scan"
 )
 
@@ -50,6 +57,7 @@ func NewComponents(clock func() time.Time) *Components {
 		Classifier: classifier,
 		Frontends:  reg,
 		Scanner: &scan.Scanner{
+			Files:     ingest.Lister{},
 			Frontends: reg,
 			Analyzer:  analysis.Engine{Names: classifier},
 			Literals:  &detect.LiteralScanner{Classifier: classifier, Now: clock},
@@ -102,10 +110,29 @@ func NewWith(stdout, stderr io.Writer, d Deps) *cli.App {
 		},
 		Commenter: commenter{cicomment.Client{HTTP: d.HTTP, Getenv: d.Getenv, ReadFile: os.ReadFile}},
 		Catalog:   comp.Classifier,
-		Languages: comp.Frontends.Languages,
-		Links:     report.CILinks(d.Getenv),
-		Clock:     d.Clock,
+
+		Configs:    config.Loader{},
+		Rules:      ruleLoader{},
+		Policy:     policy.Policies{Catalog: comp.Classifier},
+		Baselines:  baseline.Codec{},
+		Reporter:   report.Writer{},
+		DataMapper: datamap.Mapper{},
+		RuleTester: ruletest.Tester{},
+		Languages:  comp.Frontends.Languages,
+		Links:      report.CILinks(d.Getenv),
+		Clock:      d.Clock,
 	}
+}
+
+// ruleLoader adapts rules.Load to the CLI's RuleLoader.
+type ruleLoader struct{}
+
+func (ruleLoader) Load(fsys fs.FS, paths ...string) (cli.RuleSet, error) {
+	set, err := rules.Load(fsys, paths...)
+	if err != nil {
+		return nil, err // not a typed nil inside the interface
+	}
+	return set, nil
 }
 
 // commenter adapts cicomment errors to the CLI's.

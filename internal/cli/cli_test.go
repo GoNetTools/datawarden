@@ -15,11 +15,18 @@ import (
 	"testing/fstest"
 	"time"
 
+	"github.com/GoNetTools/pii-scanner/internal/baseline"
 	"github.com/GoNetTools/pii-scanner/internal/cache"
+	"github.com/GoNetTools/pii-scanner/internal/config"
+	"github.com/GoNetTools/pii-scanner/internal/datamap"
 	"github.com/GoNetTools/pii-scanner/internal/detect"
 	"github.com/GoNetTools/pii-scanner/internal/finding"
 	"github.com/GoNetTools/pii-scanner/internal/ingest"
 	"github.com/GoNetTools/pii-scanner/internal/ir"
+	"github.com/GoNetTools/pii-scanner/internal/policy"
+	"github.com/GoNetTools/pii-scanner/internal/report"
+	"github.com/GoNetTools/pii-scanner/internal/rules"
+	"github.com/GoNetTools/pii-scanner/internal/ruletest"
 	"github.com/GoNetTools/pii-scanner/internal/scan"
 )
 
@@ -126,6 +133,17 @@ func sentryFlow() []*finding.Flow {
 	}}
 }
 
+// testRules loads real rules (app wires the same adapter).
+type testRules struct{}
+
+func (testRules) Load(fsys fs.FS, paths ...string) (RuleSet, error) {
+	set, err := rules.Load(fsys, paths...)
+	if err != nil {
+		return nil, err
+	}
+	return set, nil
+}
+
 type harness struct {
 	app       *App
 	ws        *memWorkspace
@@ -146,8 +164,16 @@ func newHarness(files map[string]string) *harness {
 			return cache.Open(nil, ingest.NewHasher(repo.FS), "test", rulesHash)
 		},
 		Languages: func() []string { return []string{"go", "kotlin"} },
-		Links:     func(p ir.Pos) string { return "https://example.test/" + p.File },
-		Clock:     func() time.Time { return testNow },
+
+		Configs:    config.Loader{},
+		Rules:      testRules{},
+		Policy:     policy.Policies{Catalog: classifier},
+		Baselines:  baseline.Codec{},
+		Reporter:   report.Writer{},
+		DataMapper: datamap.Mapper{},
+		RuleTester: ruletest.Tester{},
+		Links:      func(p ir.Pos) string { return "https://example.test/" + p.File },
+		Clock:      func() time.Time { return testNow },
 	}
 	return h
 }

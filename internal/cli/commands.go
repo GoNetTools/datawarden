@@ -13,12 +13,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/GoNetTools/pii-scanner/internal/baseline"
-	"github.com/GoNetTools/pii-scanner/internal/config"
 	"github.com/GoNetTools/pii-scanner/internal/datamap"
 	"github.com/GoNetTools/pii-scanner/internal/finding"
 	"github.com/GoNetTools/pii-scanner/internal/lang"
-	"github.com/GoNetTools/pii-scanner/internal/policy"
 	"github.com/GoNetTools/pii-scanner/internal/report"
 	"github.com/GoNetTools/pii-scanner/internal/rules"
 	"github.com/GoNetTools/pii-scanner/internal/scan"
@@ -30,7 +27,7 @@ func (a *App) flagSet(name string) *flag.FlagSet {
 	return fs
 }
 
-func (a *App) newReport(res *scan.Result, flows []*finding.Flow, lits []*finding.Literal, rs *rules.Set, diffBase string) *report.Report {
+func (a *App) newReport(res *scan.Result, flows []*finding.Flow, lits []*finding.Literal, rs RuleSet, diffBase string) *report.Report {
 	if flows == nil {
 		flows = []*finding.Flow{}
 	}
@@ -47,14 +44,26 @@ func (a *App) newReport(res *scan.Result, flows []*finding.Flow, lits []*finding
 
 func (a *App) writeReport(path, format string, r *report.Report) error {
 	var buf bytes.Buffer
-	if err := report.Write(&buf, format, r); err != nil {
+	if err := a.Reporter.Write(&buf, format, r); err != nil {
 		return err
 	}
 	return a.Workspace.WriteFile(path, buf.Bytes())
 }
 
-func (a *App) evaluator(cfg *config.Config) policy.Evaluator {
-	return policy.Evaluator{Config: cfg, Catalog: a.Catalog}
+// hasNew reports whether any finding is a violation the baseline does not
+// accept; it decides the exit code.
+func hasNew(flows []*finding.Flow, lits []*finding.Literal) bool {
+	for _, f := range flows {
+		if f.IsNew() {
+			return true
+		}
+	}
+	for _, l := range lits {
+		if l.IsNew() {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *App) runScan(ctx context.Context, args []string) (int, error) {
@@ -99,23 +108,23 @@ func (a *App) runScan(ctx context.Context, args []string) (int, error) {
 	if err != nil {
 		return ExitError, err
 	}
-	flows, lits := a.evaluator(s.cfg).Apply(res.Flows, res.Literals)
-	bl := baseline.Empty()
+	flows, lits := a.Policy.Apply(s.cfg, res.Flows, res.Literals)
+	bpath := ""
 	if !*noBaseline {
-		bpath := *baselinePath
+		bpath = *baselinePath
 		if bpath == "" {
 			bpath = s.inRoot(s.cfg.Baseline)
 		} else if bpath, err = a.Workspace.Abs(bpath); err != nil {
 			return ExitError, err
 		}
-		if bl, err = a.loadBaseline(bpath); err != nil {
-			return ExitError, err
-		}
 	}
-	unseen := bl.Mark(flows, lits)
+	size, unseen, err := a.markBaseline(bpath, flows, lits)
+	if err != nil {
+		return ExitError, err
+	}
 	rep := a.newReport(res, flows, lits, s.rules, *diff)
 	rep.ShowAll = *all
-	rep.BaselineSize = bl.Len()
+	rep.BaselineSize = size
 	if res.Mode == scan.ModeFull {
 		rep.BaselineFixed = len(unseen)
 	}
@@ -139,10 +148,10 @@ func (a *App) runScan(ctx context.Context, args []string) (int, error) {
 		if err := a.writeReport(p, *format, rep); err != nil {
 			return ExitError, err
 		}
-	} else if err := report.Write(a.Stdout, *format, rep); err != nil {
+	} else if err := a.Reporter.Write(a.Stdout, *format, rep); err != nil {
 		return ExitError, err
 	}
-	if rep.HasNew() && !*noFail {
+	if hasNew(flows, lits) && !*noFail {
 		return ExitViolation, nil
 	}
 	return ExitClean, nil
@@ -170,19 +179,22 @@ func (a *App) runBaseline(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	flows, lits := a.evaluator(s.cfg).Apply(res.Flows, res.Literals)
-	b := baseline.FromFindings(flows, lits, res.Commit, a.Clock())
+	flows, lits := a.Policy.Apply(s.cfg, res.Flows, res.Literals)
+	data, entries, err := a.Baselines.Encode(flows, lits, res.Commit, a.Clock())
+	if err != nil {
+		return err
+	}
 	path := s.inRoot(s.cfg.Baseline)
 	if *out != "" {
 		if path, err = a.Workspace.Abs(*out); err != nil {
 			return err
 		}
 	}
-	if err := a.saveBaseline(path, b); err != nil {
+	if err := a.Workspace.WriteFile(path, data); err != nil {
 		return err
 	}
 	rel, _ := filepath.Rel(s.root, path)
-	fmt.Fprintf(a.Stdout, "piiflow: wrote %d accepted finding(s) to %s — commit it so CI only reports new ones\n", b.Len(), filepath.ToSlash(rel))
+	fmt.Fprintf(a.Stdout, "piiflow: wrote %d accepted finding(s) to %s — commit it so CI only reports new ones\n", entries, filepath.ToSlash(rel))
 	for _, w := range res.Warnings {
 		fmt.Fprintf(a.Stderr, "warning: %s\n", w)
 	}
@@ -209,21 +221,19 @@ func (a *App) runMap(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	flows, lits := a.evaluator(s.cfg).Apply(res.Flows, res.Literals)
-	bl, err := a.loadBaseline(s.inRoot(s.cfg.Baseline))
-	if err != nil {
+	flows, lits := a.Policy.Apply(s.cfg, res.Flows, res.Literals)
+	if _, _, err := a.markBaseline(s.inRoot(s.cfg.Baseline), flows, lits); err != nil {
 		return err
 	}
-	bl.Mark(flows, lits)
-	m := datamap.Build(datamap.Input{Flows: flows, Literals: lits, Schema: res.Schema, Commit: res.Commit, Now: a.Clock(), Catalog: a.Catalog})
+	m := a.DataMapper.Build(datamap.Input{Flows: flows, Literals: lits, Schema: res.Schema, Commit: res.Commit, Now: a.Clock(), Catalog: a.Catalog})
 	for _, wn := range res.Warnings {
 		fmt.Fprintf(a.Stderr, "warning: %s\n", wn)
 	}
 	if *out == "" {
-		return datamap.Write(a.Stdout, *format, m)
+		return a.DataMapper.Write(a.Stdout, *format, m)
 	}
 	var buf bytes.Buffer
-	if err := datamap.Write(&buf, *format, m); err != nil {
+	if err := a.DataMapper.Write(&buf, *format, m); err != nil {
 		return err
 	}
 	p, err := a.Workspace.Abs(*out)
@@ -247,7 +257,7 @@ func (a *App) runRules(args []string) error {
 	if err != nil {
 		return err
 	}
-	for _, r := range s.rules.Rules {
+	for _, r := range s.rules.All() {
 		if *kind != "" && r.Kind != *kind {
 			continue
 		}
