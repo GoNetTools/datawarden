@@ -248,7 +248,12 @@ func dpia(w io.Writer, m *Map) error {
 	b.WriteString(".\n\nThis inventory is derived from static analysis of the source code. It lists the personal data the code handles, where it is persisted and which systems receive it. It is a starting point for a Data Protection Impact Assessment (GDPR art. 35) or the impact assessment dossier required by Vietnamese personal data protection rules (Decree 13/2023/ND-CP, Law on Personal Data Protection 2025), not a substitute for one: purposes, legal bases, retention periods and data subjects must be filled in by the product owner.\n\n")
 
 	b.WriteString("## 1. Personal data processed\n\n| Data | Class | Category | Sensitive | Stored in | Sent to | Seen as |\n|---|---|---|---|---|---|---|\n")
+	var creds []string
 	for _, d := range m.DataTypes {
+		if d.Class == "credential" {
+			creds = append(creds, fmt.Sprintf("%s (`%s`)", d.Label, d.ID))
+			continue
+		}
 		sens := "no"
 		if d.Sensitive {
 			sens = "**yes**"
@@ -260,6 +265,9 @@ func dpia(w io.Writer, m *Map) error {
 		fmt.Fprintf(&b, "| %s (`%s`) | %s | %s | %s | %s | %s | %s |\n", d.Label, d.ID, orDash(d.Class), d.Category, sens, orDash(strings.Join(d.StoredIn, ", ")), orDash(strings.Join(d.Recipients, ", ")), esc(seen))
 	}
 	b.WriteString("\n")
+	if len(creds) > 0 {
+		fmt.Fprintf(&b, "Credentials are not personal data and are left out of this table; the code also handles: %s. See the JSON or CSV map for where they go.\n\n", strings.Join(creds, ", "))
+	}
 
 	b.WriteString("## 2. Recipients and transfers\n\n| Recipient | Type | Host | Data | Safeguards | Flows | Open issues |\n|---|---|---|---|---|---|---|\n")
 	for _, r := range m.Recipients {

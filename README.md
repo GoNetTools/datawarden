@@ -5,7 +5,16 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/GoNetTools/pii-scanner.svg)](https://pkg.go.dev/github.com/GoNetTools/pii-scanner)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-datawarden is a static analyzer that finds **personal data (PII) flowing into places it shouldn't go**: logs, crash reporters, analytics SDKs, third-party APIs, device storage and other apps. It also catches **real personal data committed to the repository** (fixtures, samples, seed files).
+datawarden is a static analyzer that finds **sensitive data flowing into places it shouldn't go**: logs, crash reporters, analytics SDKs, third-party APIs, device storage and other apps. It also catches **sensitive values committed to the repository**: real personal data in fixtures, samples and seed files, and live keys and tokens in config files.
+
+It knows four classes of sensitive data, and the list is data, not code ([`datatypes.yaml`](internal/detect/builtin/datatypes.yaml)):
+
+| Class | What | Examples |
+|---|---|---|
+| `pii` | Personal data (GDPR, CCPA, Decree 13/2023/ND-CP) | email, phone, name, date of birth, address, CCCD, location, device ids |
+| `phi` | Protected health information (HIPAA) | diagnoses, prescriptions, medical record numbers |
+| `pci` | Cardholder data (PCI DSS) | payment card numbers |
+| `credential` | Credentials and secrets | passwords, API keys, access and session tokens, private keys |
 
 It understands Go, Kotlin, Java and TypeScript/JavaScript, recognises Vietnam-specific data (CCCD/CMND citizen IDs, BHXH/BHYT insurance numbers, Vietnamese mobile numbers), and is built for CI: SARIF for code scanning, a PR/MR comment, a baseline so only *new* problems fail the build, and an incremental PR mode.
 
@@ -29,6 +38,7 @@ NEW      high   phone → Sentry / sentry.io (third-party)  [sdk.ts.sentry.set_u
 - [Quick start](#quick-start)
 - [Commands](#commands)
 - [How it works](#how-it-works)
+- [Data classes](#data-classes)
 - [Source detectors](#source-detectors)
 - [Sink rules](#sink-rules)
 - [Configuration](#configuration)
@@ -79,7 +89,7 @@ datawarden map --format dpia > docs/data-map.md
 |---|---|
 | `datawarden scan [paths...]` | Full scan, or only the given files/directories. |
 | `datawarden scan --diff <ref>` | PR mode: files changed since the merge base with `<ref>` plus their callers, found through the cached call graph. |
-| `datawarden scan --literals-only` | Only the committed-PII detector. `--staged` reads the git index (pre-commit). |
+| `datawarden scan --literals-only` | Only the committed-value detector (personal data and secrets). `--staged` reads the git index (pre-commit). |
 | `datawarden baseline` | Full scan; writes the current violations to the baseline. |
 | `datawarden map --format dpia\|json\|csv\|mermaid` | Personal-data inventory. |
 | `datawarden rules [--kind sink] [--lang kotlin]` | Effective rules (built-in + repository overrides). |
@@ -115,12 +125,13 @@ Useful `scan` flags: `--format text|json|sarif|markdown|gitlab`, `--sarif FILE`,
   - *Go* uses `golang.org/x/tools/go/packages` and `go/ssa` (with debug info for source names): callees and types are exact, struct tags come from the type checker, closures and interface calls are handled.
   - *Kotlin, Java, TypeScript/JavaScript* use tree-sitter with best-effort resolution: imports, declared types of parameters/locals/fields, constructor calls, `X.getInstance()` idioms, class hierarchies, extension functions, lambdas (as callbacks), string templates and named arguments.
 - **Detectors** mark sources (below). **Sinks** come from YAML rules.
-- **Taint engine**: each function is analyzed to a fixpoint with parameters as symbolic labels, which yields both concrete flows and a *summary* (parameter → return, parameter → sink, parameter → parameter, PII returned or written into arguments). Functions are processed callees-first by strongly connected component; recursion iterates until summaries stabilize. Summaries are cached by function ID and **validated by the content hash of the defining file**, so a PR scan re-analyzes only changed files and their callers and reuses everything else.
+- **Taint engine**: each function is analyzed to a fixpoint with parameters as symbolic labels, which yields both concrete flows and a *summary* (parameter → return, parameter → sink, parameter → parameter, sensitive data returned or written into arguments). Functions are processed callees-first by strongly connected component; recursion iterates until summaries stabilize. Summaries are cached by function ID and **validated by the content hash of the defining file**, so a PR scan re-analyzes only changed files and their callers and reuses everything else.
 - Each flow carries data type, source, sink, rule, destination, path, transforms and confidence:
 
   ```go
   type Flow struct {
-      DataType     string      // "email", "vn_cccd"
+      DataType     string      // "email", "vn_cccd", "api_key"
+      Class        string      // "pii", "phi", "pci", "credential"
       Source, Sink ir.Pos
       SinkRule     string      // "sdk.sentry.set_user"
       Dest         Destination // host, kind, first-party?, region, vendor
@@ -131,9 +142,17 @@ Useful `scan` flags: `--format text|json|sarif|markdown|gitlab`, `--sarif FILE`,
   }
   ```
 
+## Data classes
+
+Every data type belongs to a class, and every finding carries its class (`class` in JSON, a tag in SARIF, a column in the data map). Classes change what the policy does with a finding:
+
+- **Severity.** Findings of `phi`, `pci` and `credential` data are high severity wherever they go, as are identity documents and special-category personal data.
+- **Per-class policy.** `policy.classes.<class>` overrides `fail_on` and `safe_transforms`. The default lets credentials go over the network (an API key is sent to the service it unlocks) and accepts a hashed password, while a hashed phone number is still a leak.
+- **Opting out.** `policy.ignore_classes: [credential]` turns a whole class off, for example when another tool already scans for secrets.
+
 ## Source detectors
 
-**1. Identifier names.** Identifiers are split on camelCase, PascalCase, ACRONYMS, snake/kebab case and letter/digit boundaries. Token sequences are matched against a taxonomy of 23 data types, for example:
+**1. Identifier names.** Identifiers are split on camelCase, PascalCase, ACRONYMS, snake/kebab case and letter/digit boundaries. Token sequences are matched against the taxonomy (30 data types), for example:
 
 | Data type | Identifiers |
 |---|---|
@@ -146,25 +165,31 @@ Useful `scan` flags: `--format text|json|sarif|markdown|gitlab`, `--sarif FILE`,
 | `tax_id` | taxId, taxCode |
 | `insurance_id` | socialInsurance, bhxh, bhyt |
 | `license_plate` | licensePlate |
+| `medical_record_number` | mrn, patientMrn, medicalRecordNumber |
+| `password` | password, newPassword, passwd, passphrase |
+| `api_key` | apiKey, stripeApiKey, accessKey |
+| `access_token` | accessToken, refreshToken, bearerToken, idToken |
+| `secret_key` | clientSecret, signingKey, AWS_SECRET_ACCESS_KEY |
+| `private_key`, `session_token` | privateKey, sessionId, sessionToken |
 
 Names are matched as English words. Vietnam-specific documents keep their own acronyms (`cccd`, `cmnd`, `bhxh`, `bhyt`); other Vietnamese words (`soDienThoai`, `hoTen`, …) are not recognised.
 
 Also email, IP address, national ID, US SSN, passport, driver's license, payment card, precise location, device/advertising IDs, gender, ethnicity, religion, health and biometric data. Sensitive categories (GDPR art. 9 / Decree 13/2023/ND-CP) are marked and raise severity.
 
-Negative context avoids the usual noise: `emailValidator`, `isEmailValid`, `phoneFormatter`, `EMAIL_KEY`, `serverAddress`, `microphone`. Names that say the value is already protected carry a transform: `maskedPhone` → masked, `emailHash` → hashed.
+Negative context avoids the usual noise: `emailValidator`, `isEmailValid`, `phoneFormatter`, `EMAIL_KEY`, `serverAddress`, `microphone`, `passwordPolicy`, `apiKeyHeader`, `nextPageToken`. Names that say the value is already protected carry a transform: `maskedPhone` → masked, `emailHash` → hashed, `passwordHash` → hashed.
 
 String keys label their values: `put("email", x)`, `bundleOf("phone" to x)`, `zap.String("phone", x)`, `r.FormValue("cccd")`, `{ phone: x }`, `m["email"] = x`.
 
 **2. Schema hints.** Field-level hints from:
-- Go struct tags: `json`, `db`, `bson`, `gorm:"column:phone_number"`, `protobuf:"...,name=email"`; explicit `pii:"email"` or `pii:"-"` (not PII).
+- Go struct tags: `json`, `db`, `bson`, `gorm:"column:phone_number"`, `protobuf:"...,name=email"`; explicit `pii:"email"` (any data type, e.g. `pii:"api_key"`) or `pii:"-"` (not sensitive).
 - JPA/Room/Moshi/Gson annotations: `@Column(name=...)`, `@ColumnInfo`, `@SerializedName`, `@JsonProperty`, `@Json`; explicit `@PII("email")`.
 - TypeORM decorators (`@Column({ name: ... })`), TypeScript interfaces and type aliases.
 - Protobuf messages (`string contact = 3 [(pii) = "phone"];` or `// pii: phone`).
 - SQL migrations (`CREATE TABLE`, `ALTER TABLE ... ADD COLUMN`, `-- pii: phone` comments).
 
-A value whose type is a data class/entity with PII fields (a `Customer`) carries those data types: `Sentry.setUser(customer)` is a flow. Service classes (repositories, view models) are excluded.
+A value whose type is a data class/entity with sensitive fields (a `Customer`) carries those data types: `Sentry.setUser(customer)` is a flow. Service classes (repositories, view models) are excluded.
 
-**3. Literal values** (committed PII), validated by format so random numbers don't match:
+**3. Literal values** (committed personal data and secrets), validated by format so random numbers don't match:
 
 | Detector | Validation |
 |---|---|
@@ -175,8 +200,11 @@ A value whose type is a data class/entity with PII fields (a `Customer`) carries
 | Payment card | Luhn + issuer prefix (Visa, Mastercard, Amex, JCB, UnionPay, NAPAS `9704`); well-known test cards skipped |
 | IBAN | mod-97; documentation IBANs skipped |
 | US SSN | area/group/serial rules; advertising SSNs skipped |
+| Secrets | the taxonomy's value patterns: AWS access key ids, Stripe, Google, SendGrid, Anthropic and OpenAI API keys, GitHub, GitLab and Slack tokens, JWTs, private key blocks. Documentation values (`AKIAIOSFODNN7EXAMPLE`, the jwt.io sample), `xxxx` and `${VAR}` templates, and low-entropy strings are skipped |
 
-Reports never print the value, only a masked form (`091*****65`) and, in the baseline, a hash.
+Reports never print the value, only a masked form (`091*****65`; secrets keep only their first four characters, `AKIA********`) and, in the baseline, a hash.
+
+datawarden looks for secrets *in data flows* as well as in files: a password logged or an access token put in `localStorage` is a finding. For deep secret scanning of history and hundreds of providers, pair it with a dedicated scanner such as gitleaks or GitHub secret scanning, and set `policy.ignore_classes` or `ignore_data_types` to avoid double reports.
 
 ## Sink rules
 
@@ -242,6 +270,11 @@ policy:
   min_confidence: 0.55
   fail_on_literals: true
   ignore_data_types: []
+  ignore_classes: []          # pii, phi, pci, credential
+  classes:                    # per-class overrides of fail_on and safe_transforms
+    credential:
+      fail_on: [third_party, log, storage, ipc]
+      safe_transforms: [masked, redacted, encrypted, tokenized, hashed, sha256, sha512]
   allow:
     - sink: sdk.sentry.set_user
       data_types: [email]
@@ -250,7 +283,7 @@ policy:
     - path: "legacy/**"
 ```
 
-Hashes (`sha256`, `hashed`) are not safe transforms by default: phone and CCCD numbers are low-entropy, so their hashes can be reversed by enumeration. Add them to `safe_transforms` if you salt or key them.
+Hashes (`sha256`, `hashed`) are not safe transforms for personal data by default: phone and CCCD numbers are low-entropy, so their hashes can be reversed by enumeration. Add them to `safe_transforms` if you salt or key them. For credentials hashing is the point, so the `credential` class accepts it.
 
 ## Baseline
 
@@ -316,6 +349,7 @@ datawarden favours explainable, low-noise results over completeness. Every findi
 - Go interface calls are matched by the interface method (rules can target `io.Writer.Write`); implementations are not enumerated.
 - Kotlin/Java/TypeScript resolution is syntactic: no type inference across generics, overloads share an ID, reflection/DI-provided instances resolve only through declared types or receiver-name rules.
 - Dynamic destinations (URLs built at runtime) show up as `network (unknown host)`.
+- Secret *values* are recognised only for the providers in the taxonomy's value patterns; a generic `password = "..."` assignment is not reported as a literal, because it is almost always a test or placeholder value.
 - Name-based sources depend on naming. Add explicit hints (`pii:"..."` tags, `@PII`, proto options, SQL comments) where names are unhelpful, and `pii:"-"` to silence a field.
 
 ### Measuring accuracy and speed
@@ -333,7 +367,7 @@ go run ./cmd/datawarden-bench -manifest my-corpus.yaml -check
 - **Timings**: median wall time over `-runs` cold scans, memory allocated by the scan, files and functions. The Go frontend's `go list` runs in a child process, so its time is included but its memory is not.
 - `-check` exits 1 when a case scores below its `min_precision` or `min_recall`. CI runs it on every pull request and publishes the tables in the job summary; timings are reported but not gated.
 
-**See it on a realistic app:** [`testdata/vulnshop`](testdata/vulnshop) is a small shop (Go API, TypeScript checkout, Kotlin/Java Android app, CSV seed data) with 32 planted leaks and a set of traps. Run **Actions → demo → Run workflow** to scan it, or any other directory, and get the findings, the data map and the accuracy tables in the job summary.
+**See it on a realistic app:** [`testdata/vulnshop`](testdata/vulnshop) is a small shop (Go API, TypeScript checkout, Kotlin/Java Android app, CSV seed data, an env file) with 37 planted leaks of personal data, health data and credentials, and a set of traps. Run **Actions → demo → Run workflow** to scan it, or any other directory, and get the findings, the data map and the accuracy tables in the job summary.
 
 To measure datawarden on your own code, write a manifest whose case `dir` points at a checkout (absolute, or relative to the manifest) and label the leaks you know about. For recall on unlabelled code, plant known leaks in a copy and label those.
 

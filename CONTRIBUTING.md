@@ -4,7 +4,7 @@ Thanks for helping. Bug reports, false-positive and missed-leak reports, new sin
 
 By taking part you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md). Security problems go through the private process in [SECURITY.md](SECURITY.md), not public issues.
 
-## Never commit or paste real personal data
+## Never commit or paste real personal data or live secrets
 
 This is a sensitive-data scanner, so issues, pull requests and fixtures are full of phone numbers, ID numbers, card numbers, tokens and emails. **Use synthetic values only.**
 
@@ -78,9 +78,15 @@ A rule for one repository's own SDK belongs in that repository's `.datawarden/ru
 
 `testdata/eval.yaml` labels what a reviewer would report in each fixture, not what datawarden reports today. When you add or change a fixture, label every real leak in it, including ones datawarden misses (add a `note`), and use `ambiguous` only for flows that are genuinely acceptable either way. `go run ./cmd/datawarden-bench -check` (`make eval`) prints precision, recall and every miss and false positive. Raise `min_precision`/`min_recall` when your change improves them; lowering one needs a reason in the pull request.
 
-### Add a data type or identifier name
+### Add a data type, a class or a secret pattern
 
-The taxonomy (identifier words, negative context words, transforms) is in `internal/detect/taxonomy.go`; the literal validators are in `internal/detect/literal.go`. Add table-driven cases to `internal/detect/detect_test.go`.
+What datawarden looks for is data: [`internal/detect/builtin/datatypes.yaml`](internal/detect/builtin/datatypes.yaml). It is read strictly (unknown keys, undeclared classes, duplicate ids, bad regexes and upper-case patterns are errors) and checked by `TestBuiltinTaxonomy`.
+
+- **A data type** is an entry under `data_types:` with an `id`, `label`, `class`, `category` and at least one of `patterns` (identifier words, as space-separated lower-case tokens: `date of birth` matches `dateOfBirth`, `date_of_birth`, `DOB`...), `weak` (ambiguous abbreviations, scored lower) or `values`. `exclude` lists words that rule the type out (`remote` in `remoteAddress`); `sensitive: true` or `severity: high` raises its findings to high.
+- **A class** is an entry under `classes:`. Give it `severity: high` if every finding of it should be high. Users can then set `policy.classes.<id>` and `policy.ignore_classes` for it with no code change.
+- **A committed-value pattern** (a provider's API key format) goes under the type's `values:` with a `name` (shown as the detector), a `regex` (at most one capture group, the value), `keywords` (substrings every match contains; the regex only runs on lines that have one), a `confidence` and, for random-looking secrets, `min_entropy` (bits per character, 3 to 4.5 is typical). Placeholders (`EXAMPLE`, `xxxx`, `${VAR}`) are skipped for every pattern.
+
+Add cases for the new names and values to `internal/detect/detect_test.go` or `secrets_test.go`, including look-alikes that must not match. Build secret-shaped test strings from pieces (`"sk_" + "live_" + ...`) so that no complete credential is committed; push protection blocks them. Negative context words and transform words shared by all types (`validator`, `masked`, `hashed`) are in `internal/detect/names.go`. Finally, plant the new type in a fixture and label it in `testdata/eval.yaml` so the accuracy report covers it.
 
 ### Add a language
 
@@ -110,3 +116,13 @@ A new language touches five places, and a test checks each one:
 1. Move the **Unreleased** entries in `CHANGELOG.md` under the new version and merge that to `main`.
 2. Tag and push: `git tag -a v0.2.0 -m v0.2.0 && git push origin v0.2.0`.
 3. The `release` workflow tests the tag, builds the binaries (linux/macOS/windows, amd64/arm64), publishes the GitHub Release with checksums, pushes `ghcr.io/gonettools/datawarden`, and moves the `v0` tag that `uses: GoNetTools/pii-scanner@v0` resolves to. Tags with a suffix (`v0.2.0-rc.1`) become pre-releases and leave `v0` and `latest` alone.
+
+## Renaming the repository to datawarden (maintainers)
+
+The tool is called datawarden, but the repository, the Go module path and the GitHub Action reference still use `GoNetTools/pii-scanner`. When the repository is renamed:
+
+1. **Rename on GitHub** (Settings → General → Repository name). GitHub redirects the old URLs, clones and `uses: GoNetTools/pii-scanner@v0` to the new name, so existing users keep working.
+2. **Change the module path** in one commit: `go mod edit -module github.com/GoNetTools/datawarden`, then replace the import prefix everywhere (`git grep -l 'github.com/GoNetTools/pii-scanner' | xargs sed -i 's#github.com/GoNetTools/pii-scanner#github.com/GoNetTools/datawarden#g'`), then `gofmt -l cmd internal` and `go build ./...`. The release build reads the module path from `go list -m`, so its `-X .../internal/app.Version` flag follows on its own.
+3. **Update the remaining references**: `git grep -n pii-scanner` should then list only the badges and links in `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, `NOTICE`, `CHANGELOG.md`, `Dockerfile` (the image source label), `.github/ISSUE_TEMPLATE/config.yml`, `.github/workflows/release.yml` (a comment), `action.yml` and `examples/github/datawarden.yml`. Replace them, and change `uses: GoNetTools/pii-scanner@v0` to `uses: GoNetTools/datawarden@v0` in the README and the example workflow.
+4. **Check**: `go test ./...`, `go run ./cmd/datawarden-bench -check`, `go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12`, and `git grep -n pii-scanner` returns nothing but the CHANGELOG's history.
+5. **Release** a new minor version so `go install github.com/GoNetTools/datawarden/cmd/datawarden@latest` resolves, and note the new module path in the CHANGELOG. The old module path keeps serving the versions already published.

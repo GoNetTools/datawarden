@@ -235,7 +235,7 @@ func flowRule(r *Report, id string, f *finding.Flow) sarifRule {
 		ID: id, Name: "SensitiveDataFlow" + camel(f.SinkRule),
 		ShortDescription:     sarifText{Text: desc},
 		FullDescription:      sarifText{Text: full},
-		Help:                 sarifText{Text: "Remove the personal data from this call, mask or tokenize it first, or record the processing as accepted (policy.allow in .datawarden.yaml, or `datawarden baseline`)."},
+		Help:                 sarifText{Text: "Remove the sensitive data from this call, mask or tokenize it first, or record the processing as accepted (policy.allow in .datawarden.yaml, or `datawarden baseline`)."},
 		DefaultConfiguration: map[string]any{"level": level(f.Severity, false)},
 		Properties:           map[string]any{"tags": []string{"security", "privacy", classTag(f.Class), f.Dest.Kind}, "security-severity": securitySeverity[f.Severity], "precision": "medium"},
 	}

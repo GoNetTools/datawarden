@@ -61,3 +61,25 @@ func TestFormats(t *testing.T) {
 		t.Error("unknown format accepted")
 	}
 }
+
+// The DPIA's personal-data table leaves credentials out and names them
+// below it.
+func TestDPIASeparatesCredentials(t *testing.T) {
+	names := detect.NewClassifier(detect.DefaultTaxonomy())
+	m := Build(Input{
+		Flows: []*finding.Flow{
+			{DataType: "email", SinkRule: "log.go.stdlib", Dest: finding.Destination{Kind: "log", Host: "stderr"}, Violation: true},
+			{DataType: "access_token", SinkRule: "log.go.stdlib", Dest: finding.Destination{Kind: "log", Host: "stderr"}, Violation: true},
+		},
+		Catalog: names,
+	})
+	var b bytes.Buffer
+	if err := Write(&b, "dpia", m); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	if !strings.Contains(out, "| Email address (`email`) | pii |") || strings.Contains(out, "| Access token") ||
+		!strings.Contains(out, "the code also handles: Access token (`access_token`)") {
+		t.Errorf("dpia:\n%s", out)
+	}
+}
