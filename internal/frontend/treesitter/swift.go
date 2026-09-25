@@ -600,9 +600,14 @@ func (sb *swBuilder) conditions(n *sitter.Node) {
 		}
 	}
 	if n.Type() == "guard_statement" {
-		entry := sb.snapshot()
+		// The else branch must leave the scope; the code after the guard
+		// continues from the conditions only.
+		entry, from, dead := sb.snapshot(), sb.fn.CurBlock(), sb.terminated
+		sb.newBlock(from)
 		sb.stmt(els)
 		sb.scope = entry
+		sb.newBlock(from)
+		sb.terminated = dead
 		return
 	}
 	arms := []func(){func() { sb.stmt(then) }}

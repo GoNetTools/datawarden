@@ -168,3 +168,24 @@ func loopCarried(email: String, items: [String]) {
         x = email
     }
 }
+
+// scenario: mutated-later
+func mutatedLater(email: String) {
+    var xs: [String] = []
+    // ok: log.swift.print
+    print(xs)
+    xs.append(email)
+}
+
+// scenario: early-return
+func earlyReturn(email: String, invalid: Bool) {
+    var x = "anonymous"
+    if invalid {
+        x = email
+        // ruleid: log.swift.print
+        print(x)
+        return
+    }
+    // ok: log.swift.print
+    print(x)
+}

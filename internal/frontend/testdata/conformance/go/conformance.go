@@ -163,3 +163,25 @@ func loopCarried(email string, items []string) {
 		x = email
 	}
 }
+
+// scenario: mutated-later
+func mutatedLater(email string) {
+	var xs []string
+	// ok: log.go.stdlib
+	log.Println(xs)
+	xs = append(xs, email)
+	_ = xs
+}
+
+// scenario: early-return
+func earlyReturn(email string, invalid bool) {
+	x := "anonymous"
+	if invalid {
+		x = email
+		// ruleid: log.go.stdlib
+		log.Println(x)
+		return
+	}
+	// ok: log.go.stdlib
+	log.Println(x)
+}

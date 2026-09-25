@@ -3,10 +3,15 @@
 
 // Package analysis runs an inter-procedural taint analysis over IR.
 //
-// Each function is analyzed flow-insensitively to a fixpoint; order comes
-// from the frontends, which give every assignment its own variable (SSA
-// form). A variable named after personal data is a source unless it is a
-// new version of a same-named value (email = sha256(email)). Parameters
+// Each function is analyzed to a fixpoint over its code property graph:
+// the SSA variables the frontends produce (every assignment its own
+// variable) order values, and the control-flow graph orders mutations of
+// objects. A fact an instruction puts on an object (a field store,
+// list.add, a callee writing into an argument) carries that instruction,
+// and only instructions it can run before (order.go) see it; copies keep
+// the mark, so an alias sees the object's later mutations. A variable
+// named after personal data is a source unless it is a new version of a
+// same-named value (email = sha256(email)). Parameters
 // carry symbolic labels so that the same pass produces both concrete flows
 // (source and sink known) and a Summary that callers apply without
 // re-analyzing the callee. Functions are processed callees-first by
@@ -101,19 +106,43 @@ type fact struct {
 	xf    []string
 	conf  float64
 	seed  bool // seeded on this very variable (by its own name/type)
+	// at is 1 + the index of the instruction that put this fact on an
+	// object by mutating it (a field store, list.add, a callee writing
+	// into an argument), or 0 for a fact the value has from its
+	// definition. A mutation is seen only by instructions it can run
+	// before.
+	at int
 }
 
 func (f *fact) key() string {
+	k := fmt.Sprintf("#%d|%s", f.param, xfKey(f.xf))
 	if f.dt != "" {
-		return f.dt + "|" + xfKey(f.xf)
+		k = f.dt + "|" + xfKey(f.xf)
 	}
-	return fmt.Sprintf("#%d|%s", f.param, xfKey(f.xf))
+	if f.at > 0 {
+		k += fmt.Sprintf("@%d", f.at)
+	}
+	return k
 }
 
 type state struct {
 	facts  []map[string]*fact
 	stores map[ir.VarID]map[string]map[string]*fact
 	minC   float64
+	order  *order
+	cur    int    // index of the instruction being analyzed
+	multi  []bool // variables with more than one definition
+}
+
+// visible reports whether f can be seen by the current instruction.
+func (s *state) visible(f *fact) bool {
+	return f.at == 0 || s.order.before(f.at-1, s.cur)
+}
+
+// mutation marks a fact as put on an object by the current instruction.
+func (s *state) mutation(f *fact) *fact {
+	f.at = s.cur + 1
+	return f
 }
 
 func (s *state) add(v ir.VarID, f *fact) bool {
@@ -155,6 +184,7 @@ func (s *state) addStore(obj ir.VarID, field string, f *fact) bool {
 	return true
 }
 
+// of returns the facts of v the current instruction can see.
 func (s *state) of(v ir.VarID) []*fact {
 	if v < 0 || int(v) >= len(s.facts) {
 		return nil
@@ -165,6 +195,20 @@ func (s *state) of(v ir.VarID) []*fact {
 	}
 	out := make([]*fact, 0, len(m))
 	for _, f := range m {
+		if s.visible(f) {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// all returns every fact of v, wherever the mutations behind them happen.
+func (s *state) all(v ir.VarID) []*fact {
+	if v < 0 || int(v) >= len(s.facts) {
+		return nil
+	}
+	out := make([]*fact, 0, len(s.facts[v]))
+	for _, f := range s.facts[v] {
 		out = append(out, f)
 	}
 	return out
@@ -394,6 +438,29 @@ func redefinitions(fn *ir.Func) []bool {
 	return out
 }
 
+// multiDefined marks variables with more than one definition: several
+// instructions write them, or a parameter is also assigned. Writes to them
+// are weak updates (arr[i] = v, a Go store through a pointer), which the
+// analysis orders like other mutations.
+func multiDefined(fn *ir.Func) []bool {
+	n := make([]int, len(fn.Vars))
+	for _, p := range fn.Params {
+		if p >= 0 && int(p) < len(n) {
+			n[p]++
+		}
+	}
+	for i := range fn.Instrs {
+		if d := fn.Instrs[i].Dst; d >= 0 && int(d) < len(n) {
+			n[d]++
+		}
+	}
+	out := make([]bool, len(n))
+	for v, c := range n {
+		out[v] = c > 1
+	}
+	return out
+}
+
 func shortType(t string) string {
 	t = strings.TrimLeft(t, "*&[]")
 	if i := strings.LastIndexAny(t, "/"); i >= 0 {
@@ -403,12 +470,14 @@ func shortType(t string) string {
 }
 
 func (a *analyzer) analyzeFunc(fn *ir.Func) *Summary {
-	st := &state{facts: make([]map[string]*fact, len(fn.Vars)), stores: map[ir.VarID]map[string]map[string]*fact{}, minC: a.opts.MinConf}
+	st := &state{facts: make([]map[string]*fact, len(fn.Vars)), stores: map[ir.VarID]map[string]map[string]*fact{}, minC: a.opts.MinConf,
+		order: newOrder(fn), multi: multiDefined(fn)}
 	a.seed(st, fn)
 	sum := &Summary{}
 	for iter := 0; iter < 40; iter++ {
 		changed := false
 		for i := range fn.Instrs {
+			st.cur = i
 			if a.step(st, fn, &fn.Instrs[i], sum) {
 				changed = true
 			}
@@ -423,6 +492,7 @@ func (a *analyzer) analyzeFunc(fn *ir.Func) *Summary {
 		if in.Op != ir.OpReturn {
 			continue
 		}
+		st.cur = i
 		for _, arg := range in.Args {
 			for _, f := range st.of(arg) {
 				if f.dt == "" {
@@ -434,7 +504,7 @@ func (a *analyzer) analyzeFunc(fn *ir.Func) *Summary {
 		}
 	}
 	for i, pid := range fn.Params {
-		for _, f := range st.of(pid) {
+		for _, f := range st.all(pid) {
 			switch {
 			case f.dt == "" && f.param != i:
 				sum.addParamParam(i, f.param, Transfer{Xf: f.xf, Conf: f.conf, Path: f.path})
@@ -451,8 +521,20 @@ func (a *analyzer) step(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 	switch in.Op {
 	case ir.OpAssign:
 		for _, arg := range in.Args {
-			for _, f := range st.of(arg) {
-				changed = st.add(in.Dst, derive(f, in.Pos, 1)) || changed
+			if in.Dst >= 0 && int(in.Dst) < len(st.multi) && st.multi[in.Dst] {
+				// One of several definitions (arr[i] = v, an assignment
+				// inside a lambda): a mutation at this point.
+				for _, f := range st.of(arg) {
+					changed = st.add(in.Dst, st.mutation(derive(f, in.Pos, 1))) || changed
+				}
+				continue
+			}
+			// A copy or merge aliases its arguments: the object's
+			// mutations stay ordered where they happen.
+			for _, f := range st.all(arg) {
+				d := derive(f, in.Pos, 1)
+				d.at = f.at
+				changed = st.add(in.Dst, d) || changed
 			}
 		}
 	case ir.OpLoad:
@@ -487,7 +569,9 @@ func (a *analyzer) step(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 		}
 		if fm := st.stores[obj]; fm != nil {
 			for _, f := range fm[in.Field] {
-				changed = st.add(in.Dst, derive(f, in.Pos, 1)) || changed
+				if st.visible(f) {
+					changed = st.add(in.Dst, derive(f, in.Pos, 1)) || changed
+				}
 			}
 		}
 		if fs != detect.FieldNotPII && !a.opts.Schema.KnownType(owner) {
@@ -501,7 +585,7 @@ func (a *analyzer) step(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 		}
 		obj, val := in.Args[0], in.Args[1]
 		for _, f := range st.of(val) {
-			d := derive(f, in.Pos, 1)
+			d := st.mutation(derive(f, in.Pos, 1))
 			changed = st.addStore(obj, in.Field, d) || changed
 			changed = st.add(obj, d) || changed
 		}
@@ -511,7 +595,7 @@ func (a *analyzer) step(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 		untyped := in.Owner == ""
 		if _, fs := a.opts.Schema.Field(in.Owner, in.Field); untyped || (fs == detect.FieldUnknown && !a.opts.Schema.KnownType(in.Owner)) {
 			if m, ok := a.opts.Names.Key(in.Field); ok {
-				changed = st.add(obj, &fact{dt: m.DataType, param: -1, src: in.Pos, desc: fmt.Sprintf("key %q", in.Field), path: []ir.Pos{in.Pos}, conf: m.Conf}) || changed
+				changed = st.add(obj, st.mutation(&fact{dt: m.DataType, param: -1, src: in.Pos, desc: fmt.Sprintf("key %q", in.Field), path: []ir.Pos{in.Pos}, conf: m.Conf})) || changed
 			}
 		}
 	case ir.OpCall:
@@ -675,7 +759,7 @@ func (a *analyzer) call(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 					}
 					for _, t := range ts {
 						for _, f := range factsOf(src) {
-							changed = st.add(in.Args[dst], derive(f, in.Pos, t.Conf, t.Xf...)) || changed
+							changed = st.add(in.Args[dst], st.mutation(derive(f, in.Pos, t.Conf, t.Xf...))) || changed
 						}
 					}
 				}
@@ -685,7 +769,7 @@ func (a *analyzer) call(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 					continue
 				}
 				for _, rf := range rfs {
-					changed = st.add(in.Args[dst], realToFact(rf, in.Pos)) || changed
+					changed = st.add(in.Args[dst], st.mutation(realToFact(rf, in.Pos))) || changed
 				}
 			}
 			for _, rf := range s.ReturnFacts {
@@ -726,7 +810,7 @@ func (a *analyzer) call(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 			}
 			changed = st.add(in.Dst, derive(f, in.Pos, 0.95, nameXf)) || changed
 			if i >= recvOff && recvOff == 1 && !c.Construct && isMutator(c.Name) {
-				changed = st.add(in.Args[0], derive(f, in.Pos, 0.9)) || changed
+				changed = st.add(in.Args[0], st.mutation(derive(f, in.Pos, 0.9))) || changed
 			}
 			for _, cb := range c.Callbacks {
 				changed = st.add(cb, derive(f, in.Pos, 0.9)) || changed

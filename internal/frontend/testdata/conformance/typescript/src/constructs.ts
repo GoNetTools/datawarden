@@ -150,3 +150,13 @@ export function augmented(email: string) {
   // ruleid: log.ts.console
   console.log(x);
 }
+
+export function storeInLoop(email: string, n: number) {
+  const draft: { note?: string } = {};
+  for (let i = 0; i < n; i++) {
+    // The store below runs before this line on the next iteration.
+    // ruleid: log.ts.console
+    console.log(draft);
+    draft.note = email;
+  }
+}

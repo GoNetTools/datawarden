@@ -431,7 +431,17 @@ func (l *lowerer) lowerFunc(fn *ssa.Function) *ir.Func {
 	for _, fv := range fn.FreeVars {
 		l.vars[fv] = F.Named(fv.Name(), typeStr(fv.Type()), l.pos(fv.Pos()))
 	}
+	// The IR blocks are the SSA blocks, in the same order.
+	for range fn.Blocks {
+		F.NewBlock(false)
+	}
 	for _, b := range fn.Blocks {
+		for _, s := range b.Succs {
+			F.Edge(int32(b.Index), int32(s.Index))
+		}
+	}
+	for _, b := range fn.Blocks {
+		F.SetBlock(int32(b.Index))
 		for _, ins := range b.Instrs {
 			l.instr(ins)
 		}

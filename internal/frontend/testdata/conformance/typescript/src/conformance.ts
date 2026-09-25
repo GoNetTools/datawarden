@@ -160,3 +160,24 @@ export function loopCarried(email: string, items: string[]) {
     x = email;
   }
 }
+
+// scenario: mutated-later
+export function mutatedLater(email: string) {
+  const xs: string[] = [];
+  // ok: log.ts.console
+  console.log(xs);
+  xs.push(email);
+}
+
+// scenario: early-return
+export function earlyReturn(email: string, invalid: boolean) {
+  let x = "anonymous";
+  if (invalid) {
+    x = email;
+    // ruleid: log.ts.console
+    console.log(x);
+    return;
+  }
+  // ok: log.ts.console
+  console.log(x);
+}

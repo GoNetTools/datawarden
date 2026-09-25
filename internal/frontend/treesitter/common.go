@@ -220,11 +220,18 @@ type builder struct {
 	names   map[string]ir.VarID // unresolved identifiers read as values
 	lambdas map[ir.VarID]ir.VarID
 	assigns [][]ir.VarID // stack of variables assigned inside lambdas
+
+	// Control flow. floating counts the enclosing lambdas: their blocks
+	// have no fixed place in the function's order. terminated is set once
+	// the current path has returned; what follows it is unreachable.
+	floating   int
+	terminated bool
 }
 
 func (p *program) newBuilder(f *srcFile, cls *classInfo, id, name string, n *sitter.Node) *builder {
 	b := &builder{p: p, f: f, cls: cls, scope: map[string]ir.VarID{}, this: ir.NoVar, names: map[string]ir.VarID{}, lambdas: map[ir.VarID]ir.VarID{}}
 	b.fn = &ir.Func{ID: id, Name: name, Lang: p.lang, File: f.rel, Pos: b.pos(n)}
+	b.fn.NewBlock(false) // entry
 	return b
 }
 
@@ -311,29 +318,61 @@ func (b *builder) join(n *sitter.Node, paths ...map[string]ir.VarID) {
 // branches lowers alternative paths (if/else arms, switch cases) from the
 // current scope and joins them. skippable adds the path that takes none of
 // them: an if without else, a switch without default.
+//
+// Each arm starts a block from the current one, and the join is a new
+// block after them. An arm that returns is left out of the join; when all
+// of them return, what follows is unreachable.
 func (b *builder) branches(n *sitter.Node, skippable bool, arms ...func()) {
-	entry := b.snapshot()
-	var ends []map[string]ir.VarID
+	entry, from, dead := b.snapshot(), b.fn.CurBlock(), b.terminated
+	var scopes []map[string]ir.VarID
+	var ends []int32
 	if skippable || len(arms) == 0 {
-		ends = append(ends, entry)
+		scopes, ends = append(scopes, entry), append(ends, from)
 	}
 	for _, arm := range arms {
 		b.scope = maps.Clone(entry)
+		b.terminated = false
+		b.newBlock(from)
 		arm()
-		ends = append(ends, b.scope)
+		if !b.terminated {
+			scopes, ends = append(scopes, b.scope), append(ends, b.fn.CurBlock())
+		}
 	}
-	b.join(n, ends...)
+	b.newBlock(ends...)
+	b.terminated = dead || len(scopes) == 0
+	if len(scopes) == 0 {
+		b.scope = entry
+		return
+	}
+	b.join(n, scopes...)
 }
 
 // loop lowers a loop body that may run zero or more times. A local the body
 // redefines gets a loop-header version that merges the value from before
 // the loop with the value from the end of the previous iteration; reads in
 // the body are rewritten to it, and it is the value after the loop.
+//
+// The body starts in a header block that the end of the body loops back
+// to; the loop exits from the header.
 func (b *builder) loop(n *sitter.Node, body func()) {
-	entry := b.snapshot()
+	entry, dead := b.snapshot(), b.terminated
+	head := b.newBlock(b.fn.CurBlock())
 	start := len(b.fn.Instrs)
+	b.terminated = false
 	body()
 	end := len(b.fn.Instrs)
+	returned := b.terminated
+	if !returned {
+		b.fn.Edge(b.fn.CurBlock(), head)
+	}
+	b.newBlock(head)
+	b.terminated = dead
+	if returned {
+		// The body always returns: nothing it assigns reaches the
+		// header again or the code after the loop.
+		b.scope = entry
+		return
+	}
 	rename := map[ir.VarID]ir.VarID{}
 	for _, name := range slices.Sorted(maps.Keys(entry)) {
 		pre := entry[name]
@@ -360,17 +399,35 @@ func (b *builder) loop(n *sitter.Node, body func()) {
 // tryCatch lowers try/catch/finally. A handler can start after any part of
 // the body ran, so it starts from the join of the scopes before and after
 // the body; the finally block runs after either.
+//
+// Handler blocks have edges from the start and the end of the body.
 func (b *builder) tryCatch(n *sitter.Node, body func(), handlers []func(), finally func()) {
-	entry := b.snapshot()
+	entry, from, dead := b.snapshot(), b.fn.CurBlock(), b.terminated
+	start := b.newBlock(from)
+	b.terminated = false
 	body()
-	done := b.snapshot()
-	ends := []map[string]ir.VarID{done}
+	done, doneBlock := b.snapshot(), b.fn.CurBlock()
+	var scopes []map[string]ir.VarID
+	var ends []int32
+	if !b.terminated {
+		scopes, ends = append(scopes, done), append(ends, doneBlock)
+	}
 	for _, h := range handlers {
+		b.newBlock(from, start, doneBlock)
+		b.terminated = false
 		b.join(n, entry, done)
 		h()
-		ends = append(ends, b.scope)
+		if !b.terminated {
+			scopes, ends = append(scopes, b.scope), append(ends, b.fn.CurBlock())
+		}
 	}
-	b.join(n, ends...)
+	b.newBlock(ends...)
+	b.terminated = dead || len(scopes) == 0
+	if len(scopes) == 0 {
+		b.scope = entry
+	} else {
+		b.join(n, scopes...)
+	}
 	if finally != nil {
 		finally()
 	}
@@ -432,6 +489,27 @@ func (b *builder) ret(n *sitter.Node, vals ...ir.VarID) {
 		}
 	}
 	b.fn.Emit(ir.Instr{Op: ir.OpReturn, Dst: ir.NoVar, Args: args, Pos: b.pos(n)})
+	// Whatever follows on this path is unreachable.
+	b.terminated = true
+	b.newBlock()
+}
+
+// newBlock starts a new basic block with edges from preds.
+func (b *builder) newBlock(preds ...int32) int32 {
+	return b.fn.NewBlock(b.floating > 0, preds...)
+}
+
+// floatingRegion lowers code that runs at no fixed point of the function:
+// a lambda or local function body, which may run when it is created, later
+// or never. Its blocks are unordered, and a return inside it ends only it.
+func (b *builder) floatingRegion(body func()) {
+	from, terminated := b.fn.CurBlock(), b.terminated
+	b.floating++
+	b.newBlock()
+	body()
+	b.floating--
+	b.fn.SetBlock(from)
+	b.terminated = terminated
 }
 
 // emitCall emits a call and returns its result variable.
@@ -470,7 +548,8 @@ func (b *builder) lambda(n *sitter.Node, params []*sitter.Node, paramNames []str
 		declare("it", n)
 	}
 	b.assigns = append(b.assigns, nil)
-	last := body()
+	last := ir.NoVar
+	b.floatingRegion(func() { last = body() })
 	assigned := b.assigns[len(b.assigns)-1]
 	b.assigns = b.assigns[:len(b.assigns)-1]
 	val := b.temp(n)

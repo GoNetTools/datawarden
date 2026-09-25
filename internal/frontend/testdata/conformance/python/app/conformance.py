@@ -163,3 +163,23 @@ def loop_carried(email: str, items: list):
         # ruleid: log.py.print
         print(x)
         x = email
+
+
+# scenario: mutated-later
+def mutated_later(email: str):
+    xs = []
+    # ok: log.py.print
+    print(xs)
+    xs.append(email)
+
+
+# scenario: early-return
+def early_return(email: str, invalid: bool):
+    x = "anonymous"
+    if invalid:
+        x = email
+        # ruleid: log.py.print
+        print(x)
+        return
+    # ok: log.py.print
+    print(x)

@@ -135,3 +135,13 @@ fun catchSeesEarlierValue(email: String) {
         println(x)
     }
 }
+
+fun callbackRunsLater(email: String, handlers: MutableList<() -> Unit>) {
+    val xs = mutableListOf<String>()
+    handlers.add {
+        // A lambda may run after the add below.
+        // ruleid: log.jvm.stdout
+        println(xs)
+    }
+    xs.add(email)
+}

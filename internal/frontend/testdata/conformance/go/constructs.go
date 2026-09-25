@@ -128,3 +128,14 @@ func switchOverwrites(email string, kind int) {
 	// ok: log.go.stdlib
 	log.Println(x)
 }
+
+type draft struct{ Note string }
+
+func storeOrder(email string) {
+	d := &draft{}
+	// ok: log.go.stdlib
+	log.Println(d)
+	d.Note = email
+	// ruleid: log.go.stdlib
+	log.Println(d)
+}
