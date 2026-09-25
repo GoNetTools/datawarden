@@ -134,7 +134,8 @@
 - id: sdk.onesignal
   lang: [kotlin, java]
   call: ["com.onesignal.OneSignal.setEmail", "com.onesignal.OneSignal.setSMSNumber", "com.onesignal.OneSignal.login", "com.onesignal.OneSignal.setExternalUserId",
-         "com.onesignal.user.IUserManager.addEmail", "com.onesignal.user.IUserManager.addSms", "com.onesignal.user.IUserManager.addTag"]
+         "com.onesignal.user.IUserManager.addEmail", "com.onesignal.user.IUserManager.addSms", "com.onesignal.user.IUserManager.addTag",
+         "com.onesignal.OneSignal.User.addEmail", "com.onesignal.OneSignal.User.addSms", "com.onesignal.OneSignal.User.addTag"]
   receiver: "(?i)onesignal"
   arg: "*"
   dest: { host: onesignal.com, kind: third_party, vendor: OneSignal }

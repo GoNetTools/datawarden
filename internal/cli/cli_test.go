@@ -254,6 +254,52 @@ func TestProfilesAreWrittenThroughTheWorkspace(t *testing.T) {
 	}
 }
 
+func TestRulesTestChecksAnnotations(t *testing.T) {
+	// The fake scanner reports a Sentry flow at app/Repo.kt:9.
+	annotated := strings.Repeat("\n", 7) + "// ruleid: sdk.sentry.set_user\nSentry.setUser(sdt)\n"
+	h := newHarness(map[string]string{"examples/app/Repo.kt": annotated})
+	if code := h.run("rules", "test", "examples"); code != ExitClean {
+		t.Fatalf("exit %d\n%s%s", code, h.out, h.errb)
+	}
+	if !strings.Contains(h.out.String(), "1 annotation(s), 0 failure(s)") {
+		t.Errorf("summary: %s", h.out)
+	}
+	req := h.scanner.reqs[len(h.scanner.reqs)-1]
+	if req.Repo.Root != filepath.Join(testRoot, "examples") || req.Rules == nil || req.Cache == nil {
+		t.Errorf("examples must be scanned as their own root with the repository's rules: %+v", req.Repo)
+	}
+
+	// A wrong annotation fails: the expected finding is missing and the
+	// real one is unannotated.
+	h = newHarness(map[string]string{"examples/app/Repo.kt": strings.Replace(annotated, "sdk.sentry.set_user", "sdk.sentry.capture", 1)})
+	if code := h.run("rules", "test", "examples"); code != ExitViolation {
+		t.Errorf("wrong annotation: exit %d", code)
+	}
+	if out := h.out.String(); !strings.Contains(out, "FAIL    app/Repo.kt:9: ruleid: sdk.sentry.capture: no finding") || !strings.Contains(out, "unannotated violation") {
+		t.Errorf("failures not reported:\n%s", out)
+	}
+
+	// Repository rules without an example are listed.
+	h = newHarness(map[string]string{
+		".piiflow/rules/acme.yaml": "- id: sdk.acme.track\n  lang: kotlin\n  call: com.acme.Track.send\n  dest: {kind: third_party}\n",
+		"examples/app/Repo.kt":     annotated,
+	})
+	if code := h.run("rules", "test", "examples"); code != ExitClean || !strings.Contains(h.out.String(), "repository rules without a ruleid example: sdk.acme.track") {
+		t.Errorf("untested repository rule: exit %d\n%s", code, h.out)
+	}
+
+	for name, args := range map[string][]string{
+		"no annotations": {"rules", "test", "examples"},
+		"not a dir":      {"rules", "test", "missing"},
+		"no dir":         {"rules", "test"},
+	} {
+		h = newHarness(map[string]string{"examples/README.md": "no annotations here\n"})
+		if code := h.run(args...); code != ExitError {
+			t.Errorf("%s: exit %d", name, code)
+		}
+	}
+}
+
 func TestRequestIsBuiltFromFlagsConfigAndRepo(t *testing.T) {
 	h := newHarness(map[string]string{
 		".piiflow.yaml":           "first_party_domains: [api.acme.vn]\nrules: [policy/rules]\n",

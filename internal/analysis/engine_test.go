@@ -114,3 +114,23 @@ func TestEngineWithFakeRules(t *testing.T) {
 		t.Error("missing dependencies accepted")
 	}
 }
+
+// A map or object literal key names its value even when some type in the
+// repository has a field of the same name (regression: the schema's field
+// hint used to switch the key heuristic off for untyped stores).
+func TestMapKeyLabelsValueDespiteSchemaField(t *testing.T) {
+	names := detect.NewClassifier(detect.DefaultTaxonomy())
+	schema := detect.BuildSchema(names, []*ir.TypeDecl{{Name: "p.User", Kind: "struct", Fields: []ir.Field{{Name: "Email", Type: "string"}}}})
+	fn := &ir.Func{ID: "p.key", Name: "key", Lang: "go", File: "a.go"}
+	value := fn.AddParam("value", "string", pos(1))
+	m := fn.Named("payload", "map[string]string", pos(2))
+	fn.Emit(ir.Instr{Op: ir.OpStore, Dst: ir.NoVar, Args: []ir.VarID{m, value}, Field: "email", Pos: pos(2)})
+	fn.Emit(ir.Instr{Op: ir.OpCall, Dst: fn.Temp(pos(3)), Args: []ir.VarID{m}, Call: &ir.Call{Name: "leak"}, Pos: pos(3)})
+	res, err := Engine{Names: names}.Analyze(context.Background(), []*ir.Func{fn}, Input{Rules: fakeRules{}, Schema: schema})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Flows) != 1 || res.Flows[0].DataType != "email" {
+		t.Errorf("flows: %+v", res.Flows)
+	}
+}

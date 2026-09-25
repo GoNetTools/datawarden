@@ -43,6 +43,8 @@ func TestMatcher(t *testing.T) {
 		{"logo.png", false, true},
 		{"go.sum", false, true},
 		{".piiflow/cache/piiflow-cache.json", false, true},
+		{".piiflow/rules/examples/src/telemetry.ts", false, true},
+		{".piiflow/rules/acme.yaml", false, false},
 	}
 	for _, c := range cases {
 		if got := m.Ignored(c.path, c.dir); got != c.want {

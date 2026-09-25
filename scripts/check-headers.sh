@@ -2,7 +2,7 @@
 # Copyright 2026 The piiflow Authors
 # SPDX-License-Identifier: Apache-2.0
 #
-# Fails if a Go source file (outside testdata/) lacks the license header.
+# Fails if a Go source file (outside testdata/ directories) lacks the license header.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -12,7 +12,7 @@ while IFS= read -r f; do
     echo "missing license header: $f" >&2
     missing=1
   fi
-done < <(git ls-files --cached --others --exclude-standard -- '*.go' ':!:testdata/**')
+done < <(git ls-files --cached --others --exclude-standard -- '*.go' ':(exclude,glob)**/testdata/**')
 
 if [ "$missing" -ne 0 ]; then
   cat >&2 <<'MSG'

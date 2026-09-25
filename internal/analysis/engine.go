@@ -454,7 +454,11 @@ func (a *analyzer) step(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 			changed = st.addStore(obj, in.Field, d) || changed
 			changed = st.add(obj, d) || changed
 		}
-		if _, fs := a.opts.Schema.Field(in.Owner, in.Field); fs == detect.FieldUnknown && !a.opts.Schema.KnownType(in.Owner) {
+		// A store without a declared owner type is a map or object literal
+		// ({"email": v}): the key names the value, whatever other types say
+		// about fields of the same name. For typed owners the schema decides.
+		untyped := in.Owner == ""
+		if _, fs := a.opts.Schema.Field(in.Owner, in.Field); untyped || (fs == detect.FieldUnknown && !a.opts.Schema.KnownType(in.Owner)) {
 			if m, ok := a.opts.Names.Key(in.Field); ok {
 				changed = st.add(obj, &fact{dt: m.DataType, param: -1, src: in.Pos, desc: fmt.Sprintf("key %q", in.Field), path: []ir.Pos{in.Pos}, conf: m.Conf}) || changed
 			}
