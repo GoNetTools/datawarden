@@ -632,8 +632,6 @@ func (pb *pyBuilder) assignment(n *sitter.Node) ir.VarID {
 	return v
 }
 
-var pyCompare = map[string]bool{"comparison_operator": true, "not_operator": true}
-
 func (pb *pyBuilder) expr(n *sitter.Node) ir.VarID {
 	if n == nil {
 		return ir.NoVar

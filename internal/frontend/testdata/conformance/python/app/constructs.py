@@ -139,3 +139,71 @@ def class_attribute_access(p: Profile):
     data.update(source="web")
     # ruleid: log.py.print
     print(data)
+
+
+def subscript_store(value: str):
+    payload = {}
+    payload["email"] = value
+    # ruleid: log.py.print
+    print(payload)
+
+
+class Card:
+    holder = ""
+
+
+def attribute_store(email: str):
+    card = Card()
+    card.holder = email
+    # ruleid: log.py.print
+    print(card.holder)
+
+
+def starred(emails: list):
+    first, *rest = emails
+    # ruleid: log.py.print
+    print(first)
+
+
+def annotated(email: str):
+    contact: str = email
+    later: str
+    # ruleid: log.py.print
+    print(contact)
+
+
+def augmented(email: str):
+    msg = "to: "
+    msg += email
+    # ruleid: log.py.print
+    print(msg)
+
+
+def generator_argument(emails: list):
+    # ruleid: log.py.print
+    print(", ".join(e for e in emails))
+
+
+def dict_comprehension(profiles: list[Profile]):
+    by_mail = {p.email: p.nickname for p in profiles}
+    # ruleid: log.py.print
+    print(by_mail)
+
+
+def static_call(phone: str):
+    Controller.announce(phone)
+
+
+def boolean_ops(email: str, fallback: str):
+    contact = email or fallback
+    # ruleid: log.py.print
+    print(contact)
+    # ok: log.py.print
+    print(email is None, not email)
+
+
+def raise_with(email: str):
+    # ok: log.py.print
+    print("validating")
+    assert email, "missing"
+    raise ValueError(email)

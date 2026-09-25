@@ -16,7 +16,7 @@ It knows four classes of sensitive data, and the list is data, not code ([`datat
 | `pci` | Cardholder data (PCI DSS) | payment card numbers |
 | `credential` | Credentials and secrets | passwords, API keys, access and session tokens, private keys |
 
-It understands Go, Kotlin, Java and TypeScript/JavaScript, and is built for CI: SARIF for code scanning, a PR/MR comment, a baseline so only *new* problems fail the build, and an incremental PR mode.
+It understands Go, Python, Java, Kotlin, Swift and TypeScript/JavaScript, and is built for CI: SARIF for code scanning, a PR/MR comment, a baseline so only *new* problems fail the build, and an incremental PR mode.
 
 ```
 $ datawarden scan --diff origin/main
@@ -53,7 +53,7 @@ NEW      high   phone → Sentry / sentry.io (third-party)  [sdk.ts.sentry.set_u
 
 ## Install
 
-The Kotlin, Java and TypeScript frontends use tree-sitter, whose Go bindings need **cgo**, so release binaries are built per platform:
+The Python, Java, Kotlin, Swift and TypeScript frontends use tree-sitter, whose Go bindings need **cgo**, so release binaries are built per platform:
 
 | Option | Languages | Notes |
 |---|---|---|
@@ -106,7 +106,7 @@ Useful `scan` flags: `--format text|json|sarif|markdown|gitlab`, `--sarif FILE`,
 ```
  repo ──► Ingest ──► Frontends ──────────► IR ──► Detectors ──► Taint engine ──► Policy + Baseline ──► Reports
           .datawardenignore   Go: go/packages + SSA      sources: names,        per-function       violation? new?      text, JSON,
-          --diff: changed  Kotlin/Java/TS:            schema hints,          summaries,                              SARIF, Markdown,
+          --diff: changed  Py/Java/Kt/Swift/TS:       schema hints,          summaries,                              SARIF, Markdown,
           files + callers  tree-sitter (cgo)          literals               SCC fixpoint,                           GitLab SAST, DPIA
           (call graph      ─ shared interface ─       sinks: YAML rules      cached by file hash
            cache)
@@ -123,7 +123,9 @@ Useful `scan` flags: `--format text|json|sarif|markdown|gitlab`, `--sarif FILE`,
   ```
 
   - *Go* uses `golang.org/x/tools/go/packages` and `go/ssa` (with debug info for source names): callees and types are exact, struct tags come from the type checker, closures and interface calls are handled.
-  - *Kotlin, Java, TypeScript/JavaScript* use tree-sitter with best-effort resolution: imports, declared types of parameters/locals/fields, constructor calls, `X.getInstance()` idioms, class hierarchies, extension functions, lambdas (as callbacks), string templates and named arguments.
+  - *Python, Java, Kotlin, Swift, TypeScript/JavaScript* use tree-sitter with best-effort resolution: imports, declared types of parameters/locals/fields, constructor calls, `X.getInstance()` idioms, class hierarchies, extension functions, lambdas (as callbacks), string templates and named arguments.
+  - *Python* also follows relative imports, `self` methods, keyword arguments (which label their values like dictionary keys), f-strings and `%`/`.format()` formatting, comprehensions, `with`, and reads dataclasses, Pydantic, Django and SQLAlchemy models as schema hints.
+  - *Swift* also follows implicit `self`, extensions, argument labels, trailing closures and `$0`, `if`/`guard let`, optional chaining and computed properties, reads `Codable` types (with `CodingKeys`), SwiftData and Core Data models as schema hints, and models unified logging: `Logger` and `os_log` values are redacted unless marked public, so only public ones count as logged.
 - **Detectors** mark sources (below). **Sinks** come from YAML rules.
 - **Taint engine**: each function is analyzed to a fixpoint with parameters as symbolic labels, which yields both concrete flows and a *summary* (parameter → return, parameter → sink, parameter → parameter, sensitive data returned or written into arguments). Functions are processed callees-first by strongly connected component; recursion iterates until summaries stabilize. Summaries are cached by function ID and **validated by the content hash of the defining file**, so a PR scan re-analyzes only changed files and their callers and reuses everything else.
 - Each flow carries data type, source, sink, rule, destination, path, transforms and confidence:
@@ -206,7 +208,7 @@ datawarden looks for secrets *in data flows* as well as in files: a password log
 
 ## Sink rules
 
-Rules are YAML files embedded in the binary (`internal/rules/builtin/`: 89 rules for Go, Kotlin/Java and TypeScript). A repository adds, replaces or disables rules in `.datawarden/rules/*.yaml` (or any path listed under `rules:` in `.datawarden.yaml`).
+Rules are YAML files embedded in the binary (`internal/rules/builtin/`: 123 rules for Go, Python, Java/Kotlin, Swift and TypeScript). A repository adds, replaces or disables rules in `.datawarden/rules/*.yaml` (or any path listed under `rules:` in `.datawarden.yaml`).
 
 ```yaml
 - id: sdk.sentry.set_user
@@ -245,7 +247,9 @@ Destination kinds: `third_party`, `first_party`, `log`, `storage` (device/local)
 
 Callee names:
 - Go: `importpath.Func`, `importpath.Type.Method` (pointer receivers and type parameters dropped): `github.com/getsentry/sentry-go.Scope.SetUser`, `log/slog.Logger.Info`.
+- Python: `<module>.<name>`, as imported: `sentry_sdk.set_user`, `logging.info`, `requests.post`; `logging.getLogger(__name__).info` is `logging.getLogger().info`.
 - Kotlin/Java: `package.Class.method`; unqualified class references resolve through imports.
+- Swift: the type as written, since Swift imports whole modules: `SentrySDK.setUser`, `UserDefaults.standard.set`, `Crashlytics.crashlytics().setUserID`. Assigning a static member (`UIPasteboard.general.string = x`) is a call of `UIPasteboard.general.string`.
 - TypeScript: `<module>.<export>`: `@sentry/react.setUser`, `axios.post`, `mixpanel-browser.people.set`, globals such as `console.log`, `localStorage.setItem`, `fetch`.
 
 Calls that cannot be resolved still match heuristically on the receiver type name (`Sentry.setUser` behind a wildcard import) or a `receiver` regex (`logger.info`), with lower confidence.
@@ -255,7 +259,7 @@ Calls that cannot be resolved still match heuristically on the receiver type nam
 `.datawarden.yaml` (all keys optional; `datawarden init` writes a commented copy):
 
 ```yaml
-languages: [go, kotlin, java, typescript]   # default: all present
+languages: [go, python, java, kotlin, swift, typescript]   # default: all present
 include_tests: false          # analyze test sources for flows (literals always scan tests)
 first_party_domains: [api.example.com]       # network sinks to these hosts become first-party
 rules: [.datawarden/rules]
@@ -345,7 +349,7 @@ datawarden favours explainable, low-noise results over completeness. Every findi
 
 - The analysis is flow-insensitive inside a function and field-sensitive only for direct stores/loads. Objects are tracked through summaries, not heap models.
 - Go interface calls are matched by the interface method (rules can target `io.Writer.Write`); implementations are not enumerated.
-- Kotlin/Java/TypeScript resolution is syntactic: no type inference across generics, overloads share an ID, reflection/DI-provided instances resolve only through declared types or receiver-name rules.
+- Python/Java/Kotlin/Swift/TypeScript resolution is syntactic: no type inference across generics, overloads share an ID, reflection/DI-provided instances resolve only through declared types or receiver-name rules.
 - Dynamic destinations (URLs built at runtime) show up as `network (unknown host)`.
 - Phone and national-ID *values* are validated for a limited set of national formats; other countries' numbers are found through names and schema hints, not as committed literals.
 - Secret *values* are recognised only for the providers in the taxonomy's value patterns; a generic `password = "..."` assignment is not reported as a literal, because it is almost always a test or placeholder value.
@@ -366,7 +370,7 @@ go run ./cmd/datawarden-bench -manifest my-corpus.yaml -check
 - **Timings**: median wall time over `-runs` cold scans, memory allocated by the scan, files and functions. The Go frontend's `go list` runs in a child process, so its time is included but its memory is not.
 - `-check` exits 1 when a case scores below its `min_precision` or `min_recall`. CI runs it on every pull request and publishes the tables in the job summary; timings are reported but not gated.
 
-**See it on a realistic app:** [`testdata/vulnshop`](testdata/vulnshop) is a small shop (Go API, TypeScript checkout, Kotlin/Java Android app, CSV seed data, an env file) with 37 planted leaks of personal data, health data and credentials, and a set of traps. Run **Actions → demo → Run workflow** to scan it, or any other directory, and get the findings, the data map and the accuracy tables in the job summary.
+**See it on a realistic app:** [`testdata/vulnshop`](testdata/vulnshop) is a small shop (Go API, Python recommender, TypeScript checkout, Kotlin/Java Android app, Swift iOS app, CSV seed data, an env file) with 51 planted leaks of personal data, health data and credentials, and a set of traps. Run **Actions → demo → Run workflow** to scan it, or any other directory, and get the findings, the data map and the accuracy tables in the job summary.
 
 To measure datawarden on your own code, write a manifest whose case `dir` points at a checkout (absolute, or relative to the manifest) and label the leaks you know about. For recall on unlabelled code, plant known leaks in a copy and label those.
 
@@ -430,7 +434,7 @@ internal/ir/            the common IR
 internal/ingest/        walker, .datawardenignore, git queries
 internal/frontend/      interface + Registry
   golang/               go/packages + SSA (PackageLoader injectable)
-  treesitter/           Kotlin, Java, TypeScript (cgo; Register records them unavailable without cgo)
+  treesitter/           Python, Java, Kotlin, Swift, TypeScript (cgo; Register records them unavailable without cgo)
   testdata/conformance/ the same scenarios in every language: what a frontend must lower
 internal/detect/        Classifier + taxonomy, schema hints, literal validators
 internal/rules/         YAML rules (builtin/ embedded) and matcher; testdata/examples/ has an example per rule

@@ -133,3 +133,66 @@ func ternary(account: Account, useName: Bool) {
     // ruleid: log.swift.print
     print(label)
 }
+
+func nestedFunction(email: String) {
+    func shout(_ s: String) -> String {
+        return s.uppercased()
+    }
+    // ruleid: log.swift.print
+    print(shout(email))
+}
+
+func compoundAssignment(email: String) {
+    var msg = "to: "
+    msg += email
+    // ruleid: log.swift.print
+    print(msg)
+}
+
+func subscriptStore(phone: String) {
+    var payload: [String: String] = [:]
+    payload["phone"] = phone
+    // ruleid: log.swift.print
+    print(payload)
+}
+
+final class Card {
+    var holder = ""
+}
+
+func fieldStore(email: String) {
+    let card = Card()
+    card.holder = email
+    // ruleid: log.swift.print
+    print(card.holder)
+}
+
+func record(_ value: String) {
+    // ruleid: log.swift.print
+    print("recorded", value)
+}
+
+func record(_ value: Int) {
+    // ok: log.swift.print
+    print("recorded", value)
+}
+
+func overloads(email: String) {
+    record(email)
+}
+
+func dictionaryLoop(contacts: [String: String]) {
+    for (name, phone) in contacts {
+        // ruleid: log.swift.print
+        print(name, phone)
+    }
+}
+
+func whileLoop(emails: [String]) {
+    var i = 0
+    while i < emails.count {
+        // ruleid: log.swift.print
+        print(emails[i])
+        i += 1
+    }
+}
