@@ -64,11 +64,15 @@ type program struct {
 	ext     map[string][]string
 	modules map[string]bool // TS module ids in this run
 	mod     *ir.Module
+	// consts holds boolean constants declared in the source, keyed by
+	// "Class.NAME" for class members and "file|NAME" for top-level ones.
+	consts map[string]bool
 }
 
 func newProgram(lang string, o frontend.Options) *program {
 	return &program{lang: lang, opts: o, classes: map[string]*classInfo{}, byShort: map[string][]*classInfo{},
-		funcs: map[string]bool{}, top: map[string]string{}, ext: map[string][]string{}, modules: map[string]bool{}, mod: &ir.Module{Lang: lang}}
+		funcs: map[string]bool{}, top: map[string]string{}, ext: map[string][]string{}, modules: map[string]bool{}, mod: &ir.Module{Lang: lang},
+		consts: map[string]bool{}}
 }
 
 func (p *program) warnf(format string, args ...any) {
@@ -96,8 +100,93 @@ func (p *program) parse(ctx context.Context, rels []string, lang *sitter.Languag
 			p.warnf("%s: parse: %v", rel, err)
 			continue
 		}
-		p.files = append(p.files, &srcFile{rel: rel, src: src, tree: tree, root: tree.RootNode(), imports: map[string]string{}})
+		f := &srcFile{rel: rel, src: src, tree: tree, root: tree.RootNode(), imports: map[string]string{}}
+		p.files = append(p.files, f)
+		p.collectConsts(f, f.root)
 	}
+}
+
+// collectConsts records boolean constants: Java final fields, Kotlin val
+// and const val, Swift let, TypeScript const and readonly fields, and
+// Python UPPER_CASE assignments at module or class level, when their value
+// is a boolean literal (static final boolean DEBUG = false).
+func (p *program) collectConsts(f *srcFile, n *sitter.Node) {
+	for _, c := range named(n) {
+		switch c.Type() {
+		case "block", "function_body", "method_declaration", "constructor_declaration", "function_declaration", "function_definition",
+			"statement_block", "lambda_expression", "lambda_literal", "arrow_function":
+			continue // locals are handled through their variables
+		}
+		name, val := p.constDecl(f, c)
+		if name != "" && val != nil {
+			switch strings.TrimSpace(f.text(val)) {
+			case "true", "True":
+				p.consts[constOwner(f, c)+name] = true
+			case "false", "False":
+				p.consts[constOwner(f, c)+name] = false
+			}
+		}
+		p.collectConsts(f, c)
+	}
+}
+
+// constDecl returns the name and value of an immutable declaration.
+func (p *program) constDecl(f *srcFile, n *sitter.Node) (string, *sitter.Node) {
+	text := f.text(n)
+	switch p.lang {
+	case lang.Java:
+		if (n.Type() == "field_declaration" || n.Type() == "constant_declaration") && strings.Contains(f.text(firstOf(n, "modifiers")), "final") ||
+			n.Type() == "constant_declaration" {
+			if d := firstOf(n, "variable_declarator"); d != nil {
+				return f.text(d.ChildByFieldName("name")), d.ChildByFieldName("value")
+			}
+		}
+	case lang.Kotlin:
+		if n.Type() == "property_declaration" && !strings.Contains(f.text(firstOf(n, "binding_pattern_kind")), "var") {
+			if vd := firstOf(n, "variable_declaration"); vd != nil {
+				return f.text(firstOf(vd, "simple_identifier")), ktPropValue(n)
+			}
+		}
+	case lang.Swift:
+		if n.Type() == "property_declaration" && strings.Contains(f.text(firstOf(n, "value_binding_pattern")), "let") {
+			if id := n.ChildByFieldName("name"); id != nil {
+				return strings.TrimSpace(f.text(id)), n.ChildByFieldName("value")
+			}
+		}
+	case lang.TypeScript:
+		switch {
+		case n.Type() == "lexical_declaration" && strings.HasPrefix(text, "const"):
+			if d := firstOf(n, "variable_declarator"); d != nil {
+				return f.text(d.ChildByFieldName("name")), d.ChildByFieldName("value")
+			}
+		case (n.Type() == "public_field_definition" || n.Type() == "field_definition") && strings.Contains(text, "readonly"):
+			return unquote(f.text(n.ChildByFieldName("name"))), n.ChildByFieldName("value")
+		}
+	case lang.Python:
+		if n.Type() == "assignment" {
+			if l := n.ChildByFieldName("left"); l != nil && l.Type() == "identifier" && f.text(l) == strings.ToUpper(f.text(l)) {
+				return f.text(l), n.ChildByFieldName("right")
+			}
+		}
+	}
+	return "", nil
+}
+
+// constOwner is the key prefix of a declaration: its enclosing class's
+// short name, or its file for a top-level declaration.
+func constOwner(f *srcFile, n *sitter.Node) string {
+	for a := n.Parent(); a != nil; a = a.Parent() {
+		switch a.Type() {
+		case "class_declaration", "interface_declaration", "enum_declaration", "record_declaration", "object_declaration",
+			"class_definition", "protocol_declaration", "abstract_class_declaration":
+			name := a.ChildByFieldName("name")
+			if name == nil {
+				name = firstOf(a, "type_identifier", "simple_identifier", "identifier")
+			}
+			return f.text(name) + "."
+		}
+	}
+	return f.rel + "|"
 }
 
 func (p *program) addClass(c *classInfo) {
@@ -226,6 +315,67 @@ type builder struct {
 	// the current path has returned; what follows it is unreachable.
 	floating   int
 	terminated bool
+	targets    []*jumpTarget // enclosing loops and switches, innermost last
+	label      string        // label of the statement being lowered
+}
+
+// exit is where a path leaves a construct: its scope and block.
+type exit struct {
+	scope map[string]ir.VarID
+	block int32
+}
+
+// jumpTarget is a loop or switch that break leaves; continue goes back to
+// the header of a loop.
+type jumpTarget struct {
+	label        string
+	loop         bool
+	breaks, cont []exit
+}
+
+func (b *builder) here() exit { return exit{b.snapshot(), b.fn.CurBlock()} }
+
+func blocksOf(es []exit) []int32 {
+	out := make([]int32, len(es))
+	for i, e := range es {
+		out[i] = e.block
+	}
+	return out
+}
+
+func scopesOf(es []exit) []map[string]ir.VarID {
+	out := make([]map[string]ir.VarID, len(es))
+	for i, e := range es {
+		out[i] = e.scope
+	}
+	return out
+}
+
+// takeLabel returns the label of the statement being lowered, once.
+func (b *builder) takeLabel() string {
+	l := b.label
+	b.label = ""
+	return l
+}
+
+// jump lowers break (or continue) with an optional label: the path ends
+// here and resumes at the target's exit (or loop header). A jump with no
+// target in this function (a break inside a lambda body) is ignored.
+func (b *builder) jump(isContinue bool, label string) {
+	for i := len(b.targets) - 1; i >= 0; i-- {
+		t := b.targets[i]
+		if (label != "" && t.label != label) || (isContinue && !t.loop) {
+			continue
+		}
+		if isContinue {
+			t.cont = append(t.cont, b.here())
+		} else {
+			t.breaks = append(t.breaks, b.here())
+		}
+		b.terminated = true
+		b.newBlock()
+		return
+	}
 }
 
 func (p *program) newBuilder(f *srcFile, cls *classInfo, id, name string, n *sitter.Node) *builder {
@@ -347,44 +497,62 @@ func (b *builder) branches(n *sitter.Node, skippable bool, arms ...func()) {
 	b.join(n, scopes...)
 }
 
-// loop lowers a loop body that may run zero or more times. A local the body
-// redefines gets a loop-header version that merges the value from before
-// the loop with the value from the end of the previous iteration; reads in
-// the body are rewritten to it, and it is the value after the loop.
-//
-// The body starts in a header block that the end of the body loops back
-// to; the loop exits from the header.
-func (b *builder) loop(n *sitter.Node, body func()) {
+// loop lowers a loop body that may run zero or more times.
+func (b *builder) loop(n *sitter.Node, body func()) { b.loopWith(n, loopSpec{body: body}) }
+
+type loopSpec struct {
+	body func()
+	// orelse runs when the loop ends other than by break (Python's
+	// for/while ... else).
+	orelse func()
+	// infinite marks while(true): the loop is left only by break.
+	infinite bool
+}
+
+// loopWith lowers a loop. The body starts in a header block that the end of
+// the body and every continue loop back to. A local the body redefines gets
+// a header version merging the value from before the loop with the value at
+// each of those back edges; reads in the body are rewritten to it. The code
+// after the loop joins the header's exit with every break.
+func (b *builder) loopWith(n *sitter.Node, spec loopSpec) {
 	entry, dead := b.snapshot(), b.terminated
+	t := &jumpTarget{label: b.takeLabel(), loop: true}
 	head := b.newBlock(b.fn.CurBlock())
+	b.targets = append(b.targets, t)
 	start := len(b.fn.Instrs)
 	b.terminated = false
-	body()
+	spec.body()
 	end := len(b.fn.Instrs)
-	returned := b.terminated
-	if !returned {
-		b.fn.Edge(b.fn.CurBlock(), head)
+	b.targets = b.targets[:len(b.targets)-1]
+	backs := t.cont
+	if !b.terminated {
+		backs = append(backs, b.here())
 	}
-	b.newBlock(head)
-	b.terminated = dead
-	if returned {
-		// The body always returns: nothing it assigns reaches the
-		// header again or the code after the loop.
-		b.scope = entry
-		return
+	for _, bk := range backs {
+		b.fn.Edge(bk.block, head)
 	}
+	if spec.infinite {
+		b.newBlock()
+	} else {
+		b.newBlock(head)
+	}
+
+	// Header versions, emitted after the body so the rewrite leaves them alone.
 	rename := map[ir.VarID]ir.VarID{}
 	for _, name := range slices.Sorted(maps.Keys(entry)) {
 		pre := entry[name]
-		post, ok := b.scope[name]
-		if !ok || post == pre {
+		var vs []ir.VarID
+		for _, bk := range backs {
+			if v, ok := bk.scope[name]; ok && v != pre && !slices.Contains(vs, v) {
+				vs = append(vs, v)
+			}
+		}
+		if len(vs) == 0 {
 			continue
 		}
 		h := b.fn.Named(name, b.fn.Vars[pre].Type, b.pos(n))
 		rename[pre] = h
-		b.scope[name] = h
-		// Emitted after the body, so the rewrite below leaves it alone.
-		b.assign(h, n, pre, post)
+		b.assign(h, n, append([]ir.VarID{pre}, vs...)...)
 	}
 	for i := start; i < end; i++ {
 		in := &b.fn.Instrs[i]
@@ -394,6 +562,221 @@ func (b *builder) loop(n *sitter.Node, body func()) {
 			}
 		}
 	}
+	remap := func(sc map[string]ir.VarID) map[string]ir.VarID {
+		out := maps.Clone(sc)
+		for k, v := range out {
+			if h, ok := rename[v]; ok {
+				out[k] = h
+			}
+		}
+		return out
+	}
+
+	var exits []exit
+	if !spec.infinite {
+		// Leaving from the header: the header versions, plus the names
+		// the body binds for the first time as the last iteration left them.
+		paths := []map[string]ir.VarID{remap(entry)}
+		for _, bk := range backs {
+			fresh := map[string]ir.VarID{}
+			for k, v := range bk.scope {
+				if _, ok := entry[k]; !ok {
+					fresh[k] = v
+				}
+			}
+			paths = append(paths, fresh)
+		}
+		b.terminated = false
+		b.join(n, paths...)
+		if spec.orelse != nil {
+			spec.orelse()
+		}
+		if !b.terminated {
+			exits = append(exits, b.here())
+		}
+	}
+	for _, br := range t.breaks {
+		exits = append(exits, exit{remap(br.scope), br.block})
+	}
+	b.newBlock(blocksOf(exits)...)
+	b.terminated = dead || len(exits) == 0
+	if len(exits) == 0 {
+		b.scope = remap(entry) // while(true) without break: nothing follows
+		return
+	}
+	b.join(n, scopesOf(exits)...)
+}
+
+// switchCases lowers the cases of a switch statement. With fallthrough (C,
+// Java and JavaScript switch statements, fallsThrough), a case that does not end in break
+// continues into the next one; break leaves the switch. exhaustive means a
+// default case exists, so no path skips every case.
+func (b *builder) switchCases(n *sitter.Node, fallsThrough, exhaustive bool, cases []func()) {
+	entry, from, dead := b.snapshot(), b.fn.CurBlock(), b.terminated
+	t := &jumpTarget{label: b.takeLabel()}
+	b.targets = append(b.targets, t)
+	var ends []exit
+	var prev *exit
+	for _, c := range cases {
+		starts := []exit{{entry, from}}
+		if prev != nil {
+			starts = append(starts, *prev)
+		}
+		b.newBlock(blocksOf(starts)...)
+		b.terminated = false
+		b.join(n, scopesOf(starts)...)
+		c()
+		prev = nil
+		if !b.terminated {
+			if e := b.here(); fallsThrough {
+				prev = &e
+			} else {
+				ends = append(ends, e)
+			}
+		}
+	}
+	if prev != nil {
+		ends = append(ends, *prev)
+	}
+	b.targets = b.targets[:len(b.targets)-1]
+	ends = append(ends, t.breaks...)
+	if !exhaustive || len(cases) == 0 {
+		ends = append(ends, exit{entry, from})
+	}
+	b.newBlock(blocksOf(ends)...)
+	b.terminated = dead || len(ends) == 0
+	if len(ends) == 0 {
+		b.scope = entry
+		return
+	}
+	b.join(n, scopesOf(ends)...)
+}
+
+// ifElse lowers an if statement whose condition was already lowered: then
+// and els (nil without an else) are alternative paths. A constant
+// condition (see truth) leaves out the arm that cannot run.
+func (b *builder) ifElse(n, cond *sitter.Node, then, els func()) {
+	v, known := b.truth(cond)
+	switch {
+	case known && v:
+		b.branches(n, false, then)
+	case known && els != nil:
+		b.branches(n, false, els)
+	case known:
+		// if false { ... } without else: nothing runs.
+	case els != nil:
+		b.branches(n, false, then, els)
+	default:
+		b.branches(n, true, then)
+	}
+}
+
+// truth folds a condition whose value is fixed in the source: a boolean
+// literal, a negation or parenthesised form of one, or a local variable
+// whose only definition is such a constant (verbose = false). Anything
+// that depends on data is unknown.
+func (b *builder) truth(n *sitter.Node) (value, known bool) {
+	for depth := 0; n != nil && depth < 8; depth++ {
+		t := strings.TrimSpace(b.text(n))
+		switch t {
+		case "true", "True":
+			return true, true
+		case "false", "False":
+			return false, true
+		}
+		k := named(n)
+		switch {
+		case len(k) == 1 && (strings.HasPrefix(t, "!") || strings.HasPrefix(t, "not ")) && !strings.HasPrefix(t, "!="):
+			v, ok := b.truth(k[0])
+			return !v, ok
+		case len(k) == 1 && (n.Type() == "parenthesized_expression" || n.Type() == "condition" || n.Type() == "expression_statement"):
+			n = k[0]
+			continue
+		case n.Type() == "identifier" || n.Type() == "simple_identifier":
+			if v, ok := b.scope[t]; ok {
+				return b.constTruth(v, 0)
+			}
+			return b.constant("", t)
+		case len(k) >= 2 && isQualifiedName(t):
+			i := strings.LastIndexByte(t, '.')
+			return b.constant(t[:i], t[i+1:])
+		}
+		return false, false
+	}
+	return false, false
+}
+
+// constant looks up a declared boolean constant: NAME in the current class
+// or file, or Owner.NAME (this.NAME, self.NAME, Config.NAME).
+func (b *builder) constant(owner, name string) (value, known bool) {
+	cls := ""
+	if b.cls != nil {
+		cls = b.cls.short
+	}
+	switch owner {
+	case "", "this", "self", "Self":
+		if v, ok := b.p.consts[cls+"."+name]; ok && cls != "" {
+			return v, true
+		}
+		if owner != "" {
+			return false, false
+		}
+		v, ok := b.p.consts[b.f.rel+"|"+name]
+		return v, ok
+	}
+	v, ok := b.p.consts[shortName(owner)+"."+name]
+	return v, ok
+}
+
+// isQualifiedName reports whether s is a dotted name: Config.DEBUG.
+func isQualifiedName(s string) bool {
+	if !strings.Contains(s, ".") {
+		return false
+	}
+	for _, part := range strings.Split(s, ".") {
+		if part == "" {
+			return false
+		}
+		for i, r := range part {
+			if !(r == '_' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || i > 0 && r >= '0' && r <= '9') {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// constTruth follows a variable through single-definition copies to a
+// boolean literal.
+func (b *builder) constTruth(v ir.VarID, depth int) (value, known bool) {
+	if v < 0 || int(v) >= len(b.fn.Vars) || depth > 4 {
+		return false, false
+	}
+	if c := b.fn.Vars[v].Const; c != nil {
+		switch *c {
+		case "true", "True":
+			return true, true
+		case "false", "False":
+			return false, true
+		}
+		return false, false
+	}
+	if b.fn.Vars[v].Param >= 0 {
+		return false, false
+	}
+	var def *ir.Instr
+	for i := range b.fn.Instrs {
+		if b.fn.Instrs[i].Dst == v {
+			if def != nil {
+				return false, false // assigned more than once
+			}
+			def = &b.fn.Instrs[i]
+		}
+	}
+	if def == nil || def.Op != ir.OpAssign || def.Snapshot || len(def.Args) != 1 {
+		return false, false
+	}
+	return b.constTruth(def.Args[0], depth+1)
 }
 
 // tryCatch lowers try/catch/finally. A handler can start after any part of
@@ -464,6 +847,12 @@ func (b *builder) assign(dst ir.VarID, n *sitter.Node, args ...ir.VarID) {
 	b.fn.Assign(dst, b.pos(n), args...)
 }
 
+// compute is assign for a new value built from the arguments' current
+// state (concatenation, interpolation, arithmetic), not a reference to them.
+func (b *builder) compute(dst ir.VarID, n *sitter.Node, args ...ir.VarID) {
+	b.fn.Compute(dst, b.pos(n), args...)
+}
+
 func (b *builder) load(obj ir.VarID, field, owner string, n *sitter.Node) ir.VarID {
 	dst := b.fn.Named("", "", b.pos(n))
 	if t := b.p.fieldType(owner, field); t != "" {
@@ -503,13 +892,14 @@ func (b *builder) newBlock(preds ...int32) int32 {
 // a lambda or local function body, which may run when it is created, later
 // or never. Its blocks are unordered, and a return inside it ends only it.
 func (b *builder) floatingRegion(body func()) {
-	from, terminated := b.fn.CurBlock(), b.terminated
+	from, terminated, targets := b.fn.CurBlock(), b.terminated, b.targets
 	b.floating++
+	b.targets = nil
 	b.newBlock()
 	body()
 	b.floating--
 	b.fn.SetBlock(from)
-	b.terminated = terminated
+	b.terminated, b.targets = terminated, targets
 }
 
 // emitCall emits a call and returns its result variable.

@@ -521,6 +521,13 @@ func (a *analyzer) step(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 	switch in.Op {
 	case ir.OpAssign:
 		for _, arg := range in.Args {
+			if in.Snapshot {
+				// A new value built from what the argument holds now.
+				for _, f := range st.of(arg) {
+					changed = st.add(in.Dst, derive(f, in.Pos, 1)) || changed
+				}
+				continue
+			}
 			if in.Dst >= 0 && int(in.Dst) < len(st.multi) && st.multi[in.Dst] {
 				// One of several definitions (arr[i] = v, an assignment
 				// inside a lambda): a mutation at this point.

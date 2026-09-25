@@ -507,7 +507,12 @@ func (kb *ktBuilder) block(n *sitter.Node) ir.VarID {
 	case "statements", "block", "control_structure_body", "function_body":
 		last := ir.NoVar
 		for _, c := range named(n) {
+			if c.Type() == "label" { // outer@ for (...)
+				kb.label = strings.TrimSuffix(kb.text(c), "@")
+				continue
+			}
 			last = kb.stmt(c)
+			kb.label = ""
 		}
 		return last
 	}
@@ -553,6 +558,12 @@ func (kb *ktBuilder) stmt(n *sitter.Node) ir.VarID {
 				v = kb.expr(kids[len(kids)-1])
 			}
 			kb.ret(n, v)
+		case strings.HasPrefix(t, "break") || strings.HasPrefix(t, "continue"):
+			label := ""
+			if l := firstOf(n, "label"); l != nil {
+				label = strings.TrimPrefix(kb.text(l), "@")
+			}
+			kb.jump(strings.HasPrefix(t, "continue"), label)
 		default:
 			for _, k := range kids {
 				kb.expr(k)
@@ -586,7 +597,18 @@ func (kb *ktBuilder) stmt(n *sitter.Node) ir.VarID {
 		})
 		return ir.NoVar
 	case "while_statement", "do_while_statement":
-		kb.loop(n, func() {
+		var cond *sitter.Node
+		for _, c := range named(n) {
+			if c.Type() != "control_structure_body" {
+				cond = c
+			}
+		}
+		v, known := kb.truth(cond)
+		if known && !v && n.Type() == "while_statement" {
+			kb.expr(cond) // while (false): the body never runs
+			return ir.NoVar
+		}
+		kb.loopWith(n, loopSpec{infinite: known && v, body: func() {
 			for _, c := range named(n) {
 				if c.Type() == "control_structure_body" {
 					kb.block(c)
@@ -594,7 +616,7 @@ func (kb *ktBuilder) stmt(n *sitter.Node) ir.VarID {
 					kb.expr(c)
 				}
 			}
-		})
+		}})
 		return ir.NoVar
 	case "function_declaration":
 		// Local function: lower its body inline with its parameters as locals.
@@ -714,7 +736,7 @@ func (kb *ktBuilder) expr(n *sitter.Node) ir.VarID {
 			}
 		}
 		dst := kb.temp(n)
-		kb.assign(dst, n, parts...)
+		kb.compute(dst, n, parts...)
 		return dst
 	case "integer_literal", "real_literal", "boolean_literal", "null_literal", "character_literal", "hex_literal", "bin_literal", "long_literal", "unsigned_literal":
 		return kb.constVar(kb.text(n), n)
@@ -842,9 +864,17 @@ func (kb *ktBuilder) expr(n *sitter.Node) ir.VarID {
 		parts = append(parts, kb.expr(c))
 	}
 	dst := kb.temp(n)
-	kb.assign(dst, n, parts...)
+	if ktComputed[n.Type()] {
+		kb.compute(dst, n, parts...)
+	} else {
+		kb.assign(dst, n, parts...)
+	}
 	return dst
 }
+
+// ktComputed are expressions whose value is new, built from the parts'
+// current state, rather than a reference to one of them.
+var ktComputed = map[string]bool{"additive_expression": true, "multiplicative_expression": true, "range_expression": true}
 
 // conditional lowers if, when and try expressions: each arm is a separate
 // path from the scope before it, and the expression's value is the value of
@@ -856,15 +886,24 @@ func (kb *ktBuilder) conditional(n *sitter.Node) ir.VarID {
 	}
 	switch n.Type() {
 	case "if_expression":
-		var arms []func()
+		var cond *sitter.Node
+		var bodies []*sitter.Node
 		for _, c := range named(n) {
 			if c.Type() == "control_structure_body" {
-				arms = append(arms, arm(c))
+				bodies = append(bodies, c)
 			} else {
+				cond = c
 				kb.expr(c)
 			}
 		}
-		kb.branches(n, len(arms) < 2, arms...)
+		if len(bodies) == 0 {
+			break
+		}
+		var els func()
+		if len(bodies) > 1 {
+			els = arm(bodies[1])
+		}
+		kb.ifElse(n, cond, arm(bodies[0]), els)
 	case "when_expression":
 		var arms []func()
 		exhaustive := false

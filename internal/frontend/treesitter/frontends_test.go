@@ -223,3 +223,43 @@ final class Service {
 		t.Errorf("a class with behaviour: %+v", td)
 	}
 }
+
+// Arms under constant conditions are not lowered; conditions that depend
+// on data keep both arms.
+func TestConstantConditions(t *testing.T) {
+	m := lower(t, NewPython, map[string]string{"app/c.py": `
+DEBUG = False
+
+def f(flag):
+    if True:
+        live1()
+    else:
+        dead1()
+    if not DEBUG:
+        live2()
+    else:
+        dead2()
+    quiet = False
+    if quiet:
+        dead3()
+    again = False
+    again = True
+    if again:
+        live3()
+    if flag:
+        live4()
+    while False:
+        dead4()
+`})
+	c := calls(m)
+	for _, name := range []string{"live1", "live2", "live3", "live4"} {
+		if c[name] == nil {
+			t.Errorf("%s: arm was dropped", name)
+		}
+	}
+	for _, name := range []string{"dead1", "dead2", "dead3", "dead4"} {
+		if c[name] != nil {
+			t.Errorf("%s: dead arm was lowered", name)
+		}
+	}
+}

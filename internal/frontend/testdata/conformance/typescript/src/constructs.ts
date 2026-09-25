@@ -160,3 +160,28 @@ export function storeInLoop(email: string, n: number) {
     draft.note = email;
   }
 }
+
+export function switchFallsThrough(email: string, kind: number) {
+  let x = "anonymous";
+  switch (kind) {
+    case 1:
+      x = email;
+    case 2:
+      // ruleid: log.ts.console
+      console.log(x);
+      break;
+    default:
+      // ok: log.ts.console
+      console.log(x);
+  }
+}
+
+export function forEver(email: string) {
+  let x = email;
+  for (;;) {
+    x = "cleared";
+    break;
+  }
+  // ok: log.ts.console
+  console.log(x);
+}

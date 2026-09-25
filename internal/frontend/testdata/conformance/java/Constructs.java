@@ -129,4 +129,36 @@ class Constructs {
             System.out.println(x);
         }
     }
+
+    void switchFallsThrough(String email, int kind) {
+        String x = "anonymous";
+        switch (kind) {
+            case 1:
+                x = email;
+            case 2:
+                // case 1 has no break, so it continues here.
+                // ruleid: log.jvm.stdout
+                System.out.println(x);
+                break;
+            default:
+                // ok: log.jvm.stdout
+                System.out.println(x);
+        }
+    }
+
+    void labeledBreak(String email, List<List<String>> rows) {
+        String x = "anonymous";
+        outer:
+        for (List<String> row : rows) {
+            for (String cell : row) {
+                if (cell.isEmpty()) {
+                    x = email;
+                    break outer;
+                }
+            }
+            x = "reset";
+        }
+        // ruleid: log.jvm.stdout
+        System.out.println(x);
+    }
 }

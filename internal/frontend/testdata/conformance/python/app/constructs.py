@@ -269,3 +269,35 @@ def alias_sees_mutation(email: str):
     xs.append(email)
     # ruleid: log.py.print
     print(view)
+
+
+def for_else(email: str, items: list):
+    x = "anonymous"
+    for item in items:
+        if not item:
+            x = email
+            break
+    else:
+        # The else clause runs only when the loop did not break.
+        # ok: log.py.print
+        print(x)
+
+
+def while_true(email: str):
+    x = email
+    while True:
+        x = "cleared"
+        break
+    # ok: log.py.print
+    print(x)
+
+
+def constant_elif(email: str, kind: int):
+    if kind == 1:
+        x = "one"
+    elif False:
+        x = email
+    else:
+        x = "other"
+    # ok: log.py.print
+    print(x)

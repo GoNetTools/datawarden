@@ -189,3 +189,50 @@ func earlyReturn(email: String, invalid: Bool) {
     // ok: log.swift.print
     print(x)
 }
+
+// scenario: break-exit
+func breakExit(email: String, items: [String]) {
+    var x = "anonymous"
+    for item in items {
+        if item.isEmpty {
+            x = email
+            break
+        }
+    }
+    // ruleid: log.swift.print
+    print(x)
+}
+
+// scenario: continue-skip
+func continueSkip(email: String, items: [String]) {
+    for item in items {
+        var x = "anonymous"
+        if item.isEmpty {
+            x = email
+            continue
+        }
+        // ok: log.swift.print
+        print(x)
+    }
+}
+
+// scenario: snapshot
+func snapshot(email: String) {
+    var items: [String] = []
+    let msg = "items=\(items)"
+    items.append(email)
+    // ok: log.swift.print
+    print(msg)
+}
+
+enum LogConfig {
+    static let verbose = false
+}
+
+// scenario: constant-condition
+func constantCondition(email: String) {
+    if LogConfig.verbose {
+        // ok: log.swift.print
+        print(email)
+    }
+}

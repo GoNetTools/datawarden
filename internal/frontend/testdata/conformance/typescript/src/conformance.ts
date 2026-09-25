@@ -181,3 +181,48 @@ export function earlyReturn(email: string, invalid: boolean) {
   // ok: log.ts.console
   console.log(x);
 }
+
+// scenario: break-exit
+export function breakExit(email: string, items: string[]) {
+  let x = "anonymous";
+  for (const item of items) {
+    if (!item) {
+      x = email;
+      break;
+    }
+  }
+  // ruleid: log.ts.console
+  console.log(x);
+}
+
+// scenario: continue-skip
+export function continueSkip(email: string, items: string[]) {
+  for (const item of items) {
+    let x = "anonymous";
+    if (!item) {
+      x = email;
+      continue;
+    }
+    // ok: log.ts.console
+    console.log(x);
+  }
+}
+
+// scenario: snapshot
+export function snapshot(email: string) {
+  const items: string[] = [];
+  const msg = `items=${items}`;
+  items.push(email);
+  // ok: log.ts.console
+  console.log(msg);
+}
+
+const VERBOSE_LOGGING = false;
+
+// scenario: constant-condition
+export function constantCondition(email: string) {
+  if (VERBOSE_LOGGING) {
+    // ok: log.ts.console
+    console.log(email);
+  }
+}

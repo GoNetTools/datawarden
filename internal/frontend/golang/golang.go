@@ -431,22 +431,58 @@ func (l *lowerer) lowerFunc(fn *ssa.Function) *ir.Func {
 	for _, fv := range fn.FreeVars {
 		l.vars[fv] = F.Named(fv.Name(), typeStr(fv.Type()), l.pos(fv.Pos()))
 	}
-	// The IR blocks are the SSA blocks, in the same order.
+	// The IR blocks are the SSA blocks, in the same order. A branch on a
+	// constant (if debug, with const debug = false) has one live
+	// successor; blocks reachable only through the other are not lowered.
 	for range fn.Blocks {
 		F.NewBlock(false)
 	}
-	for _, b := range fn.Blocks {
-		for _, s := range b.Succs {
+	live := make([]bool, len(fn.Blocks))
+	var work []*ssa.BasicBlock
+	if len(fn.Blocks) > 0 {
+		work = append(work, fn.Blocks[0])
+	}
+	if fn.Recover != nil {
+		work = append(work, fn.Recover)
+	}
+	for len(work) > 0 {
+		b := work[len(work)-1]
+		work = work[:len(work)-1]
+		if live[b.Index] {
+			continue
+		}
+		live[b.Index] = true
+		for _, s := range liveSuccs(b) {
 			F.Edge(int32(b.Index), int32(s.Index))
+			work = append(work, s)
 		}
 	}
 	for _, b := range fn.Blocks {
+		if !live[b.Index] {
+			continue
+		}
 		F.SetBlock(int32(b.Index))
 		for _, ins := range b.Instrs {
 			l.instr(ins)
 		}
 	}
 	return F
+}
+
+// liveSuccs returns the successors control can reach from b: both arms of
+// an if, unless its condition is a constant.
+func liveSuccs(b *ssa.BasicBlock) []*ssa.BasicBlock {
+	if n := len(b.Instrs); n > 0 && len(b.Succs) == 2 {
+		if i, ok := b.Instrs[n-1].(*ssa.If); ok {
+			if c, ok := i.Cond.(*ssa.Const); ok && c.Value != nil && c.Value.Kind() == constant.Bool {
+				if constant.BoolVal(c.Value) {
+					return b.Succs[:1]
+				}
+				return b.Succs[1:]
+			}
+		}
+	}
+	return b.Succs
 }
 
 // debugNames maps SSA values to the source identifiers they were read
@@ -569,10 +605,11 @@ func (l *lowerer) instr(ins ssa.Instruction) {
 		case token.EQL, token.NEQ, token.LSS, token.LEQ, token.GTR, token.GEQ:
 			l.v(x)
 		default:
-			F.Assign(l.v(x), pos, l.v(x.X), l.v(x.Y))
+			F.Compute(l.v(x), pos, l.v(x.X), l.v(x.Y))
 		}
 	case *ssa.Convert:
-		F.Assign(l.v(x), pos, l.v(x.X))
+		// string <-> []byte and numeric conversions copy the value.
+		F.Compute(l.v(x), pos, l.v(x.X))
 	case *ssa.ChangeType:
 		F.Assign(l.v(x), pos, l.v(x.X))
 	case *ssa.MakeInterface:

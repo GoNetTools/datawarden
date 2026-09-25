@@ -229,3 +229,18 @@ func catchSeesEarlierValue(email: String) {
         print(x)
     }
 }
+
+func labeledBreak(email: String, rows: [[String]]) {
+    var x = "anonymous"
+    outer: for row in rows {
+        for cell in row {
+            if cell.isEmpty {
+                x = email
+                break outer
+            }
+        }
+        x = "reset"
+    }
+    // ruleid: log.swift.print
+    print(x)
+}

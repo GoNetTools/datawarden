@@ -3,6 +3,7 @@
 package conformance
 
 import (
+	"fmt"
 	"log"
 	"strings"
 )
@@ -184,4 +185,49 @@ func earlyReturn(email string, invalid bool) {
 	}
 	// ok: log.go.stdlib
 	log.Println(x)
+}
+
+// scenario: break-exit
+func breakExit(email string, items []string) {
+	x := "anonymous"
+	for _, it := range items {
+		if it == "" {
+			x = email
+			break
+		}
+	}
+	// ruleid: log.go.stdlib
+	log.Println(x)
+}
+
+// scenario: continue-skip
+func continueSkip(email string, items []string) {
+	for _, it := range items {
+		x := "anonymous"
+		if it == "" {
+			x = email
+			continue
+		}
+		// ok: log.go.stdlib
+		log.Println(x)
+	}
+}
+
+// scenario: snapshot
+func snapshot(email string) {
+	items := map[string]string{}
+	msg := fmt.Sprint("items=", len(items))
+	items["email"] = email
+	// ok: log.go.stdlib
+	log.Println(msg)
+}
+
+const verboseLogging = false
+
+// scenario: constant-condition
+func constantCondition(email string) {
+	if verboseLogging {
+		// ok: log.go.stdlib
+		log.Println(email)
+	}
 }
