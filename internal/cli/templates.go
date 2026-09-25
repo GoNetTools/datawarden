@@ -30,7 +30,7 @@ const exampleRules = `# Repository rules. Same format as the built-in rules; a r
 #   lang: [kotlin, java]
 #   call: com.acme.telemetry.Telemetry.send
 #   arg: 0
-#   dest: { host: telemetry.acme.vn, kind: third_party, vendor: Acme Telemetry, region: vn }
+#   dest: { host: telemetry.acme.example, kind: third_party, vendor: Acme Telemetry, region: eu }
 
 # - id: log.go.fmt_print
 #   disabled: true

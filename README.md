@@ -11,12 +11,12 @@ It knows four classes of sensitive data, and the list is data, not code ([`datat
 
 | Class | What | Examples |
 |---|---|---|
-| `pii` | Personal data (GDPR, CCPA, Decree 13/2023/ND-CP) | email, phone, name, date of birth, address, CCCD, location, device ids |
+| `pii` | Personal data (GDPR, CCPA and similar laws) | email, phone, name, date of birth, address, national ID, location, device ids |
 | `phi` | Protected health information (HIPAA) | diagnoses, prescriptions, medical record numbers |
 | `pci` | Cardholder data (PCI DSS) | payment card numbers |
 | `credential` | Credentials and secrets | passwords, API keys, access and session tokens, private keys |
 
-It understands Go, Kotlin, Java and TypeScript/JavaScript, recognises Vietnam-specific data (CCCD/CMND citizen IDs, BHXH/BHYT insurance numbers, Vietnamese mobile numbers), and is built for CI: SARIF for code scanning, a PR/MR comment, a baseline so only *new* problems fail the build, and an incremental PR mode.
+It understands Go, Kotlin, Java and TypeScript/JavaScript, and is built for CI: SARIF for code scanning, a PR/MR comment, a baseline so only *new* problems fail the build, and an incremental PR mode.
 
 ```
 $ datawarden scan --diff origin/main
@@ -130,7 +130,7 @@ Useful `scan` flags: `--format text|json|sarif|markdown|gitlab`, `--sarif FILE`,
 
   ```go
   type Flow struct {
-      DataType     string      // "email", "vn_cccd", "api_key"
+      DataType     string      // "email", "us_ssn", "api_key"
       Class        string      // "pii", "phi", "pci", "credential"
       Source, Sink ir.Pos
       SinkRule     string      // "sdk.sentry.set_user"
@@ -157,13 +157,13 @@ Every data type belongs to a class, and every finding carries its class (`class`
 | Data type | Identifiers |
 |---|---|
 | `phone` | phone, phoneNumber, mobile, msisdn |
-| `vn_cccd` | cccd, cccdNumber, cmnd |
+| `national_id` | nationalId, citizenId, idNumber |
 | `person_name` | fullName, firstName, lastName |
 | `dob` | dob, dateOfBirth, birthday |
 | `address` | streetAddress, shippingAddress |
 | `bank_account` | accountNumber, iban |
 | `tax_id` | taxId, taxCode |
-| `insurance_id` | socialInsurance, bhxh, bhyt |
+| `insurance_id` | socialInsurance, insuranceNumber, nhsNumber |
 | `license_plate` | licensePlate |
 | `medical_record_number` | mrn, patientMrn, medicalRecordNumber |
 | `password` | password, newPassword, passwd, passphrase |
@@ -172,13 +172,13 @@ Every data type belongs to a class, and every finding carries its class (`class`
 | `secret_key` | clientSecret, signingKey, AWS_SECRET_ACCESS_KEY |
 | `private_key`, `session_token` | privateKey, sessionId, sessionToken |
 
-Names are matched as English words. Vietnam-specific documents keep their own acronyms (`cccd`, `cmnd`, `bhxh`, `bhyt`); other Vietnamese words (`soDienThoai`, `hoTen`, …) are not recognised.
+Names are matched as English words.
 
-Also email, IP address, national ID, US SSN, passport, driver's license, payment card, precise location, device/advertising IDs, gender, ethnicity, religion, health and biometric data. Sensitive categories (GDPR art. 9 / Decree 13/2023/ND-CP) are marked and raise severity.
+Also email, IP address, national ID, US SSN, passport, driver's license, payment card, precise location, device/advertising IDs, gender, ethnicity, religion, health and biometric data. Sensitive categories (GDPR art. 9 and similar) are marked and raise severity.
 
 Negative context avoids the usual noise: `emailValidator`, `isEmailValid`, `phoneFormatter`, `EMAIL_KEY`, `serverAddress`, `microphone`, `passwordPolicy`, `apiKeyHeader`, `nextPageToken`. Names that say the value is already protected carry a transform: `maskedPhone` → masked, `emailHash` → hashed, `passwordHash` → hashed.
 
-String keys label their values: `put("email", x)`, `bundleOf("phone" to x)`, `zap.String("phone", x)`, `r.FormValue("cccd")`, `{ phone: x }`, `m["email"] = x`.
+String keys label their values: `put("email", x)`, `bundleOf("phone" to x)`, `zap.String("phone", x)`, `r.FormValue("ssn")`, `{ phone: x }`, `m["email"] = x`.
 
 **2. Schema hints.** Field-level hints from:
 - Go struct tags: `json`, `db`, `bson`, `gorm:"column:phone_number"`, `protobuf:"...,name=email"`; explicit `pii:"email"` (any data type, e.g. `pii:"api_key"`) or `pii:"-"` (not sensitive).
@@ -193,16 +193,14 @@ A value whose type is a data class/entity with sensitive fields (a `Customer`) c
 
 | Detector | Validation |
 |---|---|
-| Vietnamese mobile | `0`/`+84` + 9 digits, current carrier prefixes (03x, 05x, 07x, 08x, 09x), placeholders like `0123456789` rejected |
-| CCCD | 12 digits, valid province code, century/gender digit, birth year not in the future; needs a label on the line (`cccd`, `cmnd`, ...) |
-| CMND | 9 digits, only next to a label |
+| Phone, national ID | numbering-plan prefixes, check digits and structure (region code, birth year); placeholders like `0123456789` rejected; ID numbers need a label on the line |
 | Email | skips `example.com`, role accounts (`noreply@`, `support@`), author/copyright lines, npm scopes, Kotlin `this@label` |
-| Payment card | Luhn + issuer prefix (Visa, Mastercard, Amex, JCB, UnionPay, NAPAS `9704`); well-known test cards skipped |
+| Payment card | Luhn + issuer prefix (Visa, Mastercard, Amex, JCB, UnionPay and national schemes); well-known test cards skipped |
 | IBAN | mod-97; documentation IBANs skipped |
 | US SSN | area/group/serial rules; advertising SSNs skipped |
 | Secrets | the taxonomy's value patterns: AWS access key ids, Stripe, Google, SendGrid, Anthropic and OpenAI API keys, GitHub, GitLab and Slack tokens, JWTs, private key blocks. Documentation values (`AKIAIOSFODNN7EXAMPLE`, the jwt.io sample), `xxxx` and `${VAR}` templates, and low-entropy strings are skipped |
 
-Reports never print the value, only a masked form (`091*****65`; secrets keep only their first four characters, `AKIA********`) and, in the baseline, a hash.
+Reports never print the value, only a masked form (`555*****12`; secrets keep only their first four characters, `AKIA********`) and, in the baseline, a hash.
 
 datawarden looks for secrets *in data flows* as well as in files: a password logged or an access token put in `localStorage` is a finding. For deep secret scanning of history and hundreds of providers, pair it with a dedicated scanner such as gitleaks or GitHub secret scanning, and set `policy.ignore_classes` or `ignore_data_types` to avoid double reports.
 
@@ -222,7 +220,7 @@ Rules are YAML files embedded in the binary (`internal/rules/builtin/`: 89 rules
   call: com.acme.telemetry.Telemetry.send
   receiver: "(?i)telemetry"          # optional: match unresolved receivers by name
   arg: "*"
-  dest: { host: telemetry.acme.vn, kind: third_party }
+  dest: { host: telemetry.acme.example, kind: third_party }
 
 - id: log.go.fmt_print               # same id as a built-in: replaced; here disabled
   disabled: true
@@ -259,7 +257,7 @@ Calls that cannot be resolved still match heuristically on the receiver type nam
 ```yaml
 languages: [go, kotlin, java, typescript]   # default: all present
 include_tests: false          # analyze test sources for flows (literals always scan tests)
-first_party_domains: [api.example.vn]       # network sinks to these hosts become first-party
+first_party_domains: [api.example.com]       # network sinks to these hosts become first-party
 rules: [.datawarden/rules]
 baseline: .datawarden/baseline.json
 cache_dir: .datawarden/cache
@@ -279,11 +277,11 @@ policy:
     - sink: sdk.sentry.set_user
       data_types: [email]
       reason: DPA with Sentry, EU region
-    - dest_host: api.example.vn
+    - dest_host: api.example.com
     - path: "legacy/**"
 ```
 
-Hashes (`sha256`, `hashed`) are not safe transforms for personal data by default: phone and CCCD numbers are low-entropy, so their hashes can be reversed by enumeration. Add them to `safe_transforms` if you salt or key them. For credentials hashing is the point, so the `credential` class accepts it.
+Hashes (`sha256`, `hashed`) are not safe transforms for personal data by default: phone and ID numbers are low-entropy, so their hashes can be reversed by enumeration. Add them to `safe_transforms` if you salt or key them. For credentials hashing is the point, so the `credential` class accepts it.
 
 ## Baseline
 
@@ -331,7 +329,7 @@ Without the framework: `cp scripts/pre-commit .git/hooks/pre-commit` (runs `data
 
 ## Data map (DPIA)
 
-`datawarden map --format dpia` writes a Markdown inventory for a Data Protection Impact Assessment (GDPR art. 35) or the impact assessment dossier required by Vietnamese rules (Decree 13/2023/ND-CP, Law on Personal Data Protection 2025):
+`datawarden map --format dpia` writes a Markdown inventory for a Data Protection Impact Assessment (GDPR art. 35) or a comparable privacy impact assessment under other data protection laws:
 
 1. personal data processed (category, sensitive or not, where stored, where sent);
 2. recipients and transfers (vendor, host, data types, safeguards detected, open issues);
@@ -349,6 +347,7 @@ datawarden favours explainable, low-noise results over completeness. Every findi
 - Go interface calls are matched by the interface method (rules can target `io.Writer.Write`); implementations are not enumerated.
 - Kotlin/Java/TypeScript resolution is syntactic: no type inference across generics, overloads share an ID, reflection/DI-provided instances resolve only through declared types or receiver-name rules.
 - Dynamic destinations (URLs built at runtime) show up as `network (unknown host)`.
+- Phone and national-ID *values* are validated for a limited set of national formats; other countries' numbers are found through names and schema hints, not as committed literals.
 - Secret *values* are recognised only for the providers in the taxonomy's value patterns; a generic `password = "..."` assignment is not reported as a literal, because it is almost always a test or placeholder value.
 - Name-based sources depend on naming. Add explicit hints (`pii:"..."` tags, `@PII`, proto options, SQL comments) where names are unhelpful, and `pii:"-"` to silence a field.
 

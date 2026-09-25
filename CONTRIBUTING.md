@@ -8,7 +8,7 @@ By taking part you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md). Se
 
 This is a sensitive-data scanner, so issues, pull requests and fixtures are full of phone numbers, ID numbers, card numbers, tokens and emails. **Use synthetic values only.**
 
-- Invent values that still pass validation: an unallocated phone number with a valid carrier prefix, a CCCD with a valid province code, a card number that passes Luhn, `@example.com` emails.
+- Invent values that still pass validation: an unallocated phone number with a valid carrier prefix, an ID number with a valid structure, a card number that passes Luhn, `@example.com` emails.
 - Put fixture files under `testdata/` (excluded in `.datawardenignore`) so datawarden's own CI scan does not flag them.
 - When you paste datawarden output into an issue, the values are already masked. Keep them that way.
 

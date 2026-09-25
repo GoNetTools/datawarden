@@ -188,7 +188,7 @@ include_tests: false
 
 # Network sinks whose URL host matches these domains are first-party.
 first_party_domains: []
-#  - api.example.vn
+#  - api.example.com
 
 # Extra rule files/directories; rules with the same id replace built-ins,
 # and "- {id: <id>, disabled: true}" turns one off.
@@ -225,7 +225,7 @@ policy:
   #  - sink: sdk.sentry.set_user
   #    data_types: [email]
   #    reason: DPA with Sentry, EU data region
-  #  - dest_host: api.example.vn
+  #  - dest_host: api.example.com
 `
 
 // Loader reads configuration: the CLI's ConfigLoader.

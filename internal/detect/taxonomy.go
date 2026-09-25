@@ -33,8 +33,8 @@ type DataType struct {
 	// Category groups types for the data map: contact, identity, financial,
 	// location, device, demographic, health, biometric, online, secret.
 	Category string `json:"category" yaml:"category"`
-	// Sensitive marks special-category data (GDPR art. 9 and Vietnam's
-	// Decree 13/2023/ND-CP "sensitive personal data": health, biometrics,
+	// Sensitive marks special-category data (GDPR art. 9 and similar
+	// "sensitive personal data" definitions: health, biometrics,
 	// location, financial/bank data, ethnicity, religion...).
 	Sensitive bool `json:"sensitive" yaml:"sensitive"`
 	// Severity "high" raises the severity of findings of this type

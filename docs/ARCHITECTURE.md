@@ -54,7 +54,7 @@ flowchart TD
 
 1. **Session.** The command finds the repository root, loads `.datawarden.yaml` and the rules (built-in plus the repository's `.datawarden/rules/`).
 2. **File selection.** The scanner lists files (skipping build output, dependencies and `.datawardenignore` patterns) and decides what to analyse: everything, the paths given, or in PR mode the changed files plus their callers from the cached call graph.
-3. **Literal scan.** Text files are checked for committed personal data by validating detectors (Luhn, IBAN checksum, CCCD structure, phone prefixes) and nearby labels.
+3. **Literal scan.** Text files are checked for committed personal data by validating detectors (Luhn, IBAN checksum, national-ID structure, phone prefixes, secret value patterns) and nearby labels.
 4. **Lowering.** Each language's frontend converts its files into IR functions and type declarations.
 5. **Schema.** Declared types, protobuf messages and SQL tables become schema hints: "field `Customer.Contact` holds a phone number".
 6. **Analysis.** The taint engine follows personal data through the IR to sinks and produces flows. Summaries and the call graph go into the cache.
