@@ -14,6 +14,7 @@ import (
 
 	"github.com/GoNetTools/pii-scanner/internal/frontend"
 	"github.com/GoNetTools/pii-scanner/internal/ir"
+	"github.com/GoNetTools/pii-scanner/internal/lang"
 )
 
 // NewJava returns the java frontend.
@@ -21,7 +22,7 @@ func NewJava(o frontend.Options) frontend.Frontend { return &javaFrontend{opts: 
 
 type javaFrontend struct{ opts frontend.Options }
 
-func (fe *javaFrontend) Lang() string { return "java" }
+func (fe *javaFrontend) Lang() string { return lang.Java }
 
 type jvProgram struct {
 	*program
@@ -30,7 +31,7 @@ type jvProgram struct {
 }
 
 func (fe *javaFrontend) Lower(ctx context.Context, files []string) (*ir.Module, error) {
-	jp := &jvProgram{program: newProgram("java", fe.opts), static: map[string]bool{}, returns: map[string]string{}}
+	jp := &jvProgram{program: newProgram(lang.Java, fe.opts), static: map[string]bool{}, returns: map[string]string{}}
 	jp.parse(ctx, files, java.GetLanguage())
 	for _, f := range jp.files {
 		jp.header(f)
@@ -147,7 +148,7 @@ func (jp *jvProgram) collectType(f *srcFile, n *sitter.Node, scope string) {
 	}
 	ci := &classInfo{name: qual, short: name, file: f, fields: map[string]string{}, methods: map[string]string{}}
 	_, annNames, _ := javaAnnotations(f, firstOf(n, "modifiers"))
-	td := &ir.TypeDecl{Name: qual, Kind: "class", Lang: "java", Annotations: annNames, Pos: posOf(f, n)}
+	td := &ir.TypeDecl{Name: qual, Kind: "class", Lang: lang.Java, Annotations: annNames, Pos: posOf(f, n)}
 	if isEntityAnnotation(annNames) {
 		td.Kind = "entity"
 	}

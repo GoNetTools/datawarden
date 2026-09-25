@@ -87,6 +87,18 @@ func (r *Registry) Frontend(lang string, o Options) (Frontend, error) {
 	return nil, fmt.Errorf("no frontend registered for %s", lang)
 }
 
+// Unavailable maps languages recorded as unavailable in this build to the
+// reason.
+func (r *Registry) Unavailable() map[string]string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make(map[string]string, len(r.unavailable))
+	for l, why := range r.unavailable {
+		out[l] = why
+	}
+	return out
+}
+
 // Languages lists languages with a frontend.
 func (r *Registry) Languages() []string {
 	r.mu.Lock()

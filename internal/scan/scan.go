@@ -22,7 +22,7 @@ import (
 	"github.com/GoNetTools/pii-scanner/internal/frontend"
 	"github.com/GoNetTools/pii-scanner/internal/ingest"
 	"github.com/GoNetTools/pii-scanner/internal/ir"
-	"github.com/GoNetTools/pii-scanner/internal/rules"
+	"github.com/GoNetTools/pii-scanner/internal/lang"
 )
 
 // Modes.
@@ -326,19 +326,18 @@ func (s *Scanner) lower(ctx context.Context, req Request, targets []ingest.File,
 	cfg := req.Config
 	langs := map[string]bool{}
 	for _, l := range cfg.Languages {
-		langs[rules.NormLang(l)] = true
+		langs[lang.Normalize(l)] = true
 	}
 	groups := map[string][]string{}
 	for _, f := range targets {
-		switch f.Lang {
-		case ingest.LangGo, ingest.LangKotlin, ingest.LangJava, ingest.LangTypeScript:
-		default:
+		l, ok := lang.Lookup(f.Lang)
+		if !ok || l.Kind != lang.Code {
 			continue
 		}
 		if f.Test && !cfg.IncludeTests {
 			continue
 		}
-		if f.Lang == ingest.LangGo && ingest.GoIgnoredDir(f.Rel) {
+		if l.Ignored(f.Rel) {
 			continue
 		}
 		if len(langs) > 0 && !langs[f.Lang] {
@@ -354,21 +353,21 @@ func (s *Scanner) lower(ctx context.Context, req Request, targets []ingest.File,
 		langNames = append(langNames, l)
 	}
 	sort.Strings(langNames)
-	for _, lang := range langNames {
-		files := groups[lang]
-		fe, err := s.Frontends.Frontend(lang, fopts)
+	for _, name := range langNames {
+		files := groups[name]
+		fe, err := s.Frontends.Frontend(name, fopts)
 		if err != nil {
-			res.Warnings = append(res.Warnings, fmt.Sprintf("%s: %d files skipped: %v", lang, len(files), err))
+			res.Warnings = append(res.Warnings, fmt.Sprintf("%s: %d files skipped: %v", name, len(files), err))
 			continue
 		}
 		t0 := s.Clock()
 		m, err := fe.Lower(ctx, files)
 		if err != nil {
-			res.Warnings = append(res.Warnings, fmt.Sprintf("%s: %v", lang, err))
+			res.Warnings = append(res.Warnings, fmt.Sprintf("%s: %v", name, err))
 			continue
 		}
-		req.logf("%s: lowered %d files, %d functions in %s", lang, len(files), len(m.Funcs), s.Clock().Sub(t0).Round(time.Millisecond))
-		res.FilesAnalyzed[lang] = len(files)
+		req.logf("%s: lowered %d files, %d functions in %s", name, len(files), len(m.Funcs), s.Clock().Sub(t0).Round(time.Millisecond))
+		res.FilesAnalyzed[name] = len(files)
 		lowered = append(lowered, files...)
 		prog.Merge(m)
 	}
@@ -378,14 +377,14 @@ func (s *Scanner) lower(ctx context.Context, req Request, targets []ingest.File,
 func (s *Scanner) buildSchema(req Request, all []ingest.File, prog *ir.Module, lowered []string, mode string) *detect.Schema {
 	types := append([]*ir.TypeDecl{}, prog.Types...)
 	for _, f := range all {
-		if f.Lang != ingest.LangProto && f.Lang != ingest.LangSQL {
+		if f.Lang != lang.Proto && f.Lang != lang.SQL {
 			continue
 		}
 		b, err := fs.ReadFile(req.Repo.FS, f.Rel)
 		if err != nil {
 			continue
 		}
-		if f.Lang == ingest.LangProto {
+		if f.Lang == lang.Proto {
 			types = append(types, s.Schemas.ParseProto(f.Rel, b)...)
 		} else {
 			types = append(types, s.Schemas.ParseSQL(f.Rel, b)...)

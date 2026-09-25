@@ -17,6 +17,7 @@ import (
 	"github.com/GoNetTools/pii-scanner/internal/config"
 	"github.com/GoNetTools/pii-scanner/internal/datamap"
 	"github.com/GoNetTools/pii-scanner/internal/finding"
+	"github.com/GoNetTools/pii-scanner/internal/lang"
 	"github.com/GoNetTools/pii-scanner/internal/policy"
 	"github.com/GoNetTools/pii-scanner/internal/report"
 	"github.com/GoNetTools/pii-scanner/internal/rules"
@@ -237,7 +238,7 @@ func (a *App) runRules(args []string) error {
 	var c common
 	c.register(fs)
 	kind := fs.String("kind", "", "only rules of this kind: sink, source, transform")
-	lang := fs.String("lang", "", "only rules for this language")
+	langFlag := fs.String("lang", "", "only rules for this language")
 	pos, err := parseInterspersed(fs, args)
 	if err != nil {
 		return err
@@ -250,7 +251,7 @@ func (a *App) runRules(args []string) error {
 		if *kind != "" && r.Kind != *kind {
 			continue
 		}
-		if *lang != "" && !contains(r.Lang, rules.NormLang(*lang)) {
+		if *langFlag != "" && !contains(r.Lang, lang.Normalize(*langFlag)) {
 			continue
 		}
 		extra := ""

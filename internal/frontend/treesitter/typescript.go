@@ -16,6 +16,7 @@ import (
 
 	"github.com/GoNetTools/pii-scanner/internal/frontend"
 	"github.com/GoNetTools/pii-scanner/internal/ir"
+	"github.com/GoNetTools/pii-scanner/internal/lang"
 )
 
 // NewTypeScript returns the typescript frontend.
@@ -23,7 +24,7 @@ func NewTypeScript(o frontend.Options) frontend.Frontend { return &tsFrontend{op
 
 type tsFrontend struct{ opts frontend.Options }
 
-func (fe *tsFrontend) Lang() string { return "typescript" }
+func (fe *tsFrontend) Lang() string { return lang.TypeScript }
 
 type tsProgram struct {
 	*program
@@ -40,7 +41,7 @@ var tsGlobals = map[string]bool{
 }
 
 func (fe *tsFrontend) Lower(ctx context.Context, files []string) (*ir.Module, error) {
-	tp := &tsProgram{program: newProgram("typescript", fe.opts), static: map[string]bool{}, ctorIDs: map[string]string{}, classOf: map[string]string{}}
+	tp := &tsProgram{program: newProgram(lang.TypeScript, fe.opts), static: map[string]bool{}, ctorIDs: map[string]string{}, classOf: map[string]string{}}
 	var tsFiles, tsxFiles []string
 	for _, f := range files {
 		switch strings.ToLower(path.Ext(f)) {
@@ -293,7 +294,7 @@ func (tp *tsProgram) collect(f *srcFile) {
 			if body == nil {
 				continue
 			}
-			td := &ir.TypeDecl{Name: name, Kind: "interface", Lang: "typescript", Pos: posOf(f, d)}
+			td := &ir.TypeDecl{Name: name, Kind: "interface", Lang: lang.TypeScript, Pos: posOf(f, d)}
 			for _, ps := range allOf(body, "property_signature") {
 				fn := unquote(f.text(ps.ChildByFieldName("name")))
 				td.Fields = append(td.Fields, ir.Field{Name: fn, Type: tsTypeName(f, ps.ChildByFieldName("type")), Pos: posOf(f, ps)})
@@ -316,7 +317,7 @@ func (tp *tsProgram) collectClass(f *srcFile, d *sitter.Node) {
 		_, more := tsDecorators(f, p)
 		ann = append(ann, more...)
 	}
-	td := &ir.TypeDecl{Name: name, Kind: "class", Lang: "typescript", Annotations: ann, Pos: posOf(f, d)}
+	td := &ir.TypeDecl{Name: name, Kind: "class", Lang: lang.TypeScript, Annotations: ann, Pos: posOf(f, d)}
 	if isEntityAnnotation(ann) {
 		td.Kind = "entity"
 	}

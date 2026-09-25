@@ -21,6 +21,7 @@ import (
 
 	"github.com/GoNetTools/pii-scanner/internal/frontend"
 	"github.com/GoNetTools/pii-scanner/internal/ir"
+	"github.com/GoNetTools/pii-scanner/internal/lang"
 )
 
 type srcFile struct {
@@ -122,7 +123,7 @@ func (p *program) resolveType(f *srcFile, t string) string {
 	if q, ok := f.imports[head]; ok {
 		return q + rest
 	}
-	if f.pkg != "" && p.lang != "typescript" {
+	if f.pkg != "" && p.lang != lang.TypeScript {
 		if _, ok := p.classes[f.pkg+"."+t]; ok {
 			return f.pkg + "." + t
 		}
@@ -133,7 +134,7 @@ func (p *program) resolveType(f *srcFile, t string) string {
 	if cs := p.byShort[head]; len(cs) == 1 {
 		return cs[0].name + rest
 	}
-	if p.lang == "java" || p.lang == "kotlin" {
+	if p.lang == lang.Java || p.lang == lang.Kotlin {
 		switch head {
 		case "String", "Object", "Integer", "Long", "Boolean", "Double", "Float", "System", "Math", "Thread", "Exception":
 			return "java.lang." + t

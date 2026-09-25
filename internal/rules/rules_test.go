@@ -4,9 +4,12 @@
 package rules
 
 import (
+	"regexp"
+	"strings"
 	"testing"
 	"testing/fstest"
 
+	"github.com/GoNetTools/pii-scanner/internal/detect"
 	"github.com/GoNetTools/pii-scanner/internal/ir"
 )
 
@@ -21,6 +24,93 @@ func TestBuiltinRulesLoad(t *testing.T) {
 	r := s.ByID("sdk.sentry.set_user")
 	if r == nil || r.Dest.Host != "sentry.io" || !r.Arg.Selects(0) || r.Arg.Selects(1) {
 		t.Fatalf("sentry rule: %+v", r)
+	}
+}
+
+// TestBuiltinRuleConventions keeps the built-in rule set consistent as it
+// grows. Ids are part of baseline fingerprints and name the sink category
+// in reports, so they follow one scheme.
+func TestBuiltinRuleConventions(t *testing.T) {
+	raw, err := Builtin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	idRe := regexp.MustCompile(`^[a-z0-9_]+(\.[a-z0-9_]+)+$`)
+	prefixes := map[string]map[string]bool{ // kind -> allowed first segment
+		KindSink:      {"log": true, "sdk": true, "net": true, "storage": true, "ipc": true},
+		KindSource:    {"src": true},
+		KindTransform: {"xform": true},
+	}
+	destFor := map[string]map[string]bool{ // sink category -> allowed dest.kind
+		"log": {DestLog: true}, "sdk": {DestThirdParty: true}, "net": {DestNetwork: true},
+		"storage": {DestStorage: true, DestFirstParty: true}, "ipc": {DestIPC: true},
+	}
+	taxonomy := map[string]bool{}
+	for _, dt := range detect.DefaultTaxonomy() {
+		taxonomy[dt.ID] = true
+	}
+	seen := map[string]string{}
+	for _, r := range raw {
+		if other, ok := seen[r.ID]; ok {
+			t.Errorf("%s: id %s is already defined in %s; a duplicate id silently replaces the earlier rule", r.Origin, r.ID, other)
+		}
+		seen[r.ID] = r.Origin
+		kind := r.Kind
+		if kind == "" {
+			kind = KindSink
+		}
+		first, _, _ := strings.Cut(r.ID, ".")
+		switch {
+		case !idRe.MatchString(r.ID):
+			t.Errorf("%s: id %q must be lower-case dotted segments", r.Origin, r.ID)
+		case !prefixes[kind][first]:
+			t.Errorf("%s: %s rule %s must start with one of %v", r.Origin, kind, r.ID, keys(prefixes[kind]))
+		case kind == KindSink && !destFor[first][r.Dest.Kind]:
+			t.Errorf("%s: %s sends to dest.kind %q, which does not fit its %q category", r.Origin, r.ID, r.Dest.Kind, first)
+		case kind == KindSource && !taxonomy[r.DataType]:
+			t.Errorf("%s: source %s produces data_type %q, which is not in the taxonomy (internal/detect/taxonomy.go)", r.Origin, r.ID, r.DataType)
+		}
+		if kind == KindSink && r.Category == "" {
+			t.Errorf("%s: sink %s needs a category (logging, crash_reporting, analytics, ...)", r.Origin, r.ID)
+		}
+	}
+}
+
+func keys(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}
+
+func TestRuleFilesAreStrict(t *testing.T) {
+	for name, body := range map[string]string{
+		"misspelt key":        "- id: sdk.x.y\n  lang: go\n  call: a.b\n  recevier: x\n  dest: {kind: log}\n",
+		"misspelt dest key":   "- id: sdk.x.y\n  lang: go\n  call: a.b\n  dest: {kind: log, hots: x}\n",
+		"wrapped misspelt":    "rules:\n  - id: sdk.x.y\n    lang: go\n    call: a.b\n    dest: {kind: log}\n    data-type: email\n",
+		"unknown language":    "- id: sdk.x.y\n  lang: kotln\n  call: a.b\n  dest: {kind: log}\n",
+		"negative arg":        "- id: sdk.x.y\n  lang: go\n  call: a.b\n  arg: -1\n  dest: {kind: log}\n",
+		"negative host_arg":   "- id: sdk.x.y\n  lang: go\n  call: a.b\n  host_arg: -1\n  dest: {kind: log}\n",
+		"duplicate in file":   "- id: sdk.x.y\n  lang: go\n  call: a.b\n  dest: {kind: log}\n- id: sdk.x.y\n  lang: go\n  call: a.c\n  dest: {kind: log}\n",
+		"source without type": "- id: src.x\n  kind: source\n  lang: go\n  call: a.b\n",
+	} {
+		repo := fstest.MapFS{"rules.yaml": {Data: []byte(body)}}
+		if _, err := Load(repo, "rules.yaml"); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	for name, body := range map[string]string{
+		"empty file":    "",
+		"comments only": "# nothing yet\n",
+		"wrapped":       "rules:\n  - id: sdk.x.y\n    lang: [golang, kt]\n    call: a.b\n    dest: {kind: log}\n",
+		"custom type":   "- id: src.acme.loyalty\n  kind: source\n  lang: java\n  call: com.acme.Loyalty.card\n  data_type: loyalty_card\n",
+		"disable by id": "- id: log.go.fmt_print\n  disabled: true\n",
+	} {
+		repo := fstest.MapFS{"rules.yaml": {Data: []byte(body)}}
+		if _, err := Load(repo, "rules.yaml"); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
 	}
 }
 

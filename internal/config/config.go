@@ -12,6 +12,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/GoNetTools/pii-scanner/internal/lang"
 )
 
 // FileName is the default config file name at the repository root.
@@ -129,10 +131,8 @@ func (c *Config) validate() error {
 		}
 	}
 	for _, l := range c.Languages {
-		switch strings.ToLower(l) {
-		case "go", "kotlin", "java", "typescript", "javascript":
-		default:
-			return fmt.Errorf("%s: languages: unsupported language %q", c.Path, l)
+		if !lang.IsCode(l) {
+			return fmt.Errorf("%s: languages: unsupported language %q (supported: %s)", c.Path, l, strings.Join(lang.CodeNames(), ", "))
 		}
 	}
 	return nil
