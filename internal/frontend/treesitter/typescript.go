@@ -620,27 +620,37 @@ func (tb *tsBuilder) stmt(n *sitter.Node) ir.VarID {
 		})
 		return ir.NoVar
 	case "if_statement":
-		tb.stmt(n.ChildByFieldName("condition"))
-		cons, alt := n.ChildByFieldName("consequence"), n.ChildByFieldName("alternative")
-		arms := []func(){func() { tb.stmt(cons) }}
-		if alt != nil {
-			arms = append(arms, func() { tb.stmt(alt) })
+		cond := n.ChildByFieldName("condition")
+		tb.stmt(cond)
+		var els func()
+		if alt := n.ChildByFieldName("alternative"); alt != nil {
+			els = func() { tb.stmt(alt) }
 		}
-		tb.branches(n, alt == nil, arms...)
+		tb.ifElse(n, cond, func() { tb.stmt(n.ChildByFieldName("consequence")) }, els)
 		return ir.NoVar
 	case "for_statement":
 		tb.stmt(n.ChildByFieldName("initializer"))
-		tb.loop(n, func() {
-			tb.stmt(n.ChildByFieldName("condition"))
+		cond := n.ChildByFieldName("condition")
+		v, known := tb.truth(cond)
+		// for (;;): the condition is an empty statement.
+		infinite := cond == nil || strings.TrimSpace(tb.text(cond)) == ";" || (known && v)
+		tb.loopWith(n, loopSpec{infinite: infinite, body: func() {
+			tb.stmt(cond)
 			tb.stmt(n.ChildByFieldName("body"))
 			tb.stmt(n.ChildByFieldName("increment"))
-		})
+		}})
 		return ir.NoVar
 	case "while_statement", "do_statement":
-		tb.loop(n, func() {
-			tb.stmt(n.ChildByFieldName("condition"))
+		cond := n.ChildByFieldName("condition")
+		v, known := tb.truth(cond)
+		if known && !v && n.Type() == "while_statement" {
+			tb.stmt(cond) // while (false): the body never runs
+			return ir.NoVar
+		}
+		tb.loopWith(n, loopSpec{infinite: known && v, body: func() {
+			tb.stmt(cond)
 			tb.stmt(n.ChildByFieldName("body"))
-		})
+		}})
 		return ir.NoVar
 	case "try_statement":
 		var handlers []func()
@@ -652,15 +662,27 @@ func (tb *tsBuilder) stmt(n *sitter.Node) ir.VarID {
 		return ir.NoVar
 	case "switch_statement":
 		tb.stmt(n.ChildByFieldName("value"))
-		var arms []func()
-		skippable := true
+		var cases []func()
+		exhaustive := false
 		for _, c := range named(n.ChildByFieldName("body")) {
 			if c.Type() == "switch_default" {
-				skippable = false
+				exhaustive = true
 			}
-			arms = append(arms, func() { tb.stmt(c) })
+			cases = append(cases, func() { tb.stmt(c) })
 		}
-		tb.branches(n, skippable, arms...)
+		tb.switchCases(n, true, exhaustive, cases)
+		return ir.NoVar
+	case "break_statement", "continue_statement":
+		label := ""
+		if l := n.ChildByFieldName("label"); l != nil {
+			label = tb.text(l)
+		}
+		tb.jump(n.Type() == "continue_statement", label)
+		return ir.NoVar
+	case "labeled_statement":
+		tb.label = tb.text(n.ChildByFieldName("label"))
+		tb.stmt(n.ChildByFieldName("body"))
+		tb.label = ""
 		return ir.NoVar
 	case "catch_clause":
 		if p := n.ChildByFieldName("parameter"); p != nil {
@@ -674,13 +696,13 @@ func (tb *tsBuilder) stmt(n *sitter.Node) ir.VarID {
 		dst := tb.declare(name, "", n)
 		tb.assign(dst, n, fv)
 		return ir.NoVar
-	case "labeled_statement", "throw_statement", "parenthesized_expression", "with_statement":
+	case "throw_statement", "parenthesized_expression", "with_statement":
 		last := ir.NoVar
 		for _, c := range named(n) {
 			last = tb.stmt(c)
 		}
 		return last
-	case "class_declaration", "interface_declaration", "type_alias_declaration", "comment", "empty_statement", "import_statement", "export_statement", "debugger_statement", "break_statement", "continue_statement":
+	case "class_declaration", "interface_declaration", "type_alias_declaration", "comment", "empty_statement", "import_statement", "export_statement", "debugger_statement":
 		return ir.NoVar
 	}
 	return tb.expr(n)
@@ -723,7 +745,7 @@ func (tb *tsBuilder) expr(n *sitter.Node) ir.VarID {
 			}
 		}
 		dst := tb.temp(n)
-		tb.assign(dst, n, parts...)
+		tb.compute(dst, n, parts...)
 		return dst
 	case "number", "true", "false", "null", "regex":
 		return tb.constVar(tb.text(n), n)
@@ -769,7 +791,11 @@ func (tb *tsBuilder) expr(n *sitter.Node) ir.VarID {
 		if tsCompare[op] {
 			return dst
 		}
-		tb.assign(dst, n, l, r)
+		if op == "&&" || op == "||" || op == "??" {
+			tb.assign(dst, n, l, r) // one of the operands itself
+		} else {
+			tb.compute(dst, n, l, r)
+		}
 		return dst
 	case "unary_expression":
 		arg := tb.expr(n.ChildByFieldName("argument"))

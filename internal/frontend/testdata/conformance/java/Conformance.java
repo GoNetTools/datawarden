@@ -187,4 +187,49 @@ class Conformance {
         // ok: log.jvm.stdout
         System.out.println(x);
     }
+
+    // scenario: break-exit
+    void breakExit(String email, List<String> items) {
+        String x = "anonymous";
+        for (String item : items) {
+            if (item.isEmpty()) {
+                x = email;
+                break;
+            }
+        }
+        // ruleid: log.jvm.stdout
+        System.out.println(x);
+    }
+
+    // scenario: continue-skip
+    void continueSkip(String email, List<String> items) {
+        for (String item : items) {
+            String x = "anonymous";
+            if (item.isEmpty()) {
+                x = email;
+                continue;
+            }
+            // ok: log.jvm.stdout
+            System.out.println(x);
+        }
+    }
+
+    // scenario: snapshot
+    void snapshot(String email) {
+        List<String> items = new ArrayList<>();
+        String msg = "items=" + items;
+        items.add(email);
+        // ok: log.jvm.stdout
+        System.out.println(msg);
+    }
+
+    static final boolean VERBOSE_LOGGING = false;
+
+    // scenario: constant-condition
+    void constantCondition(String email) {
+        if (VERBOSE_LOGGING) {
+            // ok: log.jvm.stdout
+            System.out.println(email);
+        }
+    }
 }

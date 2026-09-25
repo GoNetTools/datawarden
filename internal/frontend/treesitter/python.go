@@ -493,26 +493,57 @@ func (pb *pyBuilder) stmt(n *sitter.Node) ir.VarID {
 	}
 	switch n.Type() {
 	case "if_statement":
-		pb.expr(n.ChildByFieldName("condition"))
-		arms := []func(){func() { pb.stmt(n.ChildByFieldName("consequence")) }}
+		// if/elif/else: a clause whose condition is constant false is
+		// dropped; one that is constant true ends the chain.
+		var arms []func()
 		skippable := true
-		for _, alt := range fieldChildren(n, "alternative") {
-			if alt.Type() == "else_clause" {
-				skippable = false
-				arms = append(arms, func() { pb.stmt(alt.ChildByFieldName("body")) })
-				continue
+		clause := func(cond, body *sitter.Node) bool {
+			pb.expr(cond)
+			v, known := pb.truth(cond)
+			if !known || v {
+				arms = append(arms, func() { pb.stmt(body) })
 			}
-			pb.expr(alt.ChildByFieldName("condition"))
-			arms = append(arms, func() { pb.stmt(alt.ChildByFieldName("consequence")) })
+			if known && v {
+				skippable = false
+				return false
+			}
+			return true
 		}
-		pb.branches(n, skippable, arms...)
+		if clause(n.ChildByFieldName("condition"), n.ChildByFieldName("consequence")) {
+			for _, alt := range fieldChildren(n, "alternative") {
+				if alt.Type() == "else_clause" {
+					skippable = false
+					arms = append(arms, func() { pb.stmt(alt.ChildByFieldName("body")) })
+					break
+				}
+				if !clause(alt.ChildByFieldName("condition"), alt.ChildByFieldName("consequence")) {
+					break
+				}
+			}
+		}
+		if len(arms) > 0 {
+			pb.branches(n, skippable, arms...)
+		}
 		return ir.NoVar
 	case "while_statement":
-		pb.loop(n, func() {
-			pb.expr(n.ChildByFieldName("condition"))
-			pb.stmt(n.ChildByFieldName("body"))
+		cond := n.ChildByFieldName("condition")
+		v, known := pb.truth(cond)
+		if known && !v {
+			pb.expr(cond)
+			pb.stmt(n.ChildByFieldName("alternative")) // while False: ... else runs
+			return ir.NoVar
+		}
+		pb.loopWith(n, loopSpec{
+			infinite: known && v,
+			body: func() {
+				pb.expr(n.ChildByFieldName("condition"))
+				pb.stmt(n.ChildByFieldName("body"))
+			},
+			orelse: func() { pb.stmt(n.ChildByFieldName("alternative")) },
 		})
-		pb.stmt(n.ChildByFieldName("alternative"))
+		return ir.NoVar
+	case "break_statement", "continue_statement":
+		pb.jump(n.Type() == "continue_statement", "")
 		return ir.NoVar
 	case "try_statement":
 		var handlers []func()
@@ -565,11 +596,13 @@ func (pb *pyBuilder) stmt(n *sitter.Node) ir.VarID {
 		return ir.NoVar
 	case "for_statement":
 		iter := pb.expr(n.ChildByFieldName("right"))
-		pb.loop(n, func() {
-			pb.bind(n.ChildByFieldName("left"), iter)
-			pb.stmt(n.ChildByFieldName("body"))
+		pb.loopWith(n, loopSpec{
+			body: func() {
+				pb.bind(n.ChildByFieldName("left"), iter)
+				pb.stmt(n.ChildByFieldName("body"))
+			},
+			orelse: func() { pb.stmt(n.ChildByFieldName("alternative")) },
 		})
-		pb.stmt(n.ChildByFieldName("alternative"))
 		return ir.NoVar
 	case "except_clause":
 		for _, c := range named(n) {
@@ -610,7 +643,7 @@ func (pb *pyBuilder) stmt(n *sitter.Node) ir.VarID {
 			pb.expr(c)
 		}
 		return ir.NoVar
-	case "class_definition", "comment", "pass_statement", "break_statement", "continue_statement", "import_statement",
+	case "class_definition", "comment", "pass_statement", "import_statement",
 		"import_from_statement", "global_statement", "nonlocal_statement", "delete_statement", "future_import_statement":
 		return ir.NoVar
 	}
@@ -709,7 +742,7 @@ func (pb *pyBuilder) expr(n *sitter.Node) ir.VarID {
 			parts = append(parts, pb.expr(s.ChildByFieldName("expression")))
 		}
 		dst := pb.temp(n)
-		pb.assign(dst, n, parts...)
+		pb.compute(dst, n, parts...)
 		return dst
 	case "integer", "float", "true", "false", "none", "ellipsis":
 		return pb.constVar(pb.text(n), n)
@@ -807,7 +840,11 @@ func (pb *pyBuilder) expr(n *sitter.Node) ir.VarID {
 		parts = append(parts, pb.expr(c))
 	}
 	dst := pb.temp(n)
-	pb.assign(dst, n, parts...)
+	if n.Type() == "binary_operator" || n.Type() == "concatenated_string" {
+		pb.compute(dst, n, parts...) // "items=%s" % items, a + b: a new value
+	} else {
+		pb.assign(dst, n, parts...)
+	}
 	return dst
 }
 

@@ -117,6 +117,11 @@ type Instr struct {
 	// Block is the index of the basic block (Func.Blocks) holding the
 	// instruction.
 	Block int32 `json:"block,omitempty"`
+	// Snapshot marks an assign that computes a new value from the current
+	// state of its arguments (string building, arithmetic) rather than
+	// copying or merging references to them: later mutations of an
+	// argument do not reach the result.
+	Snapshot bool `json:"snapshot,omitempty"`
 }
 
 // Block is a basic block of the control-flow graph.
@@ -241,6 +246,16 @@ func (f *Func) Assign(dst VarID, pos Pos, args ...VarID) {
 		return
 	}
 	f.Emit(Instr{Op: OpAssign, Dst: dst, Args: args, Pos: pos})
+}
+
+// Compute emits Dst = f(Args...) as a snapshot of the arguments' current
+// state: "items=" + items, a + b.
+func (f *Func) Compute(dst VarID, pos Pos, args ...VarID) {
+	args = compact(args)
+	if dst == NoVar || len(args) == 0 {
+		return
+	}
+	f.Emit(Instr{Op: OpAssign, Dst: dst, Args: args, Pos: pos, Snapshot: true})
 }
 
 func compact(in []VarID) []VarID {

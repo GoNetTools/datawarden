@@ -183,3 +183,44 @@ def early_return(email: str, invalid: bool):
         return
     # ok: log.py.print
     print(x)
+
+
+# scenario: break-exit
+def break_exit(email: str, items: list):
+    x = "anonymous"
+    for item in items:
+        if not item:
+            x = email
+            break
+    # ruleid: log.py.print
+    print(x)
+
+
+# scenario: continue-skip
+def continue_skip(email: str, items: list):
+    for item in items:
+        x = "anonymous"
+        if not item:
+            x = email
+            continue
+        # ok: log.py.print
+        print(x)
+
+
+# scenario: snapshot
+def snapshot(email: str):
+    items = []
+    msg = f"items={items}"
+    items.append(email)
+    # ok: log.py.print
+    print(msg)
+
+
+VERBOSE_LOGGING = False
+
+
+# scenario: constant-condition
+def constant_condition(email: str):
+    if VERBOSE_LOGGING:
+        # ok: log.py.print
+        print(email)

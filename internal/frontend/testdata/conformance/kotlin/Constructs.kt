@@ -145,3 +145,28 @@ fun callbackRunsLater(email: String, handlers: MutableList<() -> Unit>) {
     }
     xs.add(email)
 }
+
+fun labeledBreak(email: String, rows: List<List<String>>) {
+    var x = "anonymous"
+    outer@ for (row in rows) {
+        for (cell in row) {
+            if (cell.isEmpty()) {
+                x = email
+                break@outer
+            }
+        }
+        x = "reset"
+    }
+    // ruleid: log.jvm.stdout
+    println(x)
+}
+
+fun whileTrue(email: String) {
+    var x = email
+    while (true) {
+        x = "cleared"
+        break
+    }
+    // ok: log.jvm.stdout
+    println(x)
+}

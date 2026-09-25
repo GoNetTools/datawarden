@@ -173,3 +173,50 @@ fun earlyReturn(email: String, invalid: Boolean) {
     // ok: log.jvm.stdout
     println(x)
 }
+
+// scenario: break-exit
+fun breakExit(email: String, items: List<String>) {
+    var x = "anonymous"
+    for (item in items) {
+        if (item.isEmpty()) {
+            x = email
+            break
+        }
+    }
+    // ruleid: log.jvm.stdout
+    println(x)
+}
+
+// scenario: continue-skip
+fun continueSkip(email: String, items: List<String>) {
+    for (item in items) {
+        var x = "anonymous"
+        if (item.isEmpty()) {
+            x = email
+            continue
+        }
+        // ok: log.jvm.stdout
+        println(x)
+    }
+}
+
+// scenario: snapshot
+fun snapshot(email: String) {
+    val items = mutableListOf<String>()
+    val msg = "items=$items"
+    items.add(email)
+    // ok: log.jvm.stdout
+    println(msg)
+}
+
+object LogConfig {
+    const val VERBOSE = false
+}
+
+// scenario: constant-condition
+fun constantCondition(email: String) {
+    if (LogConfig.VERBOSE) {
+        // ok: log.jvm.stdout
+        println(email)
+    }
+}

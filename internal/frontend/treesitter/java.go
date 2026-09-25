@@ -371,31 +371,39 @@ func (jb *jvBuilder) stmt(n *sitter.Node) ir.VarID {
 		})
 		return ir.NoVar
 	case "if_statement":
-		jb.stmt(n.ChildByFieldName("condition"))
-		cons, alt := n.ChildByFieldName("consequence"), n.ChildByFieldName("alternative")
-		arms := []func(){func() { jb.stmt(cons) }}
-		if alt != nil {
-			arms = append(arms, func() { jb.stmt(alt) })
+		cond := n.ChildByFieldName("condition")
+		jb.stmt(cond)
+		var els func()
+		if alt := n.ChildByFieldName("alternative"); alt != nil {
+			els = func() { jb.stmt(alt) }
 		}
-		jb.branches(n, alt == nil, arms...)
+		jb.ifElse(n, cond, func() { jb.stmt(n.ChildByFieldName("consequence")) }, els)
 		return ir.NoVar
 	case "while_statement", "do_statement":
-		jb.loop(n, func() {
-			jb.stmt(n.ChildByFieldName("condition"))
+		cond := n.ChildByFieldName("condition")
+		v, known := jb.truth(cond)
+		if known && !v && n.Type() == "while_statement" {
+			jb.stmt(cond) // while (false): the body never runs
+			return ir.NoVar
+		}
+		jb.loopWith(n, loopSpec{infinite: known && v, body: func() {
+			jb.stmt(cond)
 			jb.stmt(n.ChildByFieldName("body"))
-		})
+		}})
 		return ir.NoVar
 	case "for_statement":
 		for _, c := range fieldChildren(n, "init") {
 			jb.stmt(c)
 		}
-		jb.loop(n, func() {
-			jb.stmt(n.ChildByFieldName("condition"))
+		cond := n.ChildByFieldName("condition")
+		v, known := jb.truth(cond)
+		jb.loopWith(n, loopSpec{infinite: cond == nil || (known && v), body: func() {
+			jb.stmt(cond)
 			jb.stmt(n.ChildByFieldName("body"))
 			for _, c := range fieldChildren(n, "update") {
 				jb.stmt(c)
 			}
-		})
+		}})
 		return ir.NoVar
 	case "try_statement", "try_with_resources_statement":
 		jb.stmt(n.ChildByFieldName("resources"))
@@ -412,15 +420,17 @@ func (jb *jvBuilder) stmt(n *sitter.Node) ir.VarID {
 	case "switch_expression", "switch_statement":
 		jb.stmt(n.ChildByFieldName("condition"))
 		result := jb.temp(n)
-		var arms []func()
-		skippable := true
+		var cases []func()
+		exhaustive, fallsThrough := false, false
 		for _, c := range named(n.ChildByFieldName("body")) {
 			if l := firstOf(c, "switch_label"); l != nil && strings.HasPrefix(jb.text(l), "default") {
-				skippable = false
+				exhaustive = true
 			}
-			arms = append(arms, func() { jb.assign(result, c, jb.stmt(c)) })
+			// case 1: ... falls through; case 1 -> ... does not.
+			fallsThrough = fallsThrough || c.Type() == "switch_block_statement_group"
+			cases = append(cases, func() { jb.assign(result, c, jb.stmt(c)) })
 		}
-		jb.branches(n, skippable, arms...)
+		jb.switchCases(n, fallsThrough, exhaustive, cases)
 		return result
 	case "catch_clause":
 		if p := firstOf(n, "catch_formal_parameter"); p != nil {
@@ -440,7 +450,21 @@ func (jb *jvBuilder) stmt(n *sitter.Node) ir.VarID {
 			jb.assign(dst, n, v)
 		}
 		return ir.NoVar
-	case "synchronized_statement", "labeled_statement", "finally_clause", "resource_specification",
+	case "break_statement", "continue_statement":
+		label := ""
+		if id := firstOf(n, "identifier"); id != nil {
+			label = jb.text(id)
+		}
+		jb.jump(n.Type() == "continue_statement", label)
+		return ir.NoVar
+	case "labeled_statement":
+		if k := named(n); len(k) >= 2 {
+			jb.label = jb.text(k[0])
+			jb.stmt(k[len(k)-1])
+			jb.label = ""
+		}
+		return ir.NoVar
+	case "synchronized_statement", "finally_clause", "resource_specification",
 		"throw_statement", "yield_statement", "parenthesized_expression", "condition":
 		last := ir.NoVar
 		for _, c := range named(n) {
@@ -531,7 +555,7 @@ func (jb *jvBuilder) expr(n *sitter.Node) ir.VarID {
 		case "==", "!=", "<", ">", "<=", ">=", "&&", "||":
 			return dst
 		}
-		jb.assign(dst, n, l, r)
+		jb.compute(dst, n, l, r)
 		return dst
 	case "ternary_expression":
 		jb.expr(n.ChildByFieldName("condition"))

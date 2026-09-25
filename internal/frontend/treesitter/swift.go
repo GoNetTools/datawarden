@@ -467,7 +467,12 @@ func (sb *swBuilder) stmt(n *sitter.Node) ir.VarID {
 		"defer_statement", "labeled_statement", "computed_getter":
 		last := ir.NoVar
 		for _, c := range named(n) {
+			if c.Type() == "statement_label" { // outer: for ...
+				sb.label = strings.TrimSuffix(sb.text(c), ":")
+				continue
+			}
 			last = sb.stmt(c)
+			sb.label = ""
 		}
 		return last
 	case "property_declaration":
@@ -484,6 +489,14 @@ func (sb *swBuilder) stmt(n *sitter.Node) ir.VarID {
 	case "assignment":
 		return sb.assignment(n)
 	case "control_transfer_statement":
+		if t := sb.text(n); strings.HasPrefix(t, "break") || strings.HasPrefix(t, "continue") {
+			label := ""
+			if r := n.ChildByFieldName("result"); r != nil {
+				label = sb.text(r)
+			}
+			sb.jump(strings.HasPrefix(t, "continue"), label)
+			return ir.NoVar
+		}
 		var v ir.VarID = ir.NoVar
 		if r := n.ChildByFieldName("result"); r != nil {
 			v = sb.expr(r)
@@ -514,23 +527,30 @@ func (sb *swBuilder) stmt(n *sitter.Node) ir.VarID {
 		})
 		return ir.NoVar
 	case "while_statement", "repeat_while_statement":
-		sb.loop(n, func() {
+		cond := n.ChildByFieldName("condition")
+		v, known := sb.truth(cond)
+		if known && !v && n.Type() == "while_statement" {
+			sb.expr(cond) // while false: the body never runs
+			return ir.NoVar
+		}
+		sb.loopWith(n, loopSpec{infinite: known && v, body: func() {
 			for _, c := range named(n) {
 				sb.stmt(c)
 			}
-		})
+		}})
 		return ir.NoVar
 	case "switch_statement":
 		sb.expr(n.ChildByFieldName("expr"))
-		var arms []func()
-		skippable := true
+		var cases []func()
+		exhaustive := false
 		for _, e := range allOf(n, "switch_entry") {
 			if firstOf(e, "default_keyword") != nil {
-				skippable = false
+				exhaustive = true
 			}
-			arms = append(arms, func() { sb.stmt(firstOf(e, "statements")) })
+			cases = append(cases, func() { sb.stmt(firstOf(e, "statements")) })
 		}
-		sb.branches(n, skippable, arms...)
+		// Swift cases do not fall through; break leaves the switch.
+		sb.switchCases(n, false, exhaustive, cases)
 		return ir.NoVar
 	case "do_statement":
 		var body *sitter.Node
@@ -572,6 +592,8 @@ func (sb *swBuilder) stmt(n *sitter.Node) ir.VarID {
 func (sb *swBuilder) conditions(n *sitter.Node) {
 	var pending *sitter.Node // the name of an `if let` binding
 	var then, els *sitter.Node
+	var conds []*sitter.Node
+	bound := false
 	afterElse := false
 	for i := 0; i < int(n.ChildCount()); i++ {
 		c := n.Child(i)
@@ -584,7 +606,9 @@ func (sb *swBuilder) conditions(n *sitter.Node) {
 			afterElse = true
 		case field == "bound_identifier":
 			pending = c
+			bound = true
 		case field == "condition":
+			conds = append(conds, c)
 			v := sb.expr(c)
 			if pending != nil {
 				dst := sb.declare(sb.text(pending), sb.fn.Vars[v].Type, pending)
@@ -610,9 +634,17 @@ func (sb *swBuilder) conditions(n *sitter.Node) {
 		sb.terminated = dead
 		return
 	}
-	arms := []func(){func() { sb.stmt(then) }}
+	var elseArm func()
 	if els != nil {
-		arms = append(arms, func() { sb.stmt(els) })
+		elseArm = func() { sb.stmt(els) }
+	}
+	if len(conds) == 1 && !bound {
+		sb.ifElse(n, conds[0], func() { sb.stmt(then) }, elseArm)
+		return
+	}
+	arms := []func(){func() { sb.stmt(then) }}
+	if elseArm != nil {
+		arms = append(arms, elseArm)
 	}
 	sb.branches(n, els == nil, arms...)
 }
@@ -779,7 +811,7 @@ func (sb *swBuilder) expr(n *sitter.Node) ir.VarID {
 			parts = append(parts, sb.expr(s.ChildByFieldName("value")))
 		}
 		dst := sb.temp(n)
-		sb.assign(dst, n, parts...)
+		sb.compute(dst, n, parts...)
 		return dst
 	case "integer_literal", "real_literal", "boolean_literal", "hex_literal", "bin_literal", "oct_literal", "nil":
 		return sb.constVar(sb.text(n), n)
@@ -885,7 +917,11 @@ func (sb *swBuilder) expr(n *sitter.Node) ir.VarID {
 		parts = append(parts, sb.expr(c))
 	}
 	dst := sb.temp(n)
-	sb.assign(dst, n, parts...)
+	if t := n.Type(); t == "additive_expression" || t == "multiplicative_expression" {
+		sb.compute(dst, n, parts...) // a new value built from the parts
+	} else {
+		sb.assign(dst, n, parts...)
+	}
 	return dst
 }
 
