@@ -307,4 +307,5 @@ flowchart LR
 - **End-to-end tests** scan the fixtures in `testdata/` with the production wiring.
 - **Accuracy** is measured on the labelled corpus (`testdata/eval.yaml`, including the vulnerable-by-design `testdata/vulnshop`). CI fails when a case drops below its minimum precision or recall.
 - **Structure tests** keep the architecture from eroding: interface-only communication, every language wired, rule conventions, a consistent language table.
+- **Coverage** is measured across packages (`go test -coverpkg=./internal/... ./...`, about 87%); CI fails below 85%.
 - **Benchmarks** (`make bench`) cover the engine's scaling, the detectors and end-to-end scans; `--cpuprofile`/`--memprofile` profile real runs.

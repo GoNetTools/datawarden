@@ -58,3 +58,28 @@ func readFS(r scan.Repo, name string) (string, error) {
 	b, err := fs.ReadFile(r.FS, name)
 	return string(b), err
 }
+
+func TestOSGetwdAndIsDir(t *testing.T) {
+	var o OS
+	wd, err := o.Getwd()
+	if err != nil || wd == "" {
+		t.Fatalf("Getwd: %q %v", wd, err)
+	}
+	dir := t.TempDir()
+	file := filepath.Join(dir, "f.txt")
+	if err := o.WriteFile(file, []byte("x")); err != nil {
+		t.Fatal(err)
+	}
+	if !o.IsDir(dir) || o.IsDir(file) || o.IsDir(filepath.Join(dir, "missing")) {
+		t.Error("IsDir")
+	}
+	if abs, err := o.Abs("rel"); err != nil || !filepath.IsAbs(abs) {
+		t.Errorf("Abs: %q %v", abs, err)
+	}
+	if b, err := o.ReadFile(file); err != nil || string(b) != "x" {
+		t.Errorf("ReadFile: %q %v", b, err)
+	}
+	if got := o.FindRoot(dir); got != dir {
+		t.Errorf("FindRoot without markers returns the directory itself: %s", got)
+	}
+}

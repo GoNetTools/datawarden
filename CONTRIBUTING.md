@@ -94,7 +94,7 @@ A new language touches five places, and a test checks each one:
 
 ## Pull requests
 
-- Keep each pull request to one change, with tests. CI must be green on Linux, macOS and Windows.
+- Keep each pull request to one change, with tests. CI must be green on Linux, macOS and Windows, and total statement coverage must stay at or above 85%.
 - Add a line under **Unreleased** in [CHANGELOG.md](CHANGELOG.md) for user-visible changes.
 - New Go files start with the license header:
 

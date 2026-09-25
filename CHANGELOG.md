@@ -25,6 +25,7 @@ All notable changes to pii-scanner are documented here. The format follows [Keep
 
 - Renamed from piiflow to **pii-scanner**: the command is `pii-scanner` (and `pii-scanner-bench`), configuration lives in `.pii-scanner.yaml`, `.pii-scannerignore` and `.pii-scanner/`, the image is `ghcr.io/gonettools/pii-scanner`, release archives are `pii-scanner_<os>_<arch>`, and the GitLab token variable is `PII_SCANNER_GITLAB_TOKEN`.
 - Rule files are read strictly: unknown keys, unknown `lang` values and ids defined twice in one file are errors.
+- Construct programs for every frontend (control flow, loops, exceptions, ternaries and elvis, destructuring, spread, optional chaining, async, lambdas, statics, channels, goroutines), more unit tests, and a CI floor of 85% statement coverage (81% → 87%).
 - `docs/ARCHITECTURE.md`: the scan pipeline, layers, design rules, interfaces, data model, analysis, extension points and test strategy.
 - Components communicate only through interfaces: the CLI reaches configuration, rules, policy, baselines, reports, the data map and rule tests through injected services, the scanner lists files through `FileLister`, frontends register through `frontend.Registrar`. An architecture test enforces it.
 - Languages are defined in one table (`internal/lang`); `languages:` in `.pii-scanner.yaml` accepts the same aliases as rules (`kt`, `ts`, `js`, `golang`).

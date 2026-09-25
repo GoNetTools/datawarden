@@ -5,9 +5,11 @@ package analysis
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/GoNetTools/pii-scanner/internal/detect"
+	"github.com/GoNetTools/pii-scanner/internal/finding"
 	"github.com/GoNetTools/pii-scanner/internal/ir"
 	"github.com/GoNetTools/pii-scanner/internal/rules"
 )
@@ -131,6 +133,107 @@ func TestMapKeyLabelsValueDespiteSchemaField(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(res.Flows) != 1 || res.Flows[0].DataType != "email" {
+		t.Errorf("flows: %+v", res.Flows)
+	}
+}
+
+// Summaries keep one entry per transform set, preferring higher confidence.
+func TestSummaryMerging(t *testing.T) {
+	var s *Summary
+	if !s.Empty() || !(&Summary{}).Empty() {
+		t.Error("empty summaries")
+	}
+	s = &Summary{}
+	s.addParamParam(0, 1, Transfer{Conf: 0.5})
+	s.addParamParam(0, 1, Transfer{Conf: 0.9})
+	s.addParamParam(0, 1, Transfer{Conf: 0.4})
+	s.addParamParam(0, 1, Transfer{Conf: 0.7, Xf: []string{"masked"}})
+	if got := s.ParamParam[0][1]; len(got) != 2 || got[0].Conf != 0.9 {
+		t.Errorf("param→param: %+v", got)
+	}
+	s.addReturnFact(RealFact{DataType: "email", Conf: 0.6})
+	s.addReturnFact(RealFact{DataType: "email", Conf: 0.8})
+	s.addParamOut(1, RealFact{DataType: "phone", Conf: 0.7})
+	if len(s.ReturnFacts) != 1 || s.ReturnFacts[0].Conf != 0.8 || len(s.ParamOut[1]) != 1 || s.Empty() {
+		t.Errorf("facts: %+v %+v", s.ReturnFacts, s.ParamOut)
+	}
+	for i := 0; i < maxPerSlot+5; i++ {
+		s.addReturnFact(RealFact{DataType: fmt.Sprintf("t%d", i), Conf: 0.5})
+		s.addParamParam(2, 0, Transfer{Conf: 0.5, Xf: []string{fmt.Sprint(i)}})
+	}
+	if len(s.ReturnFacts) != maxPerSlot || len(s.ParamParam[2][0]) != maxPerSlot {
+		t.Errorf("slots are bounded: %d %d", len(s.ReturnFacts), len(s.ParamParam[2][0]))
+	}
+}
+
+func TestHostOf(t *testing.T) {
+	for in, want := range map[string]string{
+		"https://api.partner.example/v1/leads": "api.partner.example",
+		"http://sms.vendor.example:8080/send":  "sms.vendor.example",
+		"api.partner.example/v1":               "api.partner.example",
+		"/relative/path":                       "",
+		"https://[::1":                         "",
+	} {
+		if got := hostOf(in); got != want {
+			t.Errorf("hostOf(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// httpRules reports calls named "post" as a network sink whose first
+// argument is the URL.
+type httpRules struct{}
+
+func (httpRules) Match(lang, kind string, c *ir.Call) []rules.Hit {
+	if kind != rules.KindSink || c.Name != "post" {
+		return nil
+	}
+	host := 0
+	return []rules.Hit{{Rule: &rules.Rule{ID: "net.fake.post", Arg: rules.ArgSpec{Indexes: []int{1}}, HostArg: &host, Dest: rules.Dest{Kind: rules.DestNetwork}}, Conf: 1}}
+}
+
+// A constant URL argument names the destination host, and hosts under the
+// repository's first-party domains are first party.
+func TestDestinationHostAndFirstParty(t *testing.T) {
+	names := detect.NewClassifier(detect.DefaultTaxonomy())
+	fn := &ir.Func{ID: "p.f", Name: "f", Lang: "go", File: "a.go"}
+	email := fn.AddParam("email", "string", pos(1))
+	for i, u := range []string{"https://crm.partner.example/leads", "https://api.acme.example/users"} {
+		url := fn.ConstVar(u, pos(2+i))
+		fn.Emit(ir.Instr{Op: ir.OpCall, Dst: fn.Temp(pos(2 + i)), Args: []ir.VarID{url, email}, Call: &ir.Call{Name: "post"}, Pos: pos(2 + i)})
+	}
+	res, err := Engine{Names: names}.Analyze(context.Background(), []*ir.Func{fn}, Input{Rules: httpRules{}, Schema: detect.BuildSchema(names, nil), FirstPartyDomains: []string{".acme.example"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, f := range res.Flows {
+		got[f.Dest.Host] = f.Dest.Kind
+	}
+	if got["crm.partner.example"] != rules.DestNetwork || got["api.acme.example"] != rules.DestFirstParty {
+		t.Errorf("destinations: %v", got)
+	}
+}
+
+// In a PR scan unchanged callees are not in the program; their cached
+// summaries are looked up, so a leak inside them is still reported.
+func TestCachedSummaryOfUnchangedCallee(t *testing.T) {
+	names := detect.NewClassifier(detect.DefaultTaxonomy())
+	fn := &ir.Func{ID: "p.caller", Name: "caller", Lang: "go", File: "a.go"}
+	email := fn.AddParam("email", "string", pos(1))
+	fn.Emit(ir.Instr{Op: ir.OpCall, Dst: fn.Temp(pos(2)), Args: []ir.VarID{email}, Call: &ir.Call{Name: "send", Target: "p.send"}, Pos: pos(2)})
+	cached := &Summary{ParamSink: map[int][]SinkHit{0: {{Rule: "fake.leak", Dest: finding.Destination{Kind: "third_party"}, Sink: ir.Pos{File: "b.go", Line: 9}, Func: "p.send", Conf: 1}}}}
+	res, err := Engine{Names: names}.Analyze(context.Background(), []*ir.Func{fn}, Input{Rules: fakeRules{}, Schema: detect.BuildSchema(names, nil),
+		Lookup: func(id string) *Summary {
+			if id == "p.send" {
+				return cached
+			}
+			return nil
+		}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Flows) != 1 || res.Flows[0].Sink.File != "b.go" || res.Flows[0].DataType != "email" {
 		t.Errorf("flows: %+v", res.Flows)
 	}
 }

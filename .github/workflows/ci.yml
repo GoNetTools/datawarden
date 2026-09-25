@@ -105,9 +105,15 @@ jobs:
         if: runner.os == 'Linux' && matrix.go == 'stable'
         env:
           CGO_ENABLED: "1"
+          MIN_COVERAGE: "85"
         run: |
           go test -race -coverpkg=./internal/... -coverprofile=coverage.out ./...
-          echo "Coverage: $(go tool cover -func=coverage.out | tail -n 1 | awk '{print $NF}')" | tee -a "$GITHUB_STEP_SUMMARY"
+          total="$(go tool cover -func=coverage.out | tail -n 1 | awk '{print $NF}' | tr -d %)"
+          echo "Coverage: ${total}% (minimum ${MIN_COVERAGE}%)" | tee -a "$GITHUB_STEP_SUMMARY"
+          if awk -v t="$total" -v m="$MIN_COVERAGE" 'BEGIN { exit !(t < m) }'; then
+            echo "::error::statement coverage ${total}% is below ${MIN_COVERAGE}%; add tests for the code you changed"
+            exit 1
+          fi
       - name: Test without cgo (Go frontend + literal detector)
         shell: bash
         env:

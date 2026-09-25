@@ -348,6 +348,57 @@ func TestRequestIsBuiltFromFlagsConfigAndRepo(t *testing.T) {
 	}
 }
 
+func TestSessionFlags(t *testing.T) {
+	other := filepath.Join(testRoot, "services", "api")
+	h := newHarness(map[string]string{
+		"custom.yaml":          "policy:\n  min_confidence: 0.7\n",
+		"services/api/main.go": "package main",
+		"rules-in-root/x.yaml": "- id: sdk.acme.x\n  lang: go\n  call: acme.X\n  dest: {kind: log}\n",
+		".pii-scanner.yaml":    "rules: [" + filepath.ToSlash(filepath.Join(testRoot, "rules-in-root")) + "]\n",
+	})
+
+	// --root picks the repository; --config replaces .pii-scanner.yaml.
+	if code := h.run("scan", "--root", other, "--config", "custom.yaml", "--no-cache", "--no-fail"); code != ExitClean {
+		t.Fatalf("exit %d: %s", code, h.errb)
+	}
+	req := h.scanner.reqs[len(h.scanner.reqs)-1]
+	if req.Repo.Root != other || req.Config.Policy.MinConfidence != 0.7 {
+		t.Errorf("root=%s min_confidence=%v", req.Repo.Root, req.Config.Policy.MinConfidence)
+	}
+	// --min-confidence overrides the policy; absolute rule paths inside
+	// the repository load.
+	if code := h.run("scan", "--min-confidence", "0.9", "--no-cache", "--no-fail"); code != ExitClean {
+		t.Fatalf("exit %d: %s", code, h.errb)
+	}
+	req = h.scanner.reqs[len(h.scanner.reqs)-1]
+	if req.Config.Policy.MinConfidence != 0.9 {
+		t.Errorf("min_confidence = %v", req.Config.Policy.MinConfidence)
+	}
+	if code := h.run("rules", "--lang", "go"); code != ExitClean || !strings.Contains(h.out.String(), "sdk.acme.x") {
+		t.Errorf("absolute rules path: exit %d\n%s%s", code, h.out, h.errb)
+	}
+
+	// baseline --output writes where asked.
+	if code := h.run("baseline", "--output", "accepted.json", "--no-cache"); code != ExitClean || h.file("accepted.json") == "" {
+		t.Errorf("baseline --output: exit %d %s", code, h.errb)
+	}
+
+	for name, args := range map[string][]string{
+		"missing config":         {"scan", "--config", "nope.yaml", "--no-cache"},
+		"baseline with paths":    {"baseline", "services", "--no-cache"},
+		"unknown map format":     {"map", "--format", "xml", "--no-cache"},
+		"rules outside the repo": {"rules"},
+	} {
+		h2 := newHarness(nil)
+		if name == "rules outside the repo" {
+			h2 = newHarness(map[string]string{".pii-scanner.yaml": "rules: [" + filepath.ToSlash(filepath.Join(string(filepath.Separator), "elsewhere")) + "]\n"})
+		}
+		if code := h2.run(args...); code != ExitError {
+			t.Errorf("%s: exit %d", name, code)
+		}
+	}
+}
+
 func TestErrorsExitTwo(t *testing.T) {
 	h := newHarness(nil)
 	outside := filepath.Join(string(filepath.Separator), "elsewhere", "x.go")

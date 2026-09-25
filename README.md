@@ -424,7 +424,7 @@ make check         # what CI runs: gofmt, vet, staticcheck, license headers, bot
 make eval          # precision/recall/F1 and timings on testdata/eval.yaml
 make bench         # Go benchmarks
 make release-local # release archives for this machine in dist/
-go test -coverpkg=./internal/... ./...   # ~76% of statements
+go test -coverpkg=./internal/... ./...   # ~87% of statements; CI fails below 85%
 ```
 
 The version is set with `-ldflags "-X github.com/GoNetTools/pii-scanner/internal/app.Version=v1.2.3"` (`scripts/release/build.sh` does this).

@@ -4,6 +4,7 @@
 package config
 
 import (
+	"path/filepath"
 	"testing"
 	"testing/fstest"
 )
@@ -28,5 +29,32 @@ func TestLoad(t *testing.T) {
 	}
 	if _, err := Load(fsys, "bad.yaml", true); err == nil {
 		t.Error("invalid destination kind accepted")
+	}
+}
+
+func TestAbsAndLoader(t *testing.T) {
+	root := filepath.Join(string(filepath.Separator), "repo")
+	if Abs(root, "") != "" || Abs(root, root) != root || Abs(root, "a/b") != filepath.Join(root, "a", "b") {
+		t.Error("Abs")
+	}
+	var l Loader
+	c, err := l.Parse([]byte("languages: [kt, golang]\npolicy:\n  min_confidence: 0.7\n"), "x.yaml")
+	if err != nil || c.Policy.MinConfidence != 0.7 || len(c.Languages) != 2 {
+		t.Fatalf("Parse: %+v %v", c, err)
+	}
+	for name, doc := range map[string]string{
+		"unknown language": "languages: [cobol]\n",
+		"bad kind":         "policy:\n  fail_on: [nowhere]\n",
+		"not yaml":         "policy: [\n",
+	} {
+		if _, err := l.Parse([]byte(doc), name); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	if c, err := l.Load(fstest.MapFS{}, FileName, false); err != nil || c.Policy.MinConfidence == 0 {
+		t.Errorf("missing optional file gives defaults: %+v %v", c, err)
+	}
+	if _, err := l.Load(fstest.MapFS{}, FileName, true); err == nil {
+		t.Error("missing required file accepted")
 	}
 }
