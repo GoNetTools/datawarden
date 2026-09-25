@@ -24,7 +24,7 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - uses: GoNetTools/pii-scanner@v0
+      - uses: GoNetTools/datawarden@v0
         # with:
         #   args: --caller-depth 3
         #   fail-on-new: "false"

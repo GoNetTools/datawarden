@@ -77,13 +77,6 @@ data_types:
     weak: [ip]
     exclude: [server, bind, listen, host, gateway, dns, proxy, subnet, cidr, range, allow, block, whitelist, allowlist]
 
-  - id: vn_cccd
-    label: Vietnamese citizen ID (CCCD/CMND)
-    category: identity
-    class: pii
-    severity: high
-    patterns: [cccd, cmnd]
-
   - id: national_id
     label: National ID number
     category: identity
@@ -126,7 +119,7 @@ data_types:
     category: identity
     class: pii
     severity: high
-    patterns: [bhxh, bhyt, social insurance, health insurance number, insurance number, medicare number, nhs number]
+    patterns: [social insurance, health insurance number, insurance number, medicare number, nhs number]
 
   - id: credit_card
     label: Payment card number

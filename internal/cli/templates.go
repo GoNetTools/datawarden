@@ -3,7 +3,7 @@
 
 package cli
 
-import "github.com/GoNetTools/pii-scanner/internal/config"
+import "github.com/GoNetTools/datawarden/internal/config"
 
 var initTemplates = []struct{ name, body string }{
 	{config.FileName, config.Template},

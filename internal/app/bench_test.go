@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/GoNetTools/pii-scanner/internal/cli"
+	"github.com/GoNetTools/datawarden/internal/cli"
 )
 
 // BenchmarkScan runs a full, uncached scan of each fixture end to end, the

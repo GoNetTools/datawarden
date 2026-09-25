@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/GoNetTools/pii-scanner/internal/scan"
+	"github.com/GoNetTools/datawarden/internal/scan"
 )
 
 // These are adapter tests: they touch the real file system on purpose.

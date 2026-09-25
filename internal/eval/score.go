@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/GoNetTools/pii-scanner/internal/finding"
+	"github.com/GoNetTools/datawarden/internal/finding"
 )
 
 // Counts are true positives, false positives and false negatives.

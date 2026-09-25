@@ -3,7 +3,7 @@
 
 package analysis
 
-import "github.com/GoNetTools/pii-scanner/internal/ir"
+import "github.com/GoNetTools/datawarden/internal/ir"
 
 // tarjan returns the strongly connected components of the call graph in
 // reverse topological order: callees before callers.

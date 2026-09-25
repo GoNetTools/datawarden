@@ -7,9 +7,9 @@ import (
 	"strings"
 )
 
-func httpPost(cccd string) {
+func httpPost(nationalID string) {
 	// ruleid: net.go.http_body
-	_, _ = http.Post("https://kyc.vendor.example/check", "text/plain", strings.NewReader(cccd))
+	_, _ = http.Post("https://kyc.vendor.example/check", "text/plain", strings.NewReader(nationalID))
 }
 
 func httpForm(phoneNumber string) {

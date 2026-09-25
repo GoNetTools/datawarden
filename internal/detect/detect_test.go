@@ -6,7 +6,6 @@ package detect
 import (
 	"reflect"
 	"testing"
-	"time"
 )
 
 var testC = NewClassifier(DefaultTaxonomy())
@@ -15,7 +14,7 @@ func TestTokenize(t *testing.T) {
 	cases := map[string][]string{
 		"phoneNumber":     {"phone", "number"},
 		"USER_EMAIL_ADDR": {"user", "email", "addr"},
-		"CCCDNumber":      {"cccd", "number"},
+		"SSNNumber":       {"ssn", "number"},
 		"user.email2":     {"user", "email", "2"},
 		"HTTPServer":      {"http", "server"},
 	}
@@ -30,7 +29,7 @@ func TestClassifyIdent(t *testing.T) {
 	pii := map[string]string{
 		"email": "email", "userEmail": "email", "customer_email_address": "email", "eMail": "email",
 		"phoneNumber": "phone", "msisdn": "phone", "CUSTOMER_PHONE": "phone", "mobileNo": "phone",
-		"cccd": "vn_cccd", "cccdNumber": "vn_cccd", "cmnd": "vn_cccd", "bhxh": "insurance_id",
+		"nationalId": "national_id", "citizenIdNumber": "national_id", "socialInsuranceNumber": "insurance_id",
 		"birthDate": "dob", "dateOfBirth": "dob", "dob": "dob",
 		"fullName": "person_name", "first_name": "person_name",
 		"homeAddress": "address", "shippingAddress": "address",
@@ -50,7 +49,7 @@ func TestClassifyIdent(t *testing.T) {
 		"serverAddress", "listenAddress", "ipAddressAllowlist", "microphone", "fileName", "className", "userId",
 		"emailSent", "phoneLayout", "raceCondition", "emailCount", "onEmailChanged", "hashMapOf",
 		// Vietnamese identifier words are not supported: code is written in English.
-		"soDienThoai", "sdt", "hoTen", "ngaySinh", "diaChi", "soTaiKhoan",
+		"soDienThoai", "sdt", "hoTen", "ngaySinh", "diaChi", "soTaiKhoan", "cccd", "cmnd", "bhxh", "bhyt",
 	}
 	for _, name := range notPII {
 		if m, ok := testC.Ident(name); ok {
@@ -89,9 +88,11 @@ func TestClassifyFieldEntityName(t *testing.T) {
 }
 
 func TestLiteralScanner(t *testing.T) {
-	s := &LiteralScanner{Classifier: testC, MinConf: 0.6, Now: func() time.Time { return time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC) }}
-	src := `{"phoneNumber": "0912 837 465", "cccd": "001099017384", "email": "nguyen.van.a@gmail.com"}
-{"phone": "0912345678", "email": "test@example.com", "cccd": "001099012345"}
+	s := &LiteralScanner{Classifier: testC, MinConf: 0.6}
+	// Phone and national ID numbers are found through names and schema
+	// hints, not as committed values.
+	src := `{"phoneNumber": "0912 837 465", "nationalId": "001099017384", "email": "nguyen.van.a@gmail.com"}
+{"phone": "0912345678", "email": "test@example.com", "nationalId": "001099012345"}
 card: 4539 1488 0343 6467
 test card 4111111111111111
 iban: DE44500105175407324931
@@ -108,34 +109,18 @@ id 123456789012
 			t.Errorf("hit without masked/hash: %+v", h)
 		}
 	}
-	want := map[string]int{"phone": 2, "vn_cccd": 1, "email": 1, "credit_card": 1, "bank_account": 1, "us_ssn": 1}
+	want := map[string]int{"email": 1, "credit_card": 1, "bank_account": 1, "us_ssn": 1}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("literal hits = %v, want %v\n%+v", got, want, hits)
 	}
 }
 
 func TestValidators(t *testing.T) {
-	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	if !validCCCD("079203017384", now) {
-		t.Error("valid HCMC CCCD rejected")
-	}
-	if validCCCD("003099017384", now) { // 003 is not a province code
-		t.Error("bad province accepted")
-	}
-	if validCCCD("079399017384", now) { // born 2099
-		t.Error("future birth year accepted")
-	}
 	if !luhn("4539148803436467") || luhn("4539148803436468") {
 		t.Error("luhn")
 	}
 	if !validIBAN("DE44500105175407324931") || validIBAN("DE44500105175407324932") {
 		t.Error("iban")
-	}
-	if _, ok := normalizeVNPhone("+84 983 715 204"); !ok {
-		t.Error("+84 phone rejected")
-	}
-	if _, ok := normalizeVNPhone("0123456789"); ok {
-		t.Error("placeholder phone accepted")
 	}
 	if MaskValue("email", "nguyen@gmail.com") != "n*****@gmail.com" {
 		t.Errorf("mask email: %s", MaskValue("email", "nguyen@gmail.com"))

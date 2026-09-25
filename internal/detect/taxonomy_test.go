@@ -24,7 +24,7 @@ func TestBuiltinTaxonomy(t *testing.T) {
 		}
 	}
 	c := NewClassifier(tx.Types)
-	for id, class := range map[string]string{"email": "pii", "health": "phi", "credit_card": "pci", "vn_cccd": "pii"} {
+	for id, class := range map[string]string{"email": "pii", "health": "phi", "credit_card": "pci", "national_id": "pii"} {
 		if got := c.Lookup(id).Class; got != class {
 			t.Errorf("%s: class %q, want %q", id, got, class)
 		}

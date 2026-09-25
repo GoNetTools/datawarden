@@ -12,10 +12,9 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 )
 
-// LiteralHit is a PII value found verbatim in a file (e.g. a real phone
+// LiteralHit is a PII value found verbatim in a file (e.g. a real card
 // number committed in a fixture). The raw value is never stored; only a
 // masked rendering and a hash for baselining.
 type LiteralHit struct {
@@ -30,26 +29,21 @@ type LiteralHit struct {
 
 // LiteralScanner finds sensitive values (literals) in text.
 type LiteralScanner struct {
-	// Classifier recognises labels next to values ("cccd": ...).
+	// Classifier recognises labels next to values ("ssn": ...).
 	Classifier *Classifier
 	// MinConf drops weaker hits (the policy applies its own threshold).
 	MinConf float64
-	// Now is used to validate birth years in CCCD numbers.
-	Now func() time.Time
 }
 
 var (
 	reEmail = regexp.MustCompile(`[A-Za-z0-9][A-Za-z0-9._%+\-]{0,63}@[A-Za-z0-9](?:[A-Za-z0-9\-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9\-]{0,61}[A-Za-z0-9])?)*\.[A-Za-z]{2,24}\b`)
-	// Vietnamese mobile numbers: 0xxxxxxxxx or +84/84 xxxxxxxxx with optional separators.
-	reVNPhone = regexp.MustCompile(`(?:\+84|\b84|\b0)(?:[ .\-]?\d){9}\b`)
-	reDigits  = regexp.MustCompile(`\b\d{9}\b|\b\d{12}\b`)
-	reCard    = regexp.MustCompile(`\b\d(?:[ \-]?\d){12,18}\b`)
-	reSSN     = regexp.MustCompile(`\b(\d{3})-(\d{2})-(\d{4})\b`)
-	reIBAN    = regexp.MustCompile(`\b[A-Z]{2}\d{2}(?: ?[A-Z0-9]{4}){2,7}(?: ?[A-Z0-9]{1,4})?\b`)
+	reCard  = regexp.MustCompile(`\b\d(?:[ \-]?\d){12,18}\b`)
+	reSSN   = regexp.MustCompile(`\b(\d{3})-(\d{2})-(\d{4})\b`)
+	reIBAN  = regexp.MustCompile(`\b[A-Z]{2}\d{2}(?: ?[A-Z0-9]{4}){2,7}(?: ?[A-Z0-9]{1,4})?\b`)
 )
 
 var placeholderEmailDomains = []string{
-	"example.com", "example.org", "example.net", "example.vn", "test.com", "domain.com", "email.com", "mycompany.com",
+	"example.com", "example.org", "example.net", "test.com", "domain.com", "email.com", "mycompany.com",
 	"yourcompany.com", "company.com", "acme.com", "foo.com", "bar.com", "sample.com", "mail.com", "yourdomain.com",
 	"users.noreply.github.com", "noreply.github.com", "localhost", "anthropic.com",
 }
@@ -68,8 +62,7 @@ var testCards = set("4111111111111111", "4242424242424242", "4012888888881881", 
 	"5105105105105100", "5200828282828210", "378282246310005", "371449635398431", "6011111111111117", "6011000990139424",
 	"3530111333300000", "3566002020360505", "30569309025904", "38520000023237", "4000000000000002", "4000000000009995",
 	"4000000000000077", "4000000000003220", "2223003122003222", "6200000000000005", "5454545454545454", "4917610000000000",
-	"4444333322221111", "4000000000000010", "4000002500003155", "5200000000000007", "4988438843884305", "9704000000000018",
-	"9704020000000016")
+	"4444333322221111", "4000000000000010", "4000002500003155", "5200000000000007", "4988438843884305")
 
 var docIBANs = set("GB82WEST12345698765432", "DE89370400440532013000", "GB33BUKB20201555555555", "FR1420041010050500013M02606", "NL91ABNA0417164300")
 
@@ -79,11 +72,6 @@ func (s *LiteralScanner) Scan(content []byte) []LiteralHit {
 		return nil
 	}
 	minConf := s.MinConf
-	// Without a clock, birth years are only checked for plausibility.
-	now := time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC)
-	if s.Now != nil {
-		now = s.Now()
-	}
 	var hits []LiteralHit
 	lineNo := 0
 	for len(content) > 0 {
@@ -144,20 +132,6 @@ func (s *LiteralScanner) Scan(content []byte) []LiteralHit {
 				}
 			}
 		}
-		for _, m := range reVNPhone.FindAllStringIndex(str, -1) {
-			if overlaps(m[0], m[1]) || digitAdjacent(str, m[0], m[1]) {
-				continue
-			}
-			v := str[m[0]:m[1]]
-			if n, ok := normalizeVNPhone(v); ok {
-				conf := 0.7
-				if ctxFor()["phone"] {
-					conf = 0.92
-				}
-				emit("phone", m[0], n, conf, "vn-mobile-prefix")
-				taken = append(taken, [2]int{m[0], m[1]})
-			}
-		}
 		for _, m := range reCard.FindAllStringIndex(str, -1) {
 			if overlaps(m[0], m[1]) {
 				continue
@@ -169,28 +143,6 @@ func (s *LiteralScanner) Scan(content []byte) []LiteralHit {
 				}
 				emit("credit_card", m[0], d, conf, "luhn+iin")
 				taken = append(taken, [2]int{m[0], m[1]})
-			}
-		}
-		for _, m := range reDigits.FindAllStringIndex(str, -1) {
-			if overlaps(m[0], m[1]) {
-				continue
-			}
-			d := str[m[0]:m[1]]
-			switch len(d) {
-			case 12:
-				if validCCCD(d, now) {
-					conf := 0.45
-					if c := ctxFor(); c["vn_cccd"] || c["national_id"] {
-						conf = 0.92
-					}
-					emit("vn_cccd", m[0], d, conf, "cccd-structure")
-					taken = append(taken, [2]int{m[0], m[1]})
-				}
-			case 9:
-				if ctxFor()["vn_cccd"] && !trivialDigits(d) {
-					emit("vn_cccd", m[0], d, 0.75, "cmnd-with-context")
-					taken = append(taken, [2]int{m[0], m[1]})
-				}
 			}
 		}
 		for _, m := range reSSN.FindAllStringSubmatchIndex(str, -1) {
@@ -233,16 +185,6 @@ func looksBinary(b []byte) bool {
 		n = 8000
 	}
 	return bytes.IndexByte(b[:n], 0) >= 0
-}
-
-func digitAdjacent(s string, a, b int) bool {
-	if a > 0 && (isDigitByte(s[a-1]) || s[a-1] == '.' && a > 1 && isDigitByte(s[a-2])) {
-		return true
-	}
-	if b < len(s) && (isDigitByte(s[b]) || (s[b] == '.' && b+1 < len(s) && isDigitByte(s[b+1]))) {
-		return true
-	}
-	return false
 }
 
 func isDigitByte(c byte) bool { return c >= '0' && c <= '9' }
@@ -310,29 +252,6 @@ var commonTLDs = set("com", "net", "org", "edu", "gov", "mil", "int", "info", "b
 	"website", "digital", "network", "solutions", "services", "agency", "company", "group", "global", "media", "news", "blog", "club",
 	"design", "studio", "systems", "software", "academy", "school", "center", "health", "finance", "bank", "insurance", "vip", "work")
 
-var vnMobilePrefixes = set(
-	"032", "033", "034", "035", "036", "037", "038", "039",
-	"052", "055", "056", "058", "059",
-	"070", "076", "077", "078", "079",
-	"081", "082", "083", "084", "085", "086", "087", "088", "089",
-	"090", "091", "092", "093", "094", "096", "097", "098", "099",
-)
-
-func normalizeVNPhone(v string) (string, bool) {
-	d := onlyDigits(v)
-	switch {
-	case strings.HasPrefix(v, "+84") || (strings.HasPrefix(d, "84") && len(d) == 11):
-		d = "0" + d[2:]
-	}
-	if len(d) != 10 || !vnMobilePrefixes[d[:3]] {
-		return "", false
-	}
-	if trivialDigits(d[1:]) {
-		return "", false
-	}
-	return d, true
-}
-
 // trivialDigits rejects obvious placeholders: runs, repeats, sequences.
 func trivialDigits(d string) bool {
 	if len(d) < 6 {
@@ -391,11 +310,6 @@ func cardConf(d string) float64 {
 	n2, _ := strconv.Atoi(d[:2])
 	n4, _ := strconv.Atoi(d[:4])
 	switch {
-	case iin("9704") && (len(d) == 16 || len(d) == 19): // NAPAS (Vietnam domestic)
-		if luhn(d) {
-			return 0.85
-		}
-		return 0.6
 	case !luhn(d):
 		return 0
 	case d[0] == '4' && (len(d) == 13 || len(d) == 16 || len(d) == 19):
@@ -444,27 +358,6 @@ func validIBAN(v string) bool {
 		return false
 	}
 	return new(big.Int).Mod(n, big.NewInt(97)).Int64() == 1
-}
-
-// validCCCD checks the structure of a 12-digit Vietnamese citizen ID:
-// 3-digit province code, a century/gender digit, 2-digit birth year and
-// 6 random digits (Circular 07/2016/TT-BCA).
-func validCCCD(d string, now time.Time) bool {
-	if !vnProvinceCodes[d[:3]] || trivialDigits(d[6:]) {
-		return false
-	}
-	cg := d[3]
-	yy, _ := strconv.Atoi(d[4:6])
-	var year int
-	switch cg {
-	case '0', '1':
-		year = 1900 + yy
-	case '2', '3':
-		year = 2000 + yy
-	default:
-		return false
-	}
-	return year <= now.Year()
 }
 
 func valueHash(dt, v string) string {

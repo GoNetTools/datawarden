@@ -23,7 +23,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/GoNetTools/pii-scanner/internal/lang"
+	"github.com/GoNetTools/datawarden/internal/lang"
 )
 
 //go:embed builtin/*.yaml

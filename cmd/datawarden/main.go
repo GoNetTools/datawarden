@@ -11,7 +11,7 @@ import (
 	"os"
 	"os/signal"
 
-	"github.com/GoNetTools/pii-scanner/internal/app"
+	"github.com/GoNetTools/datawarden/internal/app"
 )
 
 func main() {

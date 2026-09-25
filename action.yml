@@ -11,7 +11,7 @@ inputs:
     default: latest
   repository:
     description: GitHub repository that publishes datawarden releases.
-    default: GoNetTools/pii-scanner
+    default: GoNetTools/datawarden
   path:
     description: Directory to scan (repository root by default).
     default: .

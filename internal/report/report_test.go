@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/GoNetTools/pii-scanner/internal/detect"
-	"github.com/GoNetTools/pii-scanner/internal/finding"
-	"github.com/GoNetTools/pii-scanner/internal/ir"
+	"github.com/GoNetTools/datawarden/internal/detect"
+	"github.com/GoNetTools/datawarden/internal/finding"
+	"github.com/GoNetTools/datawarden/internal/ir"
 )
 
 type catalog map[string]string
@@ -21,9 +21,9 @@ func (c catalog) Lookup(id string) detect.DataType { return detect.DataType{ID: 
 func sample() *Report {
 	return &Report{
 		Tool: "datawarden", Version: "t", Mode: "full", Started: time.Date(2026, 9, 24, 0, 0, 0, 0, time.UTC), Duration: "2s",
-		Flows: []*finding.Flow{{DataType: "vn_cccd", SinkRule: "r", Dest: finding.Destination{Kind: "log"}, Violation: true, Severity: "high",
+		Flows: []*finding.Flow{{DataType: "national_id", SinkRule: "r", Dest: finding.Destination{Kind: "log"}, Violation: true, Severity: "high",
 			Sink: ir.Pos{File: "a.go", Line: 4}, Path: []ir.Pos{{File: "a.go", Line: 1}, {File: "a.go", Line: 4}}, Fingerprint: "fp"}},
-		Catalog: catalog{"vn_cccd": "Căn cước công dân"},
+		Catalog: catalog{"national_id": "National ID number"},
 	}
 }
 
@@ -37,7 +37,7 @@ func TestLabelsAndLinksAreInjected(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := b.String()
-	if !strings.Contains(out, "Căn cước công dân") || !strings.Contains(out, "https://github.com/acme/app/blob/abc/a.go#L4") {
+	if !strings.Contains(out, "National ID number") || !strings.Contains(out, "https://github.com/acme/app/blob/abc/a.go#L4") {
 		t.Errorf("markdown:\n%s", out)
 	}
 	if CILinks(func(string) string { return "" }) != nil {
@@ -59,7 +59,7 @@ func TestWithoutCatalogFallsBackToIDs(t *testing.T) {
 	r := sample()
 	r.Catalog = nil
 	var b bytes.Buffer
-	if err := SARIF(&b, r); err != nil || !strings.Contains(b.String(), "vn_cccd from") {
+	if err := SARIF(&b, r); err != nil || !strings.Contains(b.String(), "national_id from") {
 		t.Errorf("sarif: %v\n%s", err, b.String())
 	}
 }

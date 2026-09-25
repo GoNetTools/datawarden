@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/GoNetTools/pii-scanner/internal/detect"
-	"github.com/GoNetTools/pii-scanner/internal/ir"
+	"github.com/GoNetTools/datawarden/internal/detect"
+	"github.com/GoNetTools/datawarden/internal/ir"
 )
 
 // chain builds n functions: f0(email) passes its argument through a few

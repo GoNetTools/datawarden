@@ -8,10 +8,10 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/GoNetTools/pii-scanner/internal/detect"
-	"github.com/GoNetTools/pii-scanner/internal/finding"
-	"github.com/GoNetTools/pii-scanner/internal/ir"
-	"github.com/GoNetTools/pii-scanner/internal/rules"
+	"github.com/GoNetTools/datawarden/internal/detect"
+	"github.com/GoNetTools/datawarden/internal/finding"
+	"github.com/GoNetTools/datawarden/internal/ir"
+	"github.com/GoNetTools/datawarden/internal/rules"
 )
 
 func pos(line int) ir.Pos { return ir.Pos{File: "a.kt", Line: line} }

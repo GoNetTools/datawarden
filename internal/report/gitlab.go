@@ -88,7 +88,7 @@ func uuidFrom(s string) string {
 func GitLab(w io.Writer, r *Report) error {
 	r.Sort()
 	const tf = "2006-01-02T15:04:05"
-	tool := glTool{ID: "datawarden", Name: "datawarden", Version: r.Version, Vendor: glVendor{Name: "datawarden"}, URL: "https://github.com/GoNetTools/pii-scanner"}
+	tool := glTool{ID: "datawarden", Name: "datawarden", Version: r.Version, Vendor: glVendor{Name: "datawarden"}, URL: "https://github.com/GoNetTools/datawarden"}
 	start := r.Started
 	end, _ := time.ParseDuration(r.Duration)
 	rep := glReport{

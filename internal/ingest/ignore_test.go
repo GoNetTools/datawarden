@@ -10,7 +10,7 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/GoNetTools/pii-scanner/internal/lang"
+	"github.com/GoNetTools/datawarden/internal/lang"
 )
 
 func TestMatcher(t *testing.T) {

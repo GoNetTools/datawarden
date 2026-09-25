@@ -13,9 +13,9 @@ import (
 	sitter "github.com/smacker/go-tree-sitter"
 	"github.com/smacker/go-tree-sitter/swift"
 
-	"github.com/GoNetTools/pii-scanner/internal/frontend"
-	"github.com/GoNetTools/pii-scanner/internal/ir"
-	"github.com/GoNetTools/pii-scanner/internal/lang"
+	"github.com/GoNetTools/datawarden/internal/frontend"
+	"github.com/GoNetTools/datawarden/internal/ir"
+	"github.com/GoNetTools/datawarden/internal/lang"
 )
 
 // NewSwift returns the Swift frontend.

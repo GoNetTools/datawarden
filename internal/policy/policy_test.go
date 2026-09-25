@@ -7,10 +7,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/GoNetTools/pii-scanner/internal/config"
-	"github.com/GoNetTools/pii-scanner/internal/detect"
-	"github.com/GoNetTools/pii-scanner/internal/finding"
-	"github.com/GoNetTools/pii-scanner/internal/ir"
+	"github.com/GoNetTools/datawarden/internal/config"
+	"github.com/GoNetTools/datawarden/internal/detect"
+	"github.com/GoNetTools/datawarden/internal/finding"
+	"github.com/GoNetTools/datawarden/internal/ir"
 )
 
 func TestApply(t *testing.T) {

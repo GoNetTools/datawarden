@@ -239,7 +239,7 @@ func (m *Module) Merge(o *Module) {
 // SortStable orders functions and types deterministically.
 func (m *Module) SortStable() {
 	sort.SliceStable(m.Funcs, func(i, j int) bool {
-		return m.Funcs[i].ID < m.Funcs[j].ID 
+		return m.Funcs[i].ID < m.Funcs[j].ID
 	})
 	sort.SliceStable(m.Types, func(i, j int) bool {
 		return m.Types[i].Name < m.Types[j].Name

@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/GoNetTools/pii-scanner/internal/lang"
-	"github.com/GoNetTools/pii-scanner/internal/rules"
-	"github.com/GoNetTools/pii-scanner/internal/ruletest"
+	"github.com/GoNetTools/datawarden/internal/lang"
+	"github.com/GoNetTools/datawarden/internal/rules"
+	"github.com/GoNetTools/datawarden/internal/ruletest"
 )
 
 // TestRuleExamples scans the annotated examples of every built-in rule

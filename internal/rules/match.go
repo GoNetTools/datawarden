@@ -6,7 +6,7 @@ package rules
 import (
 	"strings"
 
-	"github.com/GoNetTools/pii-scanner/internal/ir"
+	"github.com/GoNetTools/datawarden/internal/ir"
 )
 
 // Hit is a rule that matched a call site.

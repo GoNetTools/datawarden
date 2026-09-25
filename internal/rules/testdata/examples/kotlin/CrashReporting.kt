@@ -24,11 +24,11 @@ class CrashReporting {
         Sentry.setExtra("plan", "pro")
     }
 
-    fun crashlytics(email: String, cccd: String) {
+    fun crashlytics(email: String, nationalId: String) {
         // ruleid: sdk.firebase.crashlytics
         FirebaseCrashlytics.getInstance().setUserId(email)
         // ruleid: sdk.firebase.crashlytics.custom_key
-        FirebaseCrashlytics.getInstance().setCustomKey("cccd", cccd)
+        FirebaseCrashlytics.getInstance().setCustomKey("national_id", nationalId)
     }
 
     fun bugsnag(email: String, fullName: String) {

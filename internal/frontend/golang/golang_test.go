@@ -13,7 +13,7 @@ import (
 
 	"golang.org/x/tools/go/packages"
 
-	"github.com/GoNetTools/pii-scanner/internal/frontend"
+	"github.com/GoNetTools/datawarden/internal/frontend"
 )
 
 func TestModulesAreLoadedThroughTheInjectedLoader(t *testing.T) {

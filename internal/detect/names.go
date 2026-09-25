@@ -421,7 +421,7 @@ func lastSegment(s string) string {
 
 // ContextTypes returns the data types mentioned anywhere in a line of text,
 // ignoring the negative rules. The literal detector uses it to raise
-// confidence when a value sits next to its label ("cccd": "0010...").
+// confidence when a value sits next to its label ("ssn": "536-...").
 func (c *Classifier) ContextTypes(line string) map[string]bool {
 	toks := Tokenize(line)
 	if len(toks) == 0 {

@@ -2,7 +2,7 @@
 # detector runs at commit time; full tracing belongs in CI.
 - id: datawarden
   name: datawarden (committed personal data)
-  description: Blocks commits that add real personal data (VN phone numbers, CCCD, emails, card numbers, IBANs) to files.
+  description: Blocks commits that add real personal data (emails, card numbers, IBANs, US SSNs) or live secrets to files.
   entry: datawarden scan --literals-only --no-cache
   language: golang
   types: [text]

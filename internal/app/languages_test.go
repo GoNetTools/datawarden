@@ -9,9 +9,9 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/GoNetTools/pii-scanner/internal/frontend"
-	"github.com/GoNetTools/pii-scanner/internal/lang"
-	"github.com/GoNetTools/pii-scanner/internal/rules"
+	"github.com/GoNetTools/datawarden/internal/frontend"
+	"github.com/GoNetTools/datawarden/internal/lang"
+	"github.com/GoNetTools/datawarden/internal/rules"
 )
 
 // TestEveryLanguageIsWired keeps internal/lang, the frontends and the

@@ -7,7 +7,7 @@ export interface User {
   id: string;
   email: string;
   phoneNumber?: string;
-  cccd: string;
+  nationalId: string;
 }
 
 export class UserService {
@@ -17,7 +17,7 @@ export class UserService {
     Sentry.setUser({ id: user.id, email: user.email });
     mixpanel.track("Signed Up", { phone: user.phoneNumber });
     localStorage.setItem("dob", birthDate);
-    await axios.post("https://api.partner-crm.io/v1/leads", { cccd: user.cccd });
+    await axios.post("https://api.partner-crm.io/v1/leads", { nationalId: user.nationalId });
     console.log(`registered ${maskEmail(user.email)}`);
     logInfo("user registered", user.phoneNumber);
     return fetch(`${this.baseUrl}/users`, { method: "POST", body: JSON.stringify(user) });

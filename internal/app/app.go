@@ -15,28 +15,28 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/GoNetTools/pii-scanner/internal/analysis"
-	"github.com/GoNetTools/pii-scanner/internal/baseline"
-	"github.com/GoNetTools/pii-scanner/internal/cache"
-	"github.com/GoNetTools/pii-scanner/internal/cicomment"
-	"github.com/GoNetTools/pii-scanner/internal/cli"
-	"github.com/GoNetTools/pii-scanner/internal/config"
-	"github.com/GoNetTools/pii-scanner/internal/datamap"
-	"github.com/GoNetTools/pii-scanner/internal/detect"
-	"github.com/GoNetTools/pii-scanner/internal/frontend"
-	"github.com/GoNetTools/pii-scanner/internal/frontend/golang"
-	"github.com/GoNetTools/pii-scanner/internal/frontend/treesitter"
-	"github.com/GoNetTools/pii-scanner/internal/ingest"
-	"github.com/GoNetTools/pii-scanner/internal/platform"
-	"github.com/GoNetTools/pii-scanner/internal/policy"
-	"github.com/GoNetTools/pii-scanner/internal/report"
-	"github.com/GoNetTools/pii-scanner/internal/rules"
-	"github.com/GoNetTools/pii-scanner/internal/ruletest"
-	"github.com/GoNetTools/pii-scanner/internal/scan"
+	"github.com/GoNetTools/datawarden/internal/analysis"
+	"github.com/GoNetTools/datawarden/internal/baseline"
+	"github.com/GoNetTools/datawarden/internal/cache"
+	"github.com/GoNetTools/datawarden/internal/cicomment"
+	"github.com/GoNetTools/datawarden/internal/cli"
+	"github.com/GoNetTools/datawarden/internal/config"
+	"github.com/GoNetTools/datawarden/internal/datamap"
+	"github.com/GoNetTools/datawarden/internal/detect"
+	"github.com/GoNetTools/datawarden/internal/frontend"
+	"github.com/GoNetTools/datawarden/internal/frontend/golang"
+	"github.com/GoNetTools/datawarden/internal/frontend/treesitter"
+	"github.com/GoNetTools/datawarden/internal/ingest"
+	"github.com/GoNetTools/datawarden/internal/platform"
+	"github.com/GoNetTools/datawarden/internal/policy"
+	"github.com/GoNetTools/datawarden/internal/report"
+	"github.com/GoNetTools/datawarden/internal/rules"
+	"github.com/GoNetTools/datawarden/internal/ruletest"
+	"github.com/GoNetTools/datawarden/internal/scan"
 )
 
 // Version is set at build time with
-// -ldflags "-X github.com/GoNetTools/pii-scanner/internal/app.Version=v1.2.3".
+// -ldflags "-X github.com/GoNetTools/datawarden/internal/app.Version=v1.2.3".
 var Version = "dev"
 
 // Components are the shared services, exposed so integration tests can
@@ -60,7 +60,7 @@ func NewComponents(clock func() time.Time) *Components {
 			Files:     ingest.Lister{},
 			Frontends: reg,
 			Analyzer:  analysis.Engine{Names: classifier},
-			Literals:  &detect.LiteralScanner{Classifier: classifier, Now: clock},
+			Literals:  &detect.LiteralScanner{Classifier: classifier},
 			Schemas:   detect.Schemas{Classifier: classifier},
 			Clock:     clock,
 		},

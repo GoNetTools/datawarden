@@ -13,8 +13,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/GoNetTools/pii-scanner/internal/cli"
-	"github.com/GoNetTools/pii-scanner/internal/finding"
+	"github.com/GoNetTools/datawarden/internal/cli"
+	"github.com/GoNetTools/datawarden/internal/finding"
 )
 
 type jsonReport struct {
@@ -83,7 +83,7 @@ func TestScanGo(t *testing.T) {
 	}
 	expectFlows(t, r, []want{
 		{"email", "sdk.go.sentry.scope", "service.Register$1", true},
-		{"vn_cccd", "net.go.http_body", "service.sendSMS", true},
+		{"national_id", "net.go.http_body", "service.sendSMS", true},
 		{"phone", "log.go.stdlib", "service.Register", true},
 		{"phone", "log.go.slog", "service.Handler", true},
 		{"ip_address", "log.go.fmt_print", "service.Handler", true},
@@ -104,13 +104,13 @@ func TestScanGo(t *testing.T) {
 			t.Errorf("placeholder email reported: %+v", l)
 		}
 	}
-	for _, dt := range []string{"phone", "email", "vn_cccd"} {
-		if !lits[dt] {
-			t.Errorf("missing literal %s: %+v", dt, r.Literals)
-		}
+	// Phone and national ID numbers are found through names, not as
+	// committed values: only the email in the fixture is a literal.
+	if !lits["email"] {
+		t.Errorf("missing literal email: %+v", r.Literals)
 	}
-	if len(r.Literals) != 3 {
-		t.Errorf("literals = %d, want 3 (placeholders filtered): %+v", len(r.Literals), r.Literals)
+	if len(r.Literals) != 1 {
+		t.Errorf("literals = %d, want 1 (placeholders filtered): %+v", len(r.Literals), r.Literals)
 	}
 }
 

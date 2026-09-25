@@ -10,9 +10,9 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/GoNetTools/pii-scanner/internal/config"
-	"github.com/GoNetTools/pii-scanner/internal/detect"
-	"github.com/GoNetTools/pii-scanner/internal/finding"
+	"github.com/GoNetTools/datawarden/internal/config"
+	"github.com/GoNetTools/datawarden/internal/detect"
+	"github.com/GoNetTools/datawarden/internal/finding"
 )
 
 // Severity levels.
@@ -199,7 +199,7 @@ type Policies struct {
 // Apply evaluates findings under cfg (see Evaluator.Apply).
 func (p Policies) Apply(cfg *config.Config, flows []*finding.Flow, lits []*finding.Literal) ([]*finding.Flow, []*finding.Literal) {
 	return Evaluator{
-		Config: cfg,
+		Config:  cfg,
 		Catalog: p.Catalog,
 	}.Apply(flows, lits)
 }

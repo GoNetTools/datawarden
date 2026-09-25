@@ -11,7 +11,7 @@ import (
 	"runtime"
 	"runtime/pprof"
 
-	"github.com/GoNetTools/pii-scanner/internal/scan"
+	"github.com/GoNetTools/datawarden/internal/scan"
 )
 
 // profile holds the pprof flags of the commands that run the analysis

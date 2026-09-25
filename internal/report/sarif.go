@@ -9,8 +9,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/GoNetTools/pii-scanner/internal/finding"
-	"github.com/GoNetTools/pii-scanner/internal/ir"
+	"github.com/GoNetTools/datawarden/internal/finding"
+	"github.com/GoNetTools/datawarden/internal/ir"
 )
 
 type sarifLog struct {
@@ -98,11 +98,11 @@ func loc(p ir.Pos, msg string) sarifLocation {
 	l := sarifLocation{
 		PhysicalLocation: sarifPhysical{
 			ArtifactLocation: sarifArtifact{
-				URI: p.File,
+				URI:       p.File,
 				URIBaseID: "%SRCROOT%",
 			},
 			Region: sarifRegion{
-				StartLine: max(p.Line, 1),
+				StartLine:   max(p.Line, 1),
 				StartColumn: p.Col,
 			},
 		},
@@ -115,9 +115,9 @@ func loc(p ir.Pos, msg string) sarifLocation {
 }
 
 var securitySeverity = map[string]string{
-	"high": "8.0",
+	"high":   "8.0",
 	"medium": "5.5",
-	"low": "3.0",
+	"low":    "3.0",
 }
 
 func level(sev string, baselined bool) string {
@@ -172,12 +172,12 @@ func SARIF(w io.Writer, r *Report) error {
 			CodeFlows:           []sarifCodeFlow{{ThreadFlows: []sarifThreadFlow{{Locations: steps}}}},
 			BaselineState:       state,
 			Properties: map[string]any{
-				"data_type": f.DataType,
-				"destination": f.Dest,
-				"confidence": f.Confidence,
-				"transforms": f.Transforms,
-				"function": f.Function,
-				"source": f.Source.String(),
+				"data_type":         f.DataType,
+				"destination":       f.Dest,
+				"confidence":        f.Confidence,
+				"transforms":        f.Transforms,
+				"function":          f.Function,
+				"source":            f.Source.String(),
 				"security-severity": securitySeverity[f.Severity],
 			},
 		})
@@ -191,20 +191,20 @@ func SARIF(w io.Writer, r *Report) error {
 			dt := r.dataType(l.DataType)
 			ruleMeta[id] = sarifRule{
 				ID: id, Name: "CommittedSensitiveValue" + camel(l.DataType),
-				ShortDescription:     sarifText{
-					Text: dt.Label + " committed to the repository"
+				ShortDescription: sarifText{
+					Text: dt.Label + " committed to the repository",
 				},
-				FullDescription:      sarifText{
-					Text: "A value that validates as " + strings.ToLower(dt.Label) + " is stored in the repository. Replace real personal data and live secrets in fixtures and samples with synthetic values."
+				FullDescription: sarifText{
+					Text: "A value that validates as " + strings.ToLower(dt.Label) + " is stored in the repository. Replace real personal data and live secrets in fixtures and samples with synthetic values.",
 				},
-				Help:                 sarifText{
-					Text: "Replace the value with synthetic test data (for phone and ID numbers, generate values that fail validation or use documented test ranges; for secrets, revoke the key and load it from a secret store). If it is intentional, accept it with `datawarden baseline`."
+				Help: sarifText{
+					Text: "Replace the value with synthetic test data (for card and ID numbers, generate values that fail validation or use documented test ranges; for secrets, revoke the key and load it from a secret store). If it is intentional, accept it with `datawarden baseline`.",
 				},
 				DefaultConfiguration: map[string]any{"level": level(l.Severity, false)},
-				Properties:           map[string]any{
-					"tags": []string{"security", "privacy", classTag(l.Class)},
+				Properties: map[string]any{
+					"tags":              []string{"security", "privacy", classTag(l.Class)},
 					"security-severity": securitySeverity[l.Severity],
-					"precision": "high",
+					"precision":         "high",
 				},
 			}
 		}
@@ -213,18 +213,18 @@ func SARIF(w io.Writer, r *Report) error {
 			state = "unchanged"
 		}
 		results = append(results, sarifResult{
-			RuleID: id,
-			Level: level(l.Severity, l.Baselined),
-			Message: sarifText{Text: r.literalMessage(l)},
-			Locations:           []sarifLocation{loc(l.Pos, "")},
+			RuleID:    id,
+			Level:     level(l.Severity, l.Baselined),
+			Message:   sarifText{Text: r.literalMessage(l)},
+			Locations: []sarifLocation{loc(l.Pos, "")},
 			PartialFingerprints: map[string]string{
-				"datawarden/v1": l.Fingerprint
+				"datawarden/v1": l.Fingerprint,
 			},
-			BaselineState:       state,
-			Properties:          map[string]any{
-				"data_type": l.DataType,
-				"confidence": l.Confidence,
-				"detector": l.Detector,
+			BaselineState: state,
+			Properties: map[string]any{
+				"data_type":         l.DataType,
+				"confidence":        l.Confidence,
+				"detector":          l.Detector,
 				"security-severity": securitySeverity[l.Severity],
 			},
 		})
@@ -235,9 +235,9 @@ func SARIF(w io.Writer, r *Report) error {
 	}
 	sort.Strings(ids)
 	driver := sarifDriver{
-		Name: r.Tool,
-		Version: r.Version,
-		InformationURI: "https://github.com/GoNetTools/pii-scanner",
+		Name:           r.Tool,
+		Version:        r.Version,
+		InformationURI: "https://github.com/GoNetTools/datawarden",
 	}
 	for _, id := range ids {
 		driver.Rules = append(driver.Rules, ruleMeta[id])

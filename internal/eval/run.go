@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/GoNetTools/pii-scanner/internal/finding"
+	"github.com/GoNetTools/datawarden/internal/finding"
 )
 
 // Scan is the outcome of one scan of a case directory.

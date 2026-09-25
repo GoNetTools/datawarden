@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/GoNetTools/pii-scanner/internal/finding"
-	"github.com/GoNetTools/pii-scanner/internal/ir"
-	"github.com/GoNetTools/pii-scanner/internal/rules"
+	"github.com/GoNetTools/datawarden/internal/finding"
+	"github.com/GoNetTools/datawarden/internal/ir"
+	"github.com/GoNetTools/datawarden/internal/rules"
 )
 
 type ruleLookup map[string]*rules.Rule
@@ -38,9 +38,9 @@ func rich() *Report {
 	allowed.Allowed, allowed.Transforms = "transform: masked", []string{"masked"}
 	info := flow("dob", "storage.go.sql", "low", 16)
 	info.Dest = finding.Destination{Kind: "first_party", Host: "database", FirstParty: true}
-	lit := &finding.Literal{DataType: "phone", Pos: ir.Pos{File: "seed.csv", Line: 2}, Masked: "097*****85", Detector: "vn-mobile-prefix",
+	lit := &finding.Literal{DataType: "us_ssn", Pos: ir.Pos{File: "seed.csv", Line: 2}, Masked: "536******99", Detector: "ssn-structure",
 		Confidence: 0.7, Violation: true, Severity: "medium", Fingerprint: "lit1"}
-	oldLit := &finding.Literal{DataType: "email", Pos: ir.Pos{File: "seed.csv", Line: 3}, Masked: "t***@x.vn", Detector: "email-format",
+	oldLit := &finding.Literal{DataType: "email", Pos: ir.Pos{File: "seed.csv", Line: 3}, Masked: "t***@x.io", Detector: "email-format",
 		Confidence: 0.9, Violation: true, Baselined: true, Severity: "medium", Fingerprint: "lit2"}
 	return &Report{
 		Tool: "datawarden", Version: "t", Mode: "diff", DiffBase: "origin/main", Commit: "abc123",
@@ -84,7 +84,7 @@ func TestTextReport(t *testing.T) {
 		"NEW      high   email → Sentry / sentry.io (third-party)  [sdk.sentry.set_user]",
 		"BASELINE medium phone",
 		"app/Repo.kt:1 → :2 → :9",
-		"097*****85",
+		"536******99",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("text lacks %q:\n%s", want, out)
@@ -102,7 +102,7 @@ func TestTextReport(t *testing.T) {
 
 func TestMarkdownReport(t *testing.T) {
 	out := render(t, "md", rich())
-	for _, want := range []string{CommentMarker, "email", "sdk.sentry.set_user", "097*****85"} {
+	for _, want := range []string{CommentMarker, "email", "sdk.sentry.set_user", "536******99"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("markdown lacks %q:\n%s", want, out)
 		}
@@ -154,7 +154,7 @@ func TestSARIFReport(t *testing.T) {
 	for _, r := range run.Tool.Driver.Rules {
 		names[r.Name] = true
 	}
-	if !names["SensitiveDataFlowSdkSentrySetUser"] || !names["CommittedSensitiveValuePhone"] {
+	if !names["SensitiveDataFlowSdkSentrySetUser"] || !names["CommittedSensitiveValueUsSsn"] {
 		t.Errorf("rules: %+v", run.Tool.Driver.Rules)
 	}
 	states := map[string]int{}
@@ -243,7 +243,7 @@ func TestSARIFClassTags(t *testing.T) {
 	for _, rule := range got.Runs[0].Tool.Driver.Rules {
 		tags[rule.ID] = strings.Join(rule.Properties.Tags, ",")
 	}
-	if tags["pii-literal/phone"] != "security,privacy,credential" || !strings.HasPrefix(tags["pii-flow/sdk.sentry.set_user"], "security,privacy,pii,") {
+	if tags["pii-literal/us_ssn"] != "security,privacy,credential" || !strings.HasPrefix(tags["pii-flow/sdk.sentry.set_user"], "security,privacy,pii,") {
 		t.Errorf("class tags: %v", tags)
 	}
 }

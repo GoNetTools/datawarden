@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/GoNetTools/pii-scanner/internal/cli"
+	"github.com/GoNetTools/datawarden/internal/cli"
 )
 
 func TestScanKotlinJava(t *testing.T) {
@@ -23,7 +23,7 @@ func TestScanKotlinJava(t *testing.T) {
 	}
 	expectFlows(t, r, []want{
 		{"email", "sdk.sentry.set_user", "CustomerRepo.save", true},
-		{"vn_cccd", "sdk.firebase.crashlytics.custom_key", "CustomerRepo.save", true},
+		{"national_id", "sdk.firebase.crashlytics.custom_key", "CustomerRepo.save", true},
 		{"phone", "sdk.firebase.analytics", "SignupViewModel.submit", true},
 		{"phone", "log.android.logcat", "CustomerRepo.save", true},
 		{"phone", "storage.android.shared_prefs", "CustomerRepo.save", true},
@@ -48,13 +48,13 @@ func TestScanTypeScript(t *testing.T) {
 	expectFlows(t, r, []want{
 		{"email", "sdk.ts.sentry.set_user", "UserService.register", true},
 		{"phone", "sdk.ts.mixpanel", "UserService.register", true},
-		{"vn_cccd", "net.ts.axios", "UserService.register", true},
+		{"national_id", "net.ts.axios", "UserService.register", true},
 		{"dob", "storage.ts.web_storage", "UserService.register", true},
 		{"email", "storage.ts.web_storage", "onLogin", true},
 		{"phone", "log.ts.console", "logInfo", true},
 		{"email", "log.ts.console", "UserService.register", false}, // maskEmail()
 	})
-	f := findFlow(r, want{"vn_cccd", "net.ts.axios", "UserService.register", true})
+	f := findFlow(r, want{"national_id", "net.ts.axios", "UserService.register", true})
 	if f != nil && f.Dest.Host != "api.partner-crm.io" {
 		t.Errorf("axios host: %+v", f.Dest)
 	}

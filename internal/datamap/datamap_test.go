@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/GoNetTools/pii-scanner/internal/detect"
-	"github.com/GoNetTools/pii-scanner/internal/finding"
-	"github.com/GoNetTools/pii-scanner/internal/ir"
+	"github.com/GoNetTools/datawarden/internal/detect"
+	"github.com/GoNetTools/datawarden/internal/finding"
+	"github.com/GoNetTools/datawarden/internal/ir"
 )
 
 func TestBuildUsesInjectedClockAndCatalog(t *testing.T) {
@@ -41,7 +41,7 @@ func TestFormats(t *testing.T) {
 			{DataType: "email", SinkRule: "log.go.stdlib", Dest: finding.Destination{Kind: "log", Host: "stderr"}, Violation: true, Function: "p.f", Sink: ir.Pos{File: "a.go", Line: 3}},
 			{DataType: "phone", SinkRule: "storage.go.sql", Dest: finding.Destination{Kind: "first_party", Host: "database", FirstParty: true}, Function: "p.g", Sink: ir.Pos{File: "a.go", Line: 9}},
 		},
-		Literals: []*finding.Literal{{DataType: "vn_cccd", Pos: ir.Pos{File: "seed.csv", Line: 2}, Violation: true}},
+		Literals: []*finding.Literal{{DataType: "us_ssn", Pos: ir.Pos{File: "seed.csv", Line: 2}, Violation: true}},
 		Now:      time.Date(2026, 9, 24, 0, 0, 0, 0, time.UTC),
 		Catalog:  names,
 	})

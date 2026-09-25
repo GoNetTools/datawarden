@@ -1,8 +1,8 @@
 # datawarden
 
-[![ci](https://github.com/GoNetTools/pii-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/GoNetTools/pii-scanner/actions/workflows/ci.yml)
-[![release](https://img.shields.io/github/v/release/GoNetTools/pii-scanner?sort=semver)](https://github.com/GoNetTools/pii-scanner/releases)
-[![Go Reference](https://pkg.go.dev/badge/github.com/GoNetTools/pii-scanner.svg)](https://pkg.go.dev/github.com/GoNetTools/pii-scanner)
+[![ci](https://github.com/GoNetTools/datawarden/actions/workflows/ci.yml/badge.svg)](https://github.com/GoNetTools/datawarden/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/v/release/GoNetTools/datawarden?sort=semver)](https://github.com/GoNetTools/datawarden/releases)
+[![Go Reference](https://pkg.go.dev/badge/github.com/GoNetTools/datawarden.svg)](https://pkg.go.dev/github.com/GoNetTools/datawarden)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 datawarden is a static analyzer that finds **sensitive data flowing into places it shouldn't go**: logs, crash reporters, analytics SDKs, third-party APIs, device storage and other apps. It also catches **sensitive values committed to the repository**: real personal data in fixtures, samples and seed files, and live keys and tokens in config files.
@@ -57,15 +57,15 @@ The Python, Java, Kotlin, Swift and TypeScript frontends use tree-sitter, whose 
 
 | Option | Languages | Notes |
 |---|---|---|
-| [Release archive](https://github.com/GoNetTools/pii-scanner/releases/latest) `datawarden_<os>_<arch>` | all | linux amd64/arm64 (static), macOS amd64/arm64, windows amd64 |
+| [Release archive](https://github.com/GoNetTools/datawarden/releases/latest) `datawarden_<os>_<arch>` | all | linux amd64/arm64 (static), macOS amd64/arm64, windows amd64 |
 | `docker run --rm -v "$PWD:/src" ghcr.io/gonettools/datawarden scan .` | all | linux amd64/arm64; includes Go and git |
-| `CGO_ENABLED=1 go install github.com/GoNetTools/pii-scanner/cmd/datawarden@latest` | all | Go 1.26+ and a C compiler |
-| `CGO_ENABLED=0 go install github.com/GoNetTools/pii-scanner/cmd/datawarden@latest` | Go + literal detector | no C compiler; tree-sitter languages are reported as skipped |
+| `CGO_ENABLED=1 go install github.com/GoNetTools/datawarden/cmd/datawarden@latest` | all | Go 1.26+ and a C compiler |
+| `CGO_ENABLED=0 go install github.com/GoNetTools/datawarden/cmd/datawarden@latest` | Go + literal detector | no C compiler; tree-sitter languages are reported as skipped |
 
 ```sh
 # Linux/macOS: download, verify and install the latest release
 os=$(uname -s | tr A-Z a-z); arch=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
-base=https://github.com/GoNetTools/pii-scanner/releases/latest/download
+base=https://github.com/GoNetTools/datawarden/releases/latest/download
 curl -sSfL -O "$base/datawarden_${os}_${arch}.tar.gz" -O "$base/checksums.txt"
 grep " datawarden_${os}_${arch}.tar.gz$" checksums.txt | shasum -a 256 -c -
 tar -xzf "datawarden_${os}_${arch}.tar.gz" datawarden && sudo install datawarden /usr/local/bin/
@@ -154,7 +154,7 @@ Every data type belongs to a class, and every finding carries its class (`class`
 
 ## Source detectors
 
-**1. Identifier names.** Identifiers are split on camelCase, PascalCase, ACRONYMS, snake/kebab case and letter/digit boundaries. Token sequences are matched against the taxonomy (30 data types), for example:
+**1. Identifier names.** Identifiers are split on camelCase, PascalCase, ACRONYMS, snake/kebab case and letter/digit boundaries. Token sequences are matched against the taxonomy (29 data types), for example:
 
 | Data type | Identifiers |
 |---|---|
@@ -195,9 +195,8 @@ A value whose type is a data class/entity with sensitive fields (a `Customer`) c
 
 | Detector | Validation |
 |---|---|
-| Phone, national ID | numbering-plan prefixes, check digits and structure (region code, birth year); placeholders like `0123456789` rejected; ID numbers need a label on the line |
 | Email | skips `example.com`, role accounts (`noreply@`, `support@`), author/copyright lines, npm scopes, Kotlin `this@label` |
-| Payment card | Luhn + issuer prefix (Visa, Mastercard, Amex, JCB, UnionPay and national schemes); well-known test cards skipped |
+| Payment card | Luhn + issuer prefix (Visa, Mastercard, Amex, JCB, Discover, UnionPay); well-known test cards skipped |
 | IBAN | mod-97; documentation IBANs skipped |
 | US SSN | area/group/serial rules; advertising SSNs skipped |
 | Secrets | the taxonomy's value patterns: AWS access key ids, Stripe, Google, SendGrid, Anthropic and OpenAI API keys, GitHub, GitLab and Slack tokens, JWTs, private key blocks. Documentation values (`AKIAIOSFODNN7EXAMPLE`, the jwt.io sample), `xxxx` and `${VAR}` templates, and low-entropy strings are skipped |
@@ -307,7 +306,7 @@ jobs:
         with: { fetch-depth: 0 }
       - uses: actions/setup-go@v7          # only for Go code
         with: { go-version-file: go.mod }
-      - uses: GoNetTools/pii-scanner@v0
+      - uses: GoNetTools/datawarden@v0
 ```
 
 The action installs the release binary (verified against the release's `checksums.txt`), restores the analysis cache saved by the last run on the base branch, runs `datawarden scan --diff origin/<base>` on pull requests (full scan on pushes), uploads SARIF to code scanning, writes the Markdown summary to the job summary, creates or updates one PR comment, and fails the job on new violations. Inputs: `version`, `repository`, `path`, `args`, `diff`, `sarif`, `comment`, `fail-on-new`, `token`. Pin `@v0` to follow 0.x releases, or a full tag or commit SHA.
@@ -323,7 +322,7 @@ Only the literal detector runs at commit time; full tracing is too slow for a ho
 ```yaml
 # .pre-commit-config.yaml
 repos:
-  - repo: https://github.com/GoNetTools/pii-scanner
+  - repo: https://github.com/GoNetTools/datawarden
     rev: v0.1.0
     hooks:
       - id: datawarden          # or datawarden-docker
@@ -351,7 +350,7 @@ datawarden favours explainable, low-noise results over completeness. Every findi
 - Go interface calls are matched by the interface method (rules can target `io.Writer.Write`); implementations are not enumerated.
 - Python/Java/Kotlin/Swift/TypeScript resolution is syntactic: no type inference across generics, overloads share an ID, reflection/DI-provided instances resolve only through declared types or receiver-name rules.
 - Dynamic destinations (URLs built at runtime) show up as `network (unknown host)`.
-- Phone and national-ID *values* are validated for a limited set of national formats; other countries' numbers are found through names and schema hints, not as committed literals.
+- Phone and national ID numbers are found through names and schema hints, not as committed values: the literal detector does not report them (US SSNs excepted).
 - Secret *values* are recognised only for the providers in the taxonomy's value patterns; a generic `password = "..."` assignment is not reported as a literal, because it is almost always a test or placeholder value.
 - Name-based sources depend on naming. Add explicit hints (`pii:"..."` tags, `@PII`, proto options, SQL comments) where names are unhelpful, and `pii:"-"` to silence a field.
 
@@ -464,7 +463,7 @@ make release-local # release archives for this machine in dist/
 go test -coverpkg=./internal/... ./...   # ~87% of statements; CI fails below 85%
 ```
 
-The version is set with `-ldflags "-X github.com/GoNetTools/pii-scanner/internal/app.Version=v1.2.3"` (`scripts/release/build.sh` does this).
+The version is set with `-ldflags "-X github.com/GoNetTools/datawarden/internal/app.Version=v1.2.3"` (`scripts/release/build.sh` does this).
 
 Adding a language or a rule is a checklist in [CONTRIBUTING.md](CONTRIBUTING.md#add-a-language), and tests enforce each step: `TestEveryLanguageIsWired` (language table, frontends and rules agree), `TestFrontendConformance` (the frontend lowers every scenario), `TestRuleExamples` (every rule has an example that passes) and `TestBuiltinRuleConventions` (ids, categories, data types).
 

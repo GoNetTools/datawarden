@@ -7,9 +7,9 @@ export async function fetchLead(phoneNumber: string) {
   await fetch("https://crm.vendor.example/leads", { method: "POST", body: JSON.stringify({ phone: phoneNumber }) });
 }
 
-export async function axiosPost(cccd: string) {
+export async function axiosPost(nationalId: string) {
   // ruleid: net.ts.axios
-  await axios.post("https://kyc.vendor.example/check", { cccd });
+  await axios.post("https://kyc.vendor.example/check", { nationalId });
 }
 
 export function beaconLocation() {

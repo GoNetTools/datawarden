@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/GoNetTools/pii-scanner/internal/ir"
+	"github.com/GoNetTools/datawarden/internal/ir"
 )
 
 type stubFE struct{ o Options }

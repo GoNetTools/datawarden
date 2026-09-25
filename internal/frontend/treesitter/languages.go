@@ -3,7 +3,7 @@
 
 package treesitter
 
-import "github.com/GoNetTools/pii-scanner/internal/lang"
+import "github.com/GoNetTools/datawarden/internal/lang"
 
 // Languages are the languages this package provides frontends for. Register
 // adds them (cgo builds) or records them as unavailable (CGO_ENABLED=0).

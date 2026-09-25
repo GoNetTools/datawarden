@@ -8,13 +8,13 @@ import (
 	"io/fs"
 	"time"
 
-	"github.com/GoNetTools/pii-scanner/internal/config"
-	"github.com/GoNetTools/pii-scanner/internal/datamap"
-	"github.com/GoNetTools/pii-scanner/internal/finding"
-	"github.com/GoNetTools/pii-scanner/internal/ir"
-	"github.com/GoNetTools/pii-scanner/internal/report"
-	"github.com/GoNetTools/pii-scanner/internal/rules"
-	"github.com/GoNetTools/pii-scanner/internal/ruletest"
+	"github.com/GoNetTools/datawarden/internal/config"
+	"github.com/GoNetTools/datawarden/internal/datamap"
+	"github.com/GoNetTools/datawarden/internal/finding"
+	"github.com/GoNetTools/datawarden/internal/ir"
+	"github.com/GoNetTools/datawarden/internal/report"
+	"github.com/GoNetTools/datawarden/internal/rules"
+	"github.com/GoNetTools/datawarden/internal/ruletest"
 )
 
 // The services the commands use besides the Workspace, Scanner and cache.

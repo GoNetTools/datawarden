@@ -19,9 +19,9 @@ import (
 
 	sitter "github.com/smacker/go-tree-sitter"
 
-	"github.com/GoNetTools/pii-scanner/internal/frontend"
-	"github.com/GoNetTools/pii-scanner/internal/ir"
-	"github.com/GoNetTools/pii-scanner/internal/lang"
+	"github.com/GoNetTools/datawarden/internal/frontend"
+	"github.com/GoNetTools/datawarden/internal/ir"
+	"github.com/GoNetTools/datawarden/internal/lang"
 )
 
 type srcFile struct {

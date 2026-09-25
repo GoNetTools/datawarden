@@ -4,7 +4,7 @@
 // Package finding holds the scanner's result types.
 package finding
 
-import "github.com/GoNetTools/pii-scanner/internal/ir"
+import "github.com/GoNetTools/datawarden/internal/ir"
 
 // Destination is where a sink sends data.
 type Destination struct {
@@ -17,7 +17,7 @@ type Destination struct {
 
 // Flow is a path from a PII source to a sink.
 type Flow struct {
-	DataType   string      `json:"data_type"`       // "email", "vn_cccd"
+	DataType   string      `json:"data_type"`       // "email", "national_id"
 	Class      string      `json:"class,omitempty"` // "pii", "phi", "pci", "credential"; set by the policy
 	Source     ir.Pos      `json:"source"`
 	Sink       ir.Pos      `json:"sink"`

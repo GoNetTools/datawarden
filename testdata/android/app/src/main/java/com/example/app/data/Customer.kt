@@ -8,6 +8,6 @@ data class Customer(
     val id: Long,
     @ColumnInfo(name = "phone_number") val contact: String,
     val email: String?,
-    val cccd: String,
+    val nationalId: String,
     val nickname: String,
 )

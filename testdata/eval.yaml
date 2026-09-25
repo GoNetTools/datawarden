@@ -28,16 +28,18 @@ cases:
     dir: goapp
     langs: [go]
     min_precision: 1.0
-    min_recall: 1.0
+    min_recall: 0.75
     flows:
       - {data_type: phone, sink_rule: log.go.stdlib, function: service.Register, note: "Contact is the phone_number column"}
       - {data_type: email, sink_rule: sdk.go.sentry.scope, function: service.Register$1}
-      - {data_type: vn_cccd, sink_rule: net.go.http_body, function: service.sendSMS, note: "c.CCCD in Register, two calls deep through notify()"}
+      - {data_type: national_id, sink_rule: net.go.http_body, function: service.sendSMS, note: "c.NationalID in Register, two calls deep through notify()"}
       - {data_type: phone, sink_rule: log.go.slog, function: service.Handler, note: "request form value named mobileNo"}
       - {data_type: ip_address, sink_rule: log.go.fmt_print, function: service.Handler}
     literals:
-      - {data_type: vn_cccd, file: fixtures/customers.json, line: 2}
-      - {data_type: phone, file: fixtures/customers.json, line: 2}
+      - {data_type: national_id, file: fixtures/customers.json, line: 2,
+         note: "known miss: national ID numbers are found through names, not as committed values"}
+      - {data_type: phone, file: fixtures/customers.json, line: 2,
+         note: "known miss: phone numbers are found through names, not as committed values"}
       - {data_type: email, file: fixtures/customers.json, line: 2}
 
   - name: android
@@ -50,7 +52,7 @@ cases:
       - {data_type: dob, sink_rule: log.jvm.stdout, function: SignupViewModel.track}
       - {data_type: phone, sink_rule: log.android.logcat, function: CustomerRepo.save}
       - {data_type: email, sink_rule: sdk.sentry.set_user, function: CustomerRepo.save}
-      - {data_type: vn_cccd, sink_rule: sdk.firebase.crashlytics.custom_key, function: CustomerRepo.save}
+      - {data_type: national_id, sink_rule: sdk.firebase.crashlytics.custom_key, function: CustomerRepo.save}
       - {data_type: phone, sink_rule: storage.android.shared_prefs, function: CustomerRepo.save}
       - {data_type: person_name, sink_rule: log.android.logcat, function: CustomerRepo.save,
          note: "known miss: SignupViewModel.submit passes fullName as the nickname constructor argument, which save() logs"}
@@ -67,7 +69,7 @@ cases:
       - {data_type: email, sink_rule: sdk.ts.sentry.set_user, function: UserService.register}
       - {data_type: phone, sink_rule: sdk.ts.mixpanel, function: UserService.register}
       - {data_type: dob, sink_rule: storage.ts.web_storage, function: UserService.register}
-      - {data_type: vn_cccd, sink_rule: net.ts.axios, function: UserService.register}
+      - {data_type: national_id, sink_rule: net.ts.axios, function: UserService.register}
       - {data_type: phone, sink_rule: log.ts.console, function: logInfo, note: "logInfo is called with user.phoneNumber"}
       - {data_type: email, sink_rule: storage.ts.web_storage, function: onLogin}
     ambiguous:
@@ -75,7 +77,7 @@ cases:
       # if baseUrl is not the application's own backend.
       - {data_type: email, sink_rule: net.ts.fetch, function: UserService.register}
       - {data_type: phone, sink_rule: net.ts.fetch, function: UserService.register}
-      - {data_type: vn_cccd, sink_rule: net.ts.fetch, function: UserService.register}
+      - {data_type: national_id, sink_rule: net.ts.fetch, function: UserService.register}
 
   # testdata/vulnshop: a small shop (Go API, Python recommender, TypeScript
   # checkout, Kotlin and Java Android, Swift iOS, CSV seed data) that is
@@ -92,7 +94,7 @@ cases:
       - {data_type: email, sink_rule: sdk.go.sentry.scope, function: api.Server.Signup$1}
       - {data_type: dob, sink_rule: sdk.go.sentry.scope, function: api.Server.Signup}
       - {data_type: phone, sink_rule: net.go.http_form, function: api.sendOTP, note: "Contact is the phone_number column"}
-      - {data_type: vn_cccd, sink_rule: log.go.fmt_print, function: api.writeAudit, note: "three calls deep: audit → record → writeAudit"}
+      - {data_type: national_id, sink_rule: log.go.fmt_print, function: api.writeAudit, note: "three calls deep: audit → record → writeAudit"}
       - {data_type: email, sink_rule: log.go.slog, function: api.Server.Login}
       - {data_type: ip_address, sink_rule: net.go.http_get, function: api.Server.Login}
       - {data_type: credit_card, sink_rule: log.go.stdlib, function: api.Server.Charge, note: "wrapped into an error first"}
@@ -138,10 +140,11 @@ cases:
       - {data_type: credit_card, sink_rule: ipc.swift.pasteboard, function: CheckoutViewModel.copyCard}
       - {data_type: email, sink_rule: net.swift.urlsession, function: CheckoutViewModel.sendReceipt}
     literals:
-      - {data_type: phone, file: seed/customers.csv, line: 2}
+      - {data_type: phone, file: seed/customers.csv, line: 2,
+         note: "known miss: phone numbers are found through names, not as committed values"}
       - {data_type: email, file: seed/customers.csv, line: 2}
-      - {data_type: vn_cccd, file: seed/customers.csv, line: 2,
-         note: "known miss: CCCD needs a label on its own line; in CSV the label is the header row"}
+      - {data_type: national_id, file: seed/customers.csv, line: 2,
+         note: "known miss: national ID numbers are found through names, not as committed values"}
       - {data_type: credit_card, file: seed/customers.csv, line: 2}
       - {data_type: bank_account, file: seed/customers.csv, line: 2}
       - {data_type: api_key, file: backend/deploy/staging.env, line: 4}

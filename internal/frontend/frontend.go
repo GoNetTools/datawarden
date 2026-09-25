@@ -13,7 +13,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/GoNetTools/pii-scanner/internal/ir"
+	"github.com/GoNetTools/datawarden/internal/ir"
 )
 
 // Frontend converts source files of one language into IR.

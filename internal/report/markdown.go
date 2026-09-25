@@ -8,7 +8,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/GoNetTools/pii-scanner/internal/ir"
+	"github.com/GoNetTools/datawarden/internal/ir"
 )
 
 // CommentMarker lets CI find and update its previous PR comment.

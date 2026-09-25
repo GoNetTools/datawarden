@@ -9,7 +9,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/GoNetTools/pii-scanner/internal/ir"
+	"github.com/GoNetTools/datawarden/internal/ir"
 )
 
 // Text renders a human-readable report.

@@ -7,7 +7,7 @@ type Customer struct {
 	FullName    string `json:"full_name" db:"full_name"`
 	Email       string `json:"email" db:"email"`
 	Contact     string `json:"contact" db:"phone_number"` // phone, found through the column name
-	CCCD        string `json:"cccd" db:"cccd"`
+	NationalID  string `json:"national_id" db:"national_id"`
 	DateOfBirth string `json:"date_of_birth" db:"date_of_birth"`
 	Nickname    string `json:"nickname" db:"nickname"`
 	Note        string `json:"note" pii:"-"` // explicitly not personal data

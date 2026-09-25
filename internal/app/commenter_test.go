@@ -7,8 +7,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/GoNetTools/pii-scanner/internal/cicomment"
-	"github.com/GoNetTools/pii-scanner/internal/cli"
+	"github.com/GoNetTools/datawarden/internal/cicomment"
+	"github.com/GoNetTools/datawarden/internal/cli"
 )
 
 // On a push build there is no pull request: the adapter reports the CLI's

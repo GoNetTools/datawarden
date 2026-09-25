@@ -165,8 +165,7 @@ func BuiltinTaxonomy() Taxonomy {
 }
 
 // DefaultTaxonomy returns a copy of the built-in data types. Patterns are
-// English identifier words; identity documents with no English name keep
-// their own acronym (cccd, cmnd, bhxh, bhyt).
+// English identifier words.
 func DefaultTaxonomy() []DataType { return BuiltinTaxonomy().Types }
 
 // DefaultClasses returns the built-in classes.

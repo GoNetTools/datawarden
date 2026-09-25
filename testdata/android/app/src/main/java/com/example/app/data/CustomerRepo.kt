@@ -12,7 +12,7 @@ class CustomerRepo(private val context: Context) {
     fun save(customer: Customer) {
         Log.d(TAG, "saving ${customer.contact}")
         Sentry.setUser(User().apply { email = customer.email })
-        FirebaseCrashlytics.getInstance().setCustomKey("cccd", customer.cccd)
+        FirebaseCrashlytics.getInstance().setCustomKey("national_id", customer.nationalId)
         prefs.edit().putString("phone", customer.contact).apply()
         Log.i(TAG, "saved id=${customer.id} nick=${customer.nickname}")
         audit(customer.contact.maskPhone())

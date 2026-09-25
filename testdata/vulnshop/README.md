@@ -32,7 +32,7 @@ Or on GitHub: **Actions → demo → Run workflow**. The job summary shows the f
 | 2 | Email set as the Sentry user | `api.Server.Signup` (closure) | `sdk.go.sentry.scope` |
 | 3 | Date of birth in a Sentry message | `api.Server.Signup` | `sdk.go.sentry.scope` |
 | 4 | Phone number posted to an SMS vendor | `api.sendOTP` | `net.go.http_form` |
-| 5 | CCCD printed three calls deep | `api.writeAudit` | `log.go.fmt_print` |
+| 5 | National ID number printed three calls deep | `api.writeAudit` | `log.go.fmt_print` |
 | 6 | Email in a failed-login log | `api.Server.Login` | `log.go.slog` |
 | 7 | Client IP sent to a geo lookup | `api.Server.Login` | `net.go.http_get` |
 | 8 | Card number wrapped into an error, then logged | `api.Server.Charge` | `log.go.stdlib` |
@@ -53,7 +53,7 @@ Or on GitHub: **Actions → demo → Run workflow**. The job summary shows the f
 | 25 | Last known location sent to Amplitude | `CheckoutActivity.trackDelivery` | `sdk.amplitude` |
 | 26 | Email in an implicit broadcast | `ProfileSync.publish` | `ipc.android.broadcast` |
 | 27 | Date of birth in logcat | `ProfileSync.publish` | `log.android.logcat` |
-| 28–32 | Phone, email, CCCD, card and IBAN committed in seed data | `seed/customers.csv:2` | literal detectors |
+| 28–32 | Phone, email, national ID, card and IBAN committed in seed data | `seed/customers.csv:2` | literal detectors |
 | 33 | Password in a debug log | `api.Server.Login` | `log.go.stdlib` |
 | 34 | Medical record number in a Sentry message | `api.Server.Refill` | `sdk.go.sentry.scope` |
 | 35 | Access token in `localStorage` | `signIn` | `storage.ts.web_storage` |
@@ -74,8 +74,8 @@ Traps that must stay quiet: database inserts (first party), customer and order I
 
 ## Known results
 
-datawarden finds 49 of the 51 leaks with one false positive (precision 0.98, recall 0.96):
+datawarden finds 48 of the 51 leaks with one false positive (precision 0.98, recall 0.94):
 
 - **Missed #24:** Kotlin's property syntax `telephony.line1Number` is not matched by the source rule for `getLine1Number()`.
-- **Missed #30:** the CCCD detector needs a label on the same line as the value; in a CSV the label is in the header row.
+- **Missed #28 and #30:** phone and national ID numbers are found through identifier names and schema hints, not as committed values, so the ones in the seed CSV are not reported.
 - **False positive:** `localStorage.setItem("emailOptIn", "true")` is reported as an email because of the key name. Raising `min_confidence` to 0.65 removes it without losing any leak.

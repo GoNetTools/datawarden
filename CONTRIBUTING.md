@@ -8,7 +8,7 @@ By taking part you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md). Se
 
 This is a sensitive-data scanner, so issues, pull requests and fixtures are full of phone numbers, ID numbers, card numbers, tokens and emails. **Use synthetic values only.**
 
-- Invent values that still pass validation: an unallocated phone number with a valid carrier prefix, an ID number with a valid structure, a card number that passes Luhn, `@example.com` emails.
+- Invent values that still pass validation: an SSN with a valid structure, a card number that passes Luhn, an IBAN with a valid checksum, `@example.com` emails.
 - Put fixture files under `testdata/` (excluded in `.datawardenignore`) so datawarden's own CI scan does not flag them.
 - When you paste datawarden output into an issue, the values are already masked. Keep them that way.
 
@@ -21,7 +21,7 @@ You need:
 - `git`, for `--diff` mode and its tests.
 
 ```sh
-git clone https://github.com/GoNetTools/pii-scanner && cd datawarden
+git clone https://github.com/GoNetTools/datawarden && cd datawarden
 go test ./...                    # everything (cgo)
 CGO_ENABLED=0 go test ./...      # Go frontend + literal detector only
 go build -o bin/datawarden ./cmd/datawarden && ./bin/datawarden scan testdata/web --root testdata/web --no-baseline
@@ -115,14 +115,4 @@ A new language touches five places, and a test checks each one:
 
 1. Move the **Unreleased** entries in `CHANGELOG.md` under the new version and merge that to `main`.
 2. Tag and push: `git tag -a v0.2.0 -m v0.2.0 && git push origin v0.2.0`.
-3. The `release` workflow tests the tag, builds the binaries (linux/macOS/windows, amd64/arm64), publishes the GitHub Release with checksums, pushes `ghcr.io/gonettools/datawarden`, and moves the `v0` tag that `uses: GoNetTools/pii-scanner@v0` resolves to. Tags with a suffix (`v0.2.0-rc.1`) become pre-releases and leave `v0` and `latest` alone.
-
-## Renaming the repository to datawarden (maintainers)
-
-The tool is called datawarden, but the repository, the Go module path and the GitHub Action reference still use `GoNetTools/pii-scanner`. When the repository is renamed:
-
-1. **Rename on GitHub** (Settings → General → Repository name). GitHub redirects the old URLs, clones and `uses: GoNetTools/pii-scanner@v0` to the new name, so existing users keep working.
-2. **Change the module path** in one commit: `go mod edit -module github.com/GoNetTools/datawarden`, then replace the import prefix everywhere (`git grep -l 'github.com/GoNetTools/pii-scanner' | xargs sed -i 's#github.com/GoNetTools/pii-scanner#github.com/GoNetTools/datawarden#g'`), then `gofmt -l cmd internal` and `go build ./...`. The release build reads the module path from `go list -m`, so its `-X .../internal/app.Version` flag follows on its own.
-3. **Update the remaining references**: `git grep -n pii-scanner` should then list only the badges and links in `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, `NOTICE`, `CHANGELOG.md`, `Dockerfile` (the image source label), `.github/ISSUE_TEMPLATE/config.yml`, `.github/workflows/release.yml` (a comment), `action.yml` and `examples/github/datawarden.yml`. Replace them, and change `uses: GoNetTools/pii-scanner@v0` to `uses: GoNetTools/datawarden@v0` in the README and the example workflow.
-4. **Check**: `go test ./...`, `go run ./cmd/datawarden-bench -check`, `go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12`, and `git grep -n pii-scanner` returns nothing but the CHANGELOG's history.
-5. **Release** a new minor version so `go install github.com/GoNetTools/datawarden/cmd/datawarden@latest` resolves, and note the new module path in the CHANGELOG. The old module path keeps serving the versions already published.
+3. The `release` workflow tests the tag, builds the binaries (linux/macOS/windows, amd64/arm64), publishes the GitHub Release with checksums, pushes `ghcr.io/gonettools/datawarden`, and moves the `v0` tag that `uses: GoNetTools/datawarden@v0` resolves to. Tags with a suffix (`v0.2.0-rc.1`) become pre-releases and leave `v0` and `latest` alone.

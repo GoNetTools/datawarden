@@ -15,7 +15,7 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
-const module = "github.com/GoNetTools/pii-scanner"
+const module = "github.com/GoNetTools/datawarden"
 
 // vocabulary packages hold the types every component exchanges (the IR,
 // findings, the language table). Calling their functions and methods is

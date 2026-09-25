@@ -13,12 +13,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/GoNetTools/pii-scanner/internal/datamap"
-	"github.com/GoNetTools/pii-scanner/internal/finding"
-	"github.com/GoNetTools/pii-scanner/internal/lang"
-	"github.com/GoNetTools/pii-scanner/internal/report"
-	"github.com/GoNetTools/pii-scanner/internal/rules"
-	"github.com/GoNetTools/pii-scanner/internal/scan"
+	"github.com/GoNetTools/datawarden/internal/datamap"
+	"github.com/GoNetTools/datawarden/internal/finding"
+	"github.com/GoNetTools/datawarden/internal/lang"
+	"github.com/GoNetTools/datawarden/internal/report"
+	"github.com/GoNetTools/datawarden/internal/rules"
+	"github.com/GoNetTools/datawarden/internal/scan"
 )
 
 func (a *App) flagSet(name string) *flag.FlagSet {

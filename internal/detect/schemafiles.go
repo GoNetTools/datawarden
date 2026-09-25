@@ -53,7 +53,12 @@ func ParseProto(path string, src []byte) []*ir.TypeDecl {
 					}
 				}
 				parts = append(parts, m[2])
-				fr.decl = &ir.TypeDecl{Name: strings.Join(parts, "."), Kind: "proto", Lang: "proto", Pos: ir.Pos{File: path, Line: i + 1}}
+				fr.decl = &ir.TypeDecl{
+					Name: strings.Join(parts, "."),
+					Kind: "proto",
+					Lang: "proto",
+					Pos: ir.Pos{File: path, Line: i + 1},
+				}
 				out = append(out, fr.decl)
 			}
 			stack = append(stack, fr)
@@ -75,7 +80,15 @@ func ParseProto(path string, src []byte) []*ir.TypeDecl {
 			}
 			if owner != nil && top.kind != "enum" {
 				if m := reProtoField.FindStringSubmatch(code); m != nil && !isProtoKeyword(m[1]) {
-					f := ir.Field{Name: m[2], Type: m[1], Pos: ir.Pos{File: path, Line: i + 1}, Tags: map[string]string{}}
+					f := ir.Field{
+						Name: m[2],
+						Type: m[1],
+						Pos: ir.Pos{
+							File: path,
+							Line: i + 1
+						},
+						Tags: map[string]string{},
+					}
 					if o := reProtoPIIOpt.FindStringSubmatch(code); o != nil {
 						f.Tags["pii"] = o[1]
 					} else if c := reLinePII.FindStringSubmatch(comment); c != nil {

@@ -2,7 +2,7 @@ datawarden
 Copyright 2026 The datawarden Authors
 
 This product includes software developed by The datawarden Authors
-(https://github.com/GoNetTools/pii-scanner).
+(https://github.com/GoNetTools/datawarden).
 
 Binary releases and container images also contain third-party components
 (Go standard library, golang.org/x/tools, go-tree-sitter and the tree-sitter

@@ -21,7 +21,7 @@ This document explains how datawarden is put together: the pipeline a scan goes 
 datawarden is a static analyzer. It reads a repository without running it and reports two kinds of findings:
 
 - **Flows:** sensitive data (a *source*: a variable named `email` or `accessToken`, a field tagged `pii:"phone"`, the result of `telephony.getLine1Number()`) reaching a place it should not go (a *sink*: a logger, a crash reporter, an analytics SDK, a third-party HTTP API, device storage).
-- **Literals:** real-looking sensitive values committed to the repository (a valid phone number, card number or citizen ID in a fixture or seed file; a cloud access key or a token in a config file).
+- **Literals:** real-looking sensitive values committed to the repository (a valid card number, IBAN or US Social Security number in a fixture or seed file; a cloud access key or a token in a config file).
 
 What counts as sensitive is data, not code: the [taxonomy](#the-taxonomy-data-types-and-classes) groups data types into classes (personal data, health information, cardholder data, credentials), and the analysis, the policy and the reports treat a new type or class like the built-in ones.
 
@@ -54,7 +54,7 @@ flowchart TD
 
 1. **Session.** The command finds the repository root, loads `.datawarden.yaml` and the rules (built-in plus the repository's `.datawarden/rules/`).
 2. **File selection.** The scanner lists files (skipping build output, dependencies and `.datawardenignore` patterns) and decides what to analyse: everything, the paths given, or in PR mode the changed files plus their callers from the cached call graph.
-3. **Literal scan.** Text files are checked for committed personal data by validating detectors (Luhn, IBAN checksum, national-ID structure, phone prefixes, secret value patterns) and nearby labels.
+3. **Literal scan.** Text files are checked for committed personal data by validating detectors (Luhn, IBAN checksum, SSN structure, email filters, secret value patterns) and nearby labels.
 4. **Lowering.** Each language's frontend converts its files into IR functions and type declarations.
 5. **Schema.** Declared types, protobuf messages and SQL tables become schema hints: "field `Customer.Contact` holds a phone number".
 6. **Analysis.** The taint engine follows personal data through the IR to sinks and produces flows. Summaries and the call graph go into the cache.

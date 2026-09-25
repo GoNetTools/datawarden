@@ -14,9 +14,9 @@ import (
 	"github.com/smacker/go-tree-sitter/typescript/tsx"
 	"github.com/smacker/go-tree-sitter/typescript/typescript"
 
-	"github.com/GoNetTools/pii-scanner/internal/frontend"
-	"github.com/GoNetTools/pii-scanner/internal/ir"
-	"github.com/GoNetTools/pii-scanner/internal/lang"
+	"github.com/GoNetTools/datawarden/internal/frontend"
+	"github.com/GoNetTools/datawarden/internal/ir"
+	"github.com/GoNetTools/datawarden/internal/lang"
 )
 
 // NewTypeScript returns the typescript frontend.

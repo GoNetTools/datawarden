@@ -13,15 +13,15 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/GoNetTools/pii-scanner/internal/analysis"
-	"github.com/GoNetTools/pii-scanner/internal/cache"
-	"github.com/GoNetTools/pii-scanner/internal/config"
-	"github.com/GoNetTools/pii-scanner/internal/detect"
-	"github.com/GoNetTools/pii-scanner/internal/finding"
-	"github.com/GoNetTools/pii-scanner/internal/frontend"
-	"github.com/GoNetTools/pii-scanner/internal/ingest"
-	"github.com/GoNetTools/pii-scanner/internal/ir"
-	"github.com/GoNetTools/pii-scanner/internal/rules"
+	"github.com/GoNetTools/datawarden/internal/analysis"
+	"github.com/GoNetTools/datawarden/internal/cache"
+	"github.com/GoNetTools/datawarden/internal/config"
+	"github.com/GoNetTools/datawarden/internal/detect"
+	"github.com/GoNetTools/datawarden/internal/finding"
+	"github.com/GoNetTools/datawarden/internal/frontend"
+	"github.com/GoNetTools/datawarden/internal/ingest"
+	"github.com/GoNetTools/datawarden/internal/ir"
+	"github.com/GoNetTools/datawarden/internal/rules"
 )
 
 // ---- fakes ----

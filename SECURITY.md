@@ -6,7 +6,7 @@ datawarden looks for personal data in other people's code, so it handles sensiti
 
 **Please do not open a public issue, discussion or pull request for a security problem.**
 
-Report it privately through GitHub: go to the repository's **Security** tab and choose **Report a vulnerability** ([direct link](https://github.com/GoNetTools/pii-scanner/security/advisories/new)). Include:
+Report it privately through GitHub: go to the repository's **Security** tab and choose **Report a vulnerability** ([direct link](https://github.com/GoNetTools/datawarden/security/advisories/new)). Include:
 
 - the datawarden version (`datawarden version`) and how you installed it (release binary, Docker image, `go install`, GitHub Action, pre-commit);
 - what an attacker controls (the scanned repository, its `.datawarden.yaml` or rule files, a pull request, CI environment variables, …) and what they gain;
@@ -34,7 +34,7 @@ Out of scope (please open a normal issue instead):
 
 ## How datawarden handles scanned data
 
-- **Values are masked.** Literal findings show masked values (for example `091*****78`). The baseline stores a truncated SHA-256 of the value, never the value itself. Phone and ID numbers have few enough possible values that such a hash can be brute-forced, so treat the baseline as no more secret than the files it describes, and remove real personal data from the repository instead of baselining it.
+- **Values are masked.** Literal findings show masked values (for example `536******99`). The baseline stores a truncated SHA-256 of the value, never the value itself. Card and ID numbers have few enough possible values that such a hash can be brute-forced, so treat the baseline as no more secret than the files it describes, and remove real personal data from the repository instead of baselining it.
 - **Scans are offline.** Only `datawarden comment` (which the GitHub Action calls) talks to the network, to post the Markdown summary to the GitHub or GitLab API with the token from the environment.
 - **Scanning Go code runs the Go toolchain.** The Go frontend loads packages with `go/packages`, which runs `go list` and compiles dependencies for type information (including cgo preprocessing), and may download modules or the toolchain named in `go.mod`, as `go build` would. Treat scanning untrusted Go code like building it: run it in CI or in the Docker image, not on a workstation with secrets.
 - Kotlin, Java and TypeScript are parsed with tree-sitter; no code from the scanned repository is executed for them.

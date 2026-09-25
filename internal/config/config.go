@@ -13,7 +13,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/GoNetTools/pii-scanner/internal/lang"
+	"github.com/GoNetTools/datawarden/internal/lang"
 )
 
 // FileName is the default config file name at the repository root.
@@ -206,7 +206,7 @@ policy:
   fail_on: [third_party, log, network, storage, ipc]
   # A flow is acceptable if one of these transforms was applied first.
   # Hashes (sha256, hashed) are left out on purpose: phone numbers and
-  # CCCD numbers are low-entropy and hashes of them are reversible.
+  # national ID numbers are low-entropy and hashes of them are reversible.
   safe_transforms: [masked, redacted, encrypted, tokenized, anonymized]
   min_confidence: 0.55
   fail_on_literals: true

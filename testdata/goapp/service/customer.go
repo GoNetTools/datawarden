@@ -17,12 +17,12 @@ func Register(c *model.Customer) {
 	sentry.ConfigureScope(func(s *sentry.Scope) {
 		s.SetUser(sentry.User{ID: fmt.Sprint(c.ID), Email: c.Email})
 	})
-	notify(c.CCCD)
+	notify(c.NationalID)
 	log.Printf("id=%d nick=%s note=%s", c.ID, c.Nickname, c.Note)
 }
 
-func notify(cccd string) {
-	sendSMS("Your ID " + cccd)
+func notify(nationalID string) {
+	sendSMS("Your ID " + nationalID)
 }
 
 func sendSMS(body string) {

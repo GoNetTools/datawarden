@@ -9,7 +9,7 @@
 // unavailable so the Go frontend and the literal detector keep working.
 package treesitter
 
-import "github.com/GoNetTools/pii-scanner/internal/frontend"
+import "github.com/GoNetTools/datawarden/internal/frontend"
 
 // Register records the tree-sitter languages as unavailable.
 func Register(r frontend.Registrar) {

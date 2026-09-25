@@ -6,8 +6,8 @@ package cache
 import (
 	"testing"
 
-	"github.com/GoNetTools/pii-scanner/internal/analysis"
-	"github.com/GoNetTools/pii-scanner/internal/ir"
+	"github.com/GoNetTools/datawarden/internal/analysis"
+	"github.com/GoNetTools/datawarden/internal/ir"
 )
 
 type fakeHasher map[string]string

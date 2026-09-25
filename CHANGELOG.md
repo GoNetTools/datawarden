@@ -9,7 +9,7 @@ All notable changes to datawarden are documented here. The format follows [Keep 
 - Python and Swift frontends, with rules for their logging, crash-reporting, analytics, messaging, HTTP, storage and IPC APIs, annotated examples for every rule, the shared conformance scenarios and construct programs, and planted leaks in `testdata/vulnshop` (a Flask recommender and an iOS app). Swift unified logging (`Logger`, `os_log`) counts only values marked public, since the rest are redacted.
 - `datawarden scan` with full, path, PR (`--diff <ref>`, changed files plus their callers from the cached call graph) and pre-commit (`--literals-only`, `--staged`) modes. Exit codes: 0 clean, 1 new violation, 2 error.
 - Frontends lowering to a shared IR: Go (`go/packages` + SSA), Kotlin, Java and TypeScript/JavaScript (tree-sitter).
-- Source detectors: identifier names (`phoneNumber`, `dateOfBirth`, `fullName`, `ssn`, …), schema hints (Go struct tags and GORM, JPA/Room/Gson/Moshi, TypeORM, protobuf, SQL migrations, explicit `pii` annotations) and validated literal values (phone numbers, national IDs, cards with Luhn, IBAN, SSN, email).
+- Source detectors: identifier names (`phoneNumber`, `dateOfBirth`, `fullName`, `ssn`, …), schema hints (Go struct tags and GORM, JPA/Room/Gson/Moshi, TypeORM, protobuf, SQL migrations, explicit `pii` annotations) and validated literal values (cards with Luhn, IBAN, US SSN, email).
 - 123 embedded sink, source and transform rules for logging, crash reporting, analytics, HTTP clients, storage and IPC, overridable per repository.
 - Interprocedural taint analysis with function summaries cached by file content hash.
 - Baseline with line-independent fingerprints (data type, sink rule, destination, enclosing function).
@@ -27,9 +27,10 @@ All notable changes to datawarden are documented here. The format follows [Keep 
 
 ### Changed
 
-- The README and generated files (`datawarden init`, DPIA text, SARIF help) no longer refer to one country's laws or formats; the detectors are unchanged.
+- The README and generated files (`datawarden init`, DPIA text, SARIF help) no longer refer to one country's laws or formats.
+- Vietnam-specific detection is removed: the `vn_cccd` data type, the Vietnamese mobile number and CCCD/CMND literal detectors, the NAPAS card range and the `bhxh`/`bhyt` identifier words. Phone and national ID numbers are found through names and schema hints; committed phone and ID values are no longer reported as literals (US SSNs still are).
 
-- Renamed from piiflow to **datawarden**: the command is `datawarden` (and `datawarden-bench`), configuration lives in `.datawarden.yaml`, `.datawardenignore` and `.datawarden/`, the image is `ghcr.io/gonettools/datawarden`, release archives are `datawarden_<os>_<arch>`, and the GitLab token variable is `DATAWARDEN_GITLAB_TOKEN`. The Go module path and the GitHub Action reference keep the repository name (`GoNetTools/pii-scanner`) until the repository is renamed. SARIF rule names are `SensitiveDataFlow…` and `CommittedSensitiveValue…`.
+- Renamed from piiflow to **datawarden**: the command is `datawarden` (and `datawarden-bench`), configuration lives in `.datawarden.yaml`, `.datawardenignore` and `.datawarden/`, the image is `ghcr.io/gonettools/datawarden`, release archives are `datawarden_<os>_<arch>`, and the GitLab token variable is `DATAWARDEN_GITLAB_TOKEN`. The repository is now `GoNetTools/datawarden` (was `GoNetTools/pii-scanner`; GitHub redirects the old URLs): the Go module path is `github.com/GoNetTools/datawarden` and the Action is `uses: GoNetTools/datawarden@v0`. SARIF rule names are `SensitiveDataFlow…` and `CommittedSensitiveValue…`.
 - The taxonomy moved from Go code to `internal/detect/builtin/datatypes.yaml`, read strictly and validated; adding a data type, a class or a secret pattern is a YAML change. High severity for identity documents comes from the taxonomy (`severity: high`) instead of a hard-coded list.
 - Rule files are read strictly: unknown keys, unknown `lang` values and ids defined twice in one file are errors.
 - Construct programs for every frontend (control flow, loops, exceptions, ternaries and elvis, destructuring, spread, optional chaining, async, lambdas, statics, channels, goroutines), more unit tests, and a CI floor of 85% statement coverage (81% → 87%).
@@ -43,4 +44,4 @@ All notable changes to datawarden are documented here. The format follows [Keep 
 - A network call's response no longer inherits the taint of its request (a login reply was reported as the password it was sent with).
 - A map or object literal key labels its value (`map[string]any{"email": v}`) even when some type in the repository has a field of the same name.
 
-[Unreleased]: https://github.com/GoNetTools/pii-scanner/commits/main
+[Unreleased]: https://github.com/GoNetTools/datawarden/commits/main

@@ -15,8 +15,8 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/GoNetTools/pii-scanner/internal/analysis"
-	"github.com/GoNetTools/pii-scanner/internal/ir"
+	"github.com/GoNetTools/datawarden/internal/analysis"
+	"github.com/GoNetTools/datawarden/internal/ir"
 )
 
 // FormatVersion changes whenever the on-disk format or the analysis

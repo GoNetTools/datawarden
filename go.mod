@@ -1,4 +1,4 @@
-module github.com/GoNetTools/pii-scanner
+module github.com/GoNetTools/datawarden
 
 go 1.26.0
 

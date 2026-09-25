@@ -12,7 +12,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/GoNetTools/pii-scanner/internal/lang"
+	"github.com/GoNetTools/datawarden/internal/lang"
 )
 
 // File is a repository file selected for scanning.

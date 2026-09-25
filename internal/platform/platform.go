@@ -16,8 +16,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/GoNetTools/pii-scanner/internal/ingest"
-	"github.com/GoNetTools/pii-scanner/internal/scan"
+	"github.com/GoNetTools/datawarden/internal/ingest"
+	"github.com/GoNetTools/datawarden/internal/scan"
 )
 
 // ExecGit runs the git binary (an ingest.Runner).

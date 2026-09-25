@@ -45,8 +45,8 @@ func (s *Server) Signup(w http.ResponseWriter, r *http.Request) {
 	sentry.CaptureMessage("age check failed, dob=" + c.DateOfBirth)
 	// LEAK: phone number sent to an SMS vendor.
 	sendOTP(c.Contact)
-	// LEAK: CCCD, three calls deep before it is printed.
-	audit(c.CCCD)
+	// LEAK: national ID number, three calls deep before it is printed.
+	audit(c.NationalID)
 
 	// SAFE: identifiers, nickname and the pii:"-" note.
 	log.Printf("customer id=%d nickname=%s note=%s", c.ID, c.Nickname, c.Note)

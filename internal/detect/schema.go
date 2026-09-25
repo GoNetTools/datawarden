@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/GoNetTools/pii-scanner/internal/ir"
+	"github.com/GoNetTools/datawarden/internal/ir"
 )
 
 // Hint is a schema-derived statement that a field holds a data type.

@@ -10,8 +10,8 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/GoNetTools/pii-scanner/internal/frontend"
-	"github.com/GoNetTools/pii-scanner/internal/ir"
+	"github.com/GoNetTools/datawarden/internal/frontend"
+	"github.com/GoNetTools/datawarden/internal/ir"
 )
 
 // Sources are read through frontend.Options.FS, so tests need no files on disk.

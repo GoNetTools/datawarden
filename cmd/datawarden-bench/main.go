@@ -28,10 +28,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/GoNetTools/pii-scanner/internal/app"
-	"github.com/GoNetTools/pii-scanner/internal/cli"
-	"github.com/GoNetTools/pii-scanner/internal/eval"
-	"github.com/GoNetTools/pii-scanner/internal/finding"
+	"github.com/GoNetTools/datawarden/internal/app"
+	"github.com/GoNetTools/datawarden/internal/cli"
+	"github.com/GoNetTools/datawarden/internal/eval"
+	"github.com/GoNetTools/datawarden/internal/finding"
 )
 
 func main() {

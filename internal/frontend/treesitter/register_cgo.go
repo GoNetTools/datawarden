@@ -6,8 +6,8 @@
 package treesitter
 
 import (
-	"github.com/GoNetTools/pii-scanner/internal/frontend"
-	"github.com/GoNetTools/pii-scanner/internal/lang"
+	"github.com/GoNetTools/datawarden/internal/frontend"
+	"github.com/GoNetTools/datawarden/internal/lang"
 )
 
 // Register adds the tree-sitter frontends to a registry.

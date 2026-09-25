@@ -12,10 +12,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/GoNetTools/pii-scanner/internal/detect"
-	"github.com/GoNetTools/pii-scanner/internal/finding"
-	"github.com/GoNetTools/pii-scanner/internal/ir"
-	"github.com/GoNetTools/pii-scanner/internal/rules"
+	"github.com/GoNetTools/datawarden/internal/detect"
+	"github.com/GoNetTools/datawarden/internal/finding"
+	"github.com/GoNetTools/datawarden/internal/ir"
+	"github.com/GoNetTools/datawarden/internal/rules"
 )
 
 // Report is everything a renderer needs.
@@ -60,11 +60,11 @@ type Catalog interface {
 
 // Counts summarises the report.
 type Counts struct {
-	NewFlows int
-	NewLiterals int
-	BaselinedFlows int
+	NewFlows          int
+	NewLiterals       int
+	BaselinedFlows    int
 	BaselinedLiterals int
-	Accepted int
+	Accepted          int
 }
 
 // Counts computes summary numbers.

@@ -40,8 +40,6 @@ func TestCardNetworks(t *testing.T) {
 		{"jcb", withCheckDigit("353018274619038"), 0.85},
 		{"discover", withCheckDigit("601173829104736"), 0.8},
 		{"unionpay", withCheckDigit("620583910274618"), 0.8},
-		{"napas", withCheckDigit("970418273645192"), 0.85},
-		{"napas without luhn", breakLuhn(withCheckDigit("970418273645192")), 0.6},
 		{"visa without luhn", breakLuhn(withCheckDigit("453201884730215")), 0},
 		{"documented test card", "4111111111111111", 0},
 		{"unknown network", withCheckDigit("100000384729164"), 0},

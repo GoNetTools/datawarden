@@ -38,7 +38,7 @@ RUN set -eux; \
 FROM golang:1.27-trixie
 LABEL org.opencontainers.image.title="datawarden" \
       org.opencontainers.image.description="Finds sensitive data (PII, PHI, card data, credentials) flowing to logs, analytics/crash SDKs and third parties" \
-      org.opencontainers.image.source="https://github.com/GoNetTools/pii-scanner" \
+      org.opencontainers.image.source="https://github.com/GoNetTools/datawarden" \
       org.opencontainers.image.licenses="Apache-2.0"
 # CI checkouts are often owned by another user; let git (for --diff) read them.
 COPY <<EOT /etc/gitconfig

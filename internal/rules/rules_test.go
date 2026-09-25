@@ -9,8 +9,8 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/GoNetTools/pii-scanner/internal/detect"
-	"github.com/GoNetTools/pii-scanner/internal/ir"
+	"github.com/GoNetTools/datawarden/internal/detect"
+	"github.com/GoNetTools/datawarden/internal/ir"
 )
 
 func TestBuiltinRulesLoad(t *testing.T) {

@@ -36,8 +36,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/GoNetTools/pii-scanner/internal/finding"
-	"github.com/GoNetTools/pii-scanner/internal/rules"
+	"github.com/GoNetTools/datawarden/internal/finding"
+	"github.com/GoNetTools/datawarden/internal/rules"
 )
 
 // Mark is the kind of an annotation.

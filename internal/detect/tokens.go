@@ -14,7 +14,7 @@ import (
 //
 //	phoneNumber     -> [phone number]
 //	USER_EMAIL_ADDR -> [user email addr]
-//	CCCDNumber      -> [cccd number]
+//	SSNNumber       -> [ssn number]
 //	user.email2     -> [user email 2]
 func Tokenize(s string) []string {
 	var out []string
@@ -42,7 +42,7 @@ func Tokenize(s string) []string {
 			flush(i)
 			start = i
 		case unicode.IsUpper(prev) && unicode.IsUpper(r) && i+1 < len(rs) && unicode.IsLower(rs[i+1]):
-			// "CCCDNumber": split before the 'N'.
+			// "SSNNumber": split before the 'N'.
 			flush(i)
 			start = i
 		case unicode.IsDigit(prev) != unicode.IsDigit(r):

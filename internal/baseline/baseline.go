@@ -20,7 +20,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/GoNetTools/pii-scanner/internal/finding"
+	"github.com/GoNetTools/datawarden/internal/finding"
 )
 
 // Version of the baseline file format.

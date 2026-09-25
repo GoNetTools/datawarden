@@ -15,14 +15,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/GoNetTools/pii-scanner/internal/analysis"
-	"github.com/GoNetTools/pii-scanner/internal/config"
-	"github.com/GoNetTools/pii-scanner/internal/detect"
-	"github.com/GoNetTools/pii-scanner/internal/finding"
-	"github.com/GoNetTools/pii-scanner/internal/frontend"
-	"github.com/GoNetTools/pii-scanner/internal/ingest"
-	"github.com/GoNetTools/pii-scanner/internal/ir"
-	"github.com/GoNetTools/pii-scanner/internal/lang"
+	"github.com/GoNetTools/datawarden/internal/analysis"
+	"github.com/GoNetTools/datawarden/internal/config"
+	"github.com/GoNetTools/datawarden/internal/detect"
+	"github.com/GoNetTools/datawarden/internal/finding"
+	"github.com/GoNetTools/datawarden/internal/frontend"
+	"github.com/GoNetTools/datawarden/internal/ingest"
+	"github.com/GoNetTools/datawarden/internal/ir"
+	"github.com/GoNetTools/datawarden/internal/lang"
 )
 
 // Modes.
@@ -159,10 +159,10 @@ func (s *Scanner) Run(ctx context.Context, req Request) (*Result, error) {
 	cfg := req.Config
 	repo := req.Repo
 	res := &Result{
-		Mode: ModeFull, 
-		FilesAnalyzed: map[string]int{}, 
-		Commit: repo.VCS.HeadCommit(ctx), 
-		Started: start
+		Mode:          ModeFull,
+		FilesAnalyzed: map[string]int{},
+		Commit:        repo.VCS.HeadCommit(ctx),
+		Started:       start,
 	}
 
 	all, err := s.Files.List(repo.FS)
@@ -221,17 +221,17 @@ func (s *Scanner) Run(ctx context.Context, req Request) (*Result, error) {
 func (s *Scanner) validate(req Request) error {
 	var missing []string
 	for name, ok := range map[string]bool{
-		"Scanner.Files": s.Files != nil,
+		"Scanner.Files":     s.Files != nil,
 		"Scanner.Frontends": s.Frontends != nil,
-		"Scanner.Analyzer": s.Analyzer != nil,
-		"Scanner.Literals": s.Literals != nil,
-		"Scanner.Schemas": s.Schemas != nil,
-		"Scanner.Clock": s.Clock != nil,
-		"Request.Repo.FS": req.Repo.FS != nil,
-		"Request.Repo.VCS": req.Repo.VCS != nil,
-		"Request.Cache": req.Cache != nil,
-		"Request.Config": req.Config != nil,
-		"Request.Rules": req.Rules != nil,
+		"Scanner.Analyzer":  s.Analyzer != nil,
+		"Scanner.Literals":  s.Literals != nil,
+		"Scanner.Schemas":   s.Schemas != nil,
+		"Scanner.Clock":     s.Clock != nil,
+		"Request.Repo.FS":   req.Repo.FS != nil,
+		"Request.Repo.VCS":  req.Repo.VCS != nil,
+		"Request.Cache":     req.Cache != nil,
+		"Request.Config":    req.Config != nil,
+		"Request.Rules":     req.Rules != nil,
 	} {
 		if !ok {
 			missing = append(missing, name)
@@ -365,11 +365,11 @@ func (s *Scanner) lower(ctx context.Context, req Request, targets []ingest.File,
 		groups[f.Lang] = append(groups[f.Lang], f.Rel)
 	}
 	fopts := frontend.Options{
-		Root: req.Repo.Root,
-		FS: req.Repo.FS,
+		Root:      req.Repo.Root,
+		FS:        req.Repo.FS,
 		BuildTags: cfg.GoBuildTags,
-		Logf: req.Logf,
-		KnownFunc: req.Cache.Has
+		Logf:      req.Logf,
+		KnownFunc: req.Cache.Has,
 	}
 	prog := &ir.Module{}
 	var lowered []string

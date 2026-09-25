@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/GoNetTools/pii-scanner/internal/scan"
+	"github.com/GoNetTools/datawarden/internal/scan"
 )
 
 // runRulesTest checks annotated example code against the repository's
