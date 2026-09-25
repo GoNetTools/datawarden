@@ -3,8 +3,8 @@
 
 //go:build cgo
 
-// Package treesitter provides the Kotlin, Java and TypeScript/JavaScript
-// frontends. They parse with tree-sitter (cgo) and lower syntax to the
+// Package treesitter provides the Kotlin, Java, Python, Swift and
+// TypeScript/JavaScript frontends. They parse with tree-sitter (cgo) and lower syntax to the
 // shared IR with best-effort name and type resolution: imports, declared
 // types of locals/parameters/fields, constructor calls and a program-wide
 // index of classes and functions.

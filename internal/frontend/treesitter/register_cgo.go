@@ -10,11 +10,12 @@ import (
 	"github.com/GoNetTools/pii-scanner/internal/lang"
 )
 
-// Register adds the Kotlin, Java and TypeScript frontends to a registry.
+// Register adds the tree-sitter frontends to a registry.
 func Register(r frontend.Registrar) {
 	factories := map[string]frontend.Factory{
 		lang.Java:       NewJava,
 		lang.Kotlin:     NewKotlin,
+		lang.Python:     NewPython,
 		lang.TypeScript: NewTypeScript,
 	}
 	for _, l := range Languages() {
