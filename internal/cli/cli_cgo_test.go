@@ -20,7 +20,7 @@ func TestProductionWiringHasAllFrontends(t *testing.T) {
 	if code := app.New(&out, &errb).Run(context.Background(), []string{"version"}); code != 0 {
 		t.Fatalf("exit %d: %s", code, errb.String())
 	}
-	if !strings.Contains(out.String(), "frontends: go, java, kotlin, typescript") {
+	if !strings.Contains(out.String(), "frontends: go, java, kotlin, python, swift, typescript") {
 		t.Errorf("version: %s", out.String())
 	}
 }

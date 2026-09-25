@@ -1,0 +1,97 @@
+# Built-in rules for Swift (iOS, macOS). Swift imports whole modules, so
+# callees are named by type as written: `SentrySDK.setUser(user)` is
+# "SentrySDK.setUser" and `Crashlytics.crashlytics().setUserID(id)` is
+# "Crashlytics.crashlytics().setUserID". Logger and os_log messages are
+# redacted unless marked public; the frontend only passes public values.
+
+- id: log.swift.print
+  lang: swift
+  call: ["print", "debugPrint", "NSLog", "dump"]
+  arg: "*"
+  dest: { kind: log, host: console }
+  category: logging
+
+- id: log.swift.os_log
+  lang: swift
+  call: ["os_log", "Logger.debug", "Logger.info", "Logger.notice", "Logger.warning", "Logger.error", "Logger.fault", "Logger.critical",
+         "Logger.log", "Logger.trace"]
+  receiver: "(?i)^(self\\.)?_?(log|logger)$"
+  arg: "*"
+  dest: { kind: log, host: unified-log }
+  category: logging
+
+- id: sdk.swift.sentry
+  lang: swift
+  call: ["SentrySDK.setUser", "SentrySDK.capture", "SentrySDK.addBreadcrumb", "Scope.setUser", "Scope.setExtra", "Scope.setTag", "Scope.setContext"]
+  receiver: "(?i)^scope$"
+  arg: "*"
+  dest: { host: sentry.io, kind: third_party, vendor: Sentry }
+  category: crash_reporting
+
+- id: sdk.swift.firebase.analytics
+  lang: swift
+  call: ["Analytics.logEvent", "Analytics.setUserID", "Analytics.setUserProperty", "Analytics.setDefaultEventParameters"]
+  arg: "*"
+  dest: { host: firebase.google.com, kind: third_party, vendor: Firebase Analytics }
+  category: analytics
+
+- id: sdk.swift.firebase.crashlytics
+  lang: swift
+  call: ["Crashlytics.crashlytics().setUserID", "Crashlytics.crashlytics().setCustomValue", "Crashlytics.crashlytics().setCustomKeysAndValues",
+         "Crashlytics.crashlytics().log", "Crashlytics.crashlytics().record"]
+  receiver: "(?i)^(self\\.)?crashlytics$"
+  arg: "*"
+  dest: { host: firebase.google.com, kind: third_party, vendor: Firebase Crashlytics }
+  category: crash_reporting
+
+- id: sdk.swift.mixpanel
+  lang: swift
+  call: ["Mixpanel.mainInstance().track", "Mixpanel.mainInstance().identify", "Mixpanel.mainInstance().registerSuperProperties", "People.set"]
+  receiver: "(?i)(^(self\\.)?_?mixpanel$|\\.people$)"
+  arg: "*"
+  dest: { host: api.mixpanel.com, kind: third_party, vendor: Mixpanel }
+  category: analytics
+
+- id: sdk.swift.amplitude
+  lang: swift
+  call: ["Amplitude.instance().logEvent", "Amplitude.instance().setUserId", "Amplitude.instance().setUserProperties", "Amplitude.track",
+         "Amplitude.setUserId", "Amplitude.identify"]
+  receiver: "(?i)^(self\\.)?_?amplitude$"
+  arg: "*"
+  dest: { host: api2.amplitude.com, kind: third_party, vendor: Amplitude }
+  category: analytics
+
+- id: storage.swift.user_defaults
+  lang: swift
+  call: ["UserDefaults.standard.set", "UserDefaults.standard.setValue", "UserDefaults.set", "UserDefaults.setValue"]
+  receiver: "(?i)^(self\\.)?_?(defaults|userdefaults|user_defaults)$"
+  arg: 0
+  dest: { kind: storage, host: user-defaults }
+  category: storage
+  description: UserDefaults is an unencrypted plist in the app container; keep personal data in the Keychain.
+
+- id: storage.swift.file
+  lang: swift
+  call: ["FileManager.default.createFile", "FileManager.createFile", "FileHandle.write"]
+  receiver: "(?i)^(self\\.)?_?(file_?handle|handle)$"
+  arg: "*"
+  dest: { kind: storage, host: local-file }
+  category: storage
+
+- id: net.swift.urlsession
+  lang: swift
+  call: ["URLSession.shared.data", "URLSession.shared.dataTask", "URLSession.shared.upload", "URLSession.shared.uploadTask", "URLSession.data",
+         "URLSession.dataTask", "URLSession.upload", "URLSession.uploadTask", "AF.request", "Alamofire.AF.request", "Session.request"]
+  receiver: "(?i)^(self\\.)?_?(session|urlsession|url_session)$"
+  arg: "*"
+  dest: { kind: network }
+  category: network
+
+- id: ipc.swift.pasteboard
+  lang: swift
+  call: ["UIPasteboard.general.string", "UIPasteboard.general.strings", "UIPasteboard.general.url", "UIPasteboard.general.setValue",
+         "UIPasteboard.general.setItems", "UIPasteboard.general.addItems"]
+  receiver: "(?i)^(self\\.)?_?pasteboard$"
+  arg: "*"
+  dest: { kind: ipc, host: pasteboard }
+  category: ipc

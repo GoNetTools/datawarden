@@ -17,7 +17,7 @@ This is a sensitive-data scanner, so issues, pull requests and fixtures are full
 You need:
 
 - **Go**: the version in `go.mod` or newer. CI tests the current and previous Go releases.
-- **A C compiler**, for the tree-sitter frontends (Kotlin, Java, TypeScript) which use cgo: `gcc` or `clang` on Linux/macOS, MinGW-w64 `gcc` on Windows. Without one, `CGO_ENABLED=0` still builds the Go frontend and the literal detector.
+- **A C compiler**, for the tree-sitter frontends (Python, Java, Kotlin, Swift, TypeScript) which use cgo: `gcc` or `clang` on Linux/macOS, MinGW-w64 `gcc` on Windows. Without one, `CGO_ENABLED=0` still builds the Go frontend and the literal detector.
 - `git`, for `--diff` mode and its tests.
 
 ```sh

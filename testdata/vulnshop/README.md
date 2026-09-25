@@ -6,7 +6,9 @@ A small online shop that leaks personal data, health data and credentials on pur
 |---|---|---|
 | API | `backend/` | Go (stdlib + a Sentry stub, so it builds offline) |
 | Checkout page | `web/src/checkout.ts` | TypeScript |
+| Recommender service | `recommender/app/` | Python (Flask) |
 | Android app | `android/.../checkout/CheckoutActivity.kt`, `android/.../profile/ProfileSync.java` | Kotlin, Java |
+| iOS app | `ios/VulnShop/CheckoutViewModel.swift` | Swift |
 | Seed data | `seed/customers.csv` | CSV |
 | Deployment settings | `backend/deploy/staging.env` | env file |
 
@@ -56,12 +58,23 @@ Or on GitHub: **Actions → demo → Run workflow**. The job summary shows the f
 | 34 | Medical record number in a Sentry message | `api.Server.Refill` | `sdk.go.sentry.scope` |
 | 35 | Access token in `localStorage` | `signIn` | `storage.ts.web_storage` |
 | 36–37 | AWS access key id and a service JWT committed | `backend/deploy/staging.env` | `aws-access-key-id`, `jwt` value patterns |
+| 38 | Email in the recommender log | `views:recommendations` | `log.py.logging` |
+| 39 | Phone number as Sentry extra context | `views:recommendations` | `sdk.py.sentry` |
+| 40 | Date of birth posted to an ad-tech partner | `views:recommendations` | `net.py.http` |
+| 41–42 | Email and password printed by a debugging helper | `views:debug_attempt` | `log.py.print` |
+| 43–45 | Whole profile (email, phone, date of birth) pickled to a world-readable file | `store:save_profile` | `storage.py.file` |
+| 46 | Email as the Crashlytics user id | `CheckoutViewModel.placeOrder` | `sdk.swift.firebase.crashlytics` |
+| 47 | Phone number in a Firebase Analytics event | `CheckoutViewModel.placeOrder` | `sdk.swift.firebase.analytics` |
+| 48 | Card number logged with `privacy: .public` | `CheckoutViewModel.placeOrder` | `log.swift.os_log` |
+| 49 | Email in UserDefaults | `CheckoutViewModel.placeOrder` | `storage.swift.user_defaults` |
+| 50 | Card number on the general pasteboard | `CheckoutViewModel.copyCard` | `ipc.swift.pasteboard` |
+| 51 | Email sent to a mailing vendor | `CheckoutViewModel.sendReceipt` | `net.swift.urlsession` |
 
-Traps that must stay quiet: database inserts (first party), customer and order IDs, the nickname, a field tagged `pii:"-"`, masked email/card/phone, `len(email)`, cart sizes, a SHA-256 of the password (hashing is a safe transform for credentials), an API key in an `Authorization` header and a token sent to the API that issued it (credentials are meant for the services they unlock), the login request's response, email sent to the shop's own API (`first_party_domains` in `.datawarden.yaml`), the AWS documentation key `AKIAIOSFODNN7EXAMPLE`, and the placeholder row in the CSV (`0123456789`, `test@example.com`, `4111 1111 1111 1111`).
+Traps that must stay quiet: database inserts (first party), customer and order IDs, the nickname, a field tagged `pii:"-"`, masked email/card/phone, `len(email)`, cart sizes, a SHA-256 of the password (hashing is a safe transform for credentials), an API key in an `Authorization` header and a token sent to the API that issued it (credentials are meant for the services they unlock), the login request's response, email sent to the shop's own API (`first_party_domains` in `.datawarden.yaml`), the AWS documentation key `AKIAIOSFODNN7EXAMPLE`, the shopper id, nickname and masked email in the recommender, its own SQLite database, a unified-log message whose email is redacted by default, and the placeholder row in the CSV (`0123456789`, `test@example.com`, `4111 1111 1111 1111`).
 
 ## Known results
 
-datawarden finds 35 of the 37 leaks with one false positive (precision 0.97, recall 0.95):
+datawarden finds 49 of the 51 leaks with one false positive (precision 0.98, recall 0.96):
 
 - **Missed #24:** Kotlin's property syntax `telephony.line1Number` is not matched by the source rule for `getLine1Number()`.
 - **Missed #30:** the CCCD detector needs a label on the same line as the value; in a CSV the label is in the header row.

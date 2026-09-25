@@ -57,7 +57,7 @@ func TestOfPath(t *testing.T) {
 }
 
 func TestLookupAndNormalize(t *testing.T) {
-	for in, want := range map[string]string{"golang": Go, "KT": Kotlin, "js": TypeScript, " TypeScript ": TypeScript, "protobuf": Proto, "cobol": "cobol"} {
+	for in, want := range map[string]string{"golang": Go, "KT": Kotlin, "js": TypeScript, "py": Python, " TypeScript ": TypeScript, "protobuf": Proto, "cobol": "cobol"} {
 		if got := Normalize(in); got != want {
 			t.Errorf("Normalize(%q) = %q, want %q", in, got, want)
 		}
@@ -68,7 +68,7 @@ func TestLookupAndNormalize(t *testing.T) {
 	if !IsCode("kotlin") || !IsCode("js") || IsCode("sql") || IsCode("cobol") {
 		t.Error("IsCode")
 	}
-	if got := CodeNames(); !reflect.DeepEqual(got, []string{Go, Java, Kotlin, TypeScript}) {
+	if got := CodeNames(); !reflect.DeepEqual(got, []string{Go, Java, Kotlin, Python, Swift, TypeScript}) {
 		t.Errorf("CodeNames() = %v", got)
 	}
 }
@@ -81,6 +81,8 @@ func TestTestFilesAndIgnoredPaths(t *testing.T) {
 		{"pkg/x_test.go", true}, {"pkg/x.go", false},
 		{"app/FooTest.kt", true}, {"app/FooTests.java", true}, {"app/Foo.java", false},
 		{"web/app.ts", false},
+		{"app/test_user.py", true}, {"app/user_test.py", true}, {"conftest.py", true}, {"app/user.py", false}, {"app/contest.py", false},
+		{"App/UserTests.swift", true}, {"App/User.swift", false},
 	}
 	for _, c := range cases {
 		l, _ := ForPath(c.path)

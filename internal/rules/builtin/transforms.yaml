@@ -79,3 +79,63 @@
   lang: typescript
   call: ["btoa", "Buffer.from"]
   transform: base64
+
+- id: xform.py.sha256
+  kind: transform
+  lang: python
+  call: ["hashlib.sha256", "hashlib.sha3_256", "hmac.new"]
+  transform: sha256
+- id: xform.py.sha512
+  kind: transform
+  lang: python
+  call: ["hashlib.sha512", "hashlib.blake2b"]
+  transform: sha512
+- id: xform.py.weak_hash
+  kind: transform
+  lang: python
+  call: ["hashlib.md5", "hashlib.sha1"]
+  transform: md5_or_sha1
+- id: xform.py.password_hash
+  kind: transform
+  lang: python
+  call: ["bcrypt.hashpw", "argon2.PasswordHasher.hash", "werkzeug.security.generate_password_hash", "django.contrib.auth.hashers.make_password",
+         "passlib.hash.*.hash", "hashlib.pbkdf2_hmac", "hashlib.scrypt"]
+  receiver: "(?i)^(self\\.)?_?(ph|hasher|password_hasher|pwd_context)$"
+  transform: hashed
+- id: xform.py.encrypt
+  kind: transform
+  lang: python
+  call: ["cryptography.fernet.Fernet.encrypt"]
+  receiver: "(?i)^(self\\.)?_?(fernet|cipher|f)$"
+  transform: encrypted
+- id: xform.py.base64
+  kind: transform
+  lang: python
+  call: ["base64.b64encode", "base64.urlsafe_b64encode"]
+  transform: base64
+
+- id: xform.swift.sha256
+  kind: transform
+  lang: swift
+  call: ["SHA256.hash", "CryptoKit.SHA256.hash", "HMAC.authenticationCode"]
+  transform: sha256
+- id: xform.swift.sha512
+  kind: transform
+  lang: swift
+  call: ["SHA512.hash", "CryptoKit.SHA512.hash"]
+  transform: sha512
+- id: xform.swift.weak_hash
+  kind: transform
+  lang: swift
+  call: ["Insecure.MD5.hash", "Insecure.SHA1.hash", "CC_MD5", "CC_SHA1"]
+  transform: md5_or_sha1
+- id: xform.swift.encrypt
+  kind: transform
+  lang: swift
+  call: ["AES.GCM.seal", "ChaChaPoly.seal", "SecKeyCreateEncryptedData"]
+  transform: encrypted
+- id: xform.swift.base64
+  kind: transform
+  lang: swift
+  call: ["Data.base64EncodedString", "Data.base64EncodedData"]
+  transform: base64

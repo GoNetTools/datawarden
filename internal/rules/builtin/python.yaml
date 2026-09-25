@@ -1,0 +1,107 @@
+# Built-in rules for Python. Imported names resolve to "<module>.<name>":
+# `import sentry_sdk; sentry_sdk.set_user(u)` and `from sentry_sdk import
+# set_user; set_user(u)` are both "sentry_sdk.set_user". Loggers and
+# clients held in untyped variables match by receiver name.
+
+- id: log.py.print
+  lang: python
+  call: ["print", "pprint.pprint", "sys.stdout.write", "sys.stderr.write"]
+  arg: "*"
+  dest: { kind: log, host: stdout }
+  category: logging
+
+- id: log.py.logging
+  lang: python
+  call: ["logging.debug", "logging.info", "logging.warning", "logging.warn", "logging.error", "logging.exception", "logging.critical", "logging.log",
+         "logging.getLogger().*", "logging.Logger.debug", "logging.Logger.info", "logging.Logger.warning", "logging.Logger.error",
+         "logging.Logger.exception", "logging.Logger.critical", "structlog.get_logger().*", "loguru.logger.*"]
+  receiver: "(?i)^(self\\.|cls\\.)?_*(log|logger)$"
+  arg: "*"
+  dest: { kind: log, host: application-log }
+  category: logging
+
+- id: sdk.py.sentry
+  lang: python
+  call: ["sentry_sdk.set_user", "sentry_sdk.set_extra", "sentry_sdk.set_tag", "sentry_sdk.set_context", "sentry_sdk.capture_message",
+         "sentry_sdk.add_breadcrumb", "sentry_sdk.Scope.set_user", "sentry_sdk.Scope.set_extra", "sentry_sdk.Scope.set_tag", "sentry_sdk.Scope.set_context"]
+  receiver: "(?i)^scope$"
+  arg: "*"
+  dest: { host: sentry.io, kind: third_party, vendor: Sentry }
+  category: crash_reporting
+
+- id: sdk.py.segment
+  lang: python
+  call: ["analytics.track", "analytics.identify", "analytics.page", "segment.analytics.track", "segment.analytics.identify", "segment.analytics.page"]
+  arg: "*"
+  dest: { host: api.segment.io, kind: third_party, vendor: Segment }
+  category: analytics
+
+- id: sdk.py.mixpanel
+  lang: python
+  call: ["mixpanel.Mixpanel.track", "mixpanel.Mixpanel.people_set", "mixpanel.Mixpanel.people_set_once", "mixpanel.Mixpanel.alias"]
+  receiver: "(?i)^(self\\.)?_?(mp|mixpanel)$"
+  arg: "*"
+  dest: { host: api.mixpanel.com, kind: third_party, vendor: Mixpanel }
+  category: analytics
+
+- id: sdk.py.posthog
+  lang: python
+  call: ["posthog.capture", "posthog.identify", "posthog.alias", "posthog.Posthog.capture", "posthog.Posthog.identify"]
+  receiver: "(?i)^(self\\.)?_?posthog$"
+  arg: "*"
+  dest: { host: app.posthog.com, kind: third_party, vendor: PostHog }
+  category: analytics
+
+- id: sdk.py.twilio
+  lang: python
+  call: ["twilio.rest.Client.messages.create", "twilio.rest.api.v2010.account.message.MessageList.create"]
+  receiver: "(?i)\\.messages$"
+  arg: "*"
+  dest: { host: api.twilio.com, kind: third_party, vendor: Twilio }
+  category: messaging
+
+- id: sdk.py.aws_sns
+  lang: python
+  call: ["boto3.client().publish"]
+  receiver: "(?i)^(self\\.)?_?sns(_client)?$"
+  arg: "*"
+  dest: { host: sns.amazonaws.com, kind: third_party, vendor: AWS SNS }
+  category: messaging
+
+- id: net.py.http
+  lang: python
+  call: ["requests.get", "requests.post", "requests.put", "requests.patch", "requests.delete", "requests.request", "requests.Session.get", "requests.Session.post",
+         "requests.Session.put", "requests.Session.patch", "httpx.get", "httpx.post", "httpx.put", "httpx.patch", "httpx.request", "httpx.Client.get",
+         "httpx.Client.post", "httpx.Client.put", "httpx.AsyncClient.get", "httpx.AsyncClient.post", "httpx.AsyncClient.put", "urllib.request.urlopen",
+         "urllib.request.Request", "aiohttp.ClientSession.get", "aiohttp.ClientSession.post", "aiohttp.ClientSession.put"]
+  receiver: "(?i)^(self\\.)?_?(session|http|http_client|client|httpx_client)$"
+  arg: "*"
+  host_arg: 0
+  dest: { kind: network }
+  category: network
+
+- id: storage.py.file
+  lang: python
+  call: ["json.dump", "pickle.dump", "yaml.dump", "pathlib.Path.write_text", "pathlib.Path.write_bytes", "io.TextIOWrapper.write",
+         "io.TextIOWrapper.writelines", "csv.writer().writerow", "csv.writer().writerows", "csv.DictWriter.writerow", "csv.DictWriter.writerows"]
+  receiver: "(?i)^(f|fh|fp|fd|file|out|outfile|output|writer|csv_writer)$"
+  arg: "*"
+  dest: { kind: storage, host: local-file }
+  category: storage
+
+- id: storage.py.sql
+  lang: python
+  call: ["sqlite3.Connection.execute", "sqlite3.Cursor.execute", "sqlite3.Cursor.executemany", "*.objects.create", "*.objects.update_or_create",
+         "*.objects.get_or_create", "*.objects.bulk_create"]
+  receiver: "(?i)^(self\\.)?_?(cur|cursor|conn|connection|db|session|objects|[a-z]+\\.objects)$"
+  arg: "*"
+  dest: { kind: first_party, host: database }
+  category: storage
+
+- id: storage.py.redis
+  lang: python
+  call: ["redis.Redis.set", "redis.Redis.setex", "redis.Redis.hset", "redis.Redis.lpush", "redis.Redis.rpush", "redis.Redis.sadd"]
+  receiver: "(?i)^(self\\.)?_?(redis|cache|redis_client|rds)$"
+  arg: "*"
+  dest: { kind: first_party, host: redis }
+  category: storage

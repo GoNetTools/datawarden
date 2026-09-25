@@ -90,7 +90,7 @@ jobs:
           version="$("$BIN" version)"
           echo "$version"
           case "$version" in
-            *go*java*kotlin*typescript*) ;;
+            *go*java*kotlin*python*swift*typescript*) ;;
             *) echo "::error::binary is missing frontends: $version"; exit 1 ;;
           esac
           code=0

@@ -77,12 +77,13 @@ cases:
       - {data_type: phone, sink_rule: net.ts.fetch, function: UserService.register}
       - {data_type: vn_cccd, sink_rule: net.ts.fetch, function: UserService.register}
 
-  # testdata/vulnshop: a small shop (Go API, TypeScript checkout, Kotlin and
-  # Java Android, CSV seed data) that is vulnerable by design. Every LEAK
-  # comment in its sources is labelled here; SAFE comments are traps.
+  # testdata/vulnshop: a small shop (Go API, Python recommender, TypeScript
+  # checkout, Kotlin and Java Android, Swift iOS, CSV seed data) that is
+  # vulnerable by design. Every LEAK comment in its sources is labelled
+  # here; SAFE comments are traps.
   - name: vulnshop
     dir: vulnshop
-    langs: [go, typescript, kotlin, java]
+    langs: [go, typescript, kotlin, java, python, swift]
     min_precision: 0.96
     min_recall: 0.93
     flows:
@@ -120,6 +121,22 @@ cases:
       - {data_type: location, sink_rule: sdk.amplitude, function: CheckoutActivity.trackDelivery}
       - {data_type: email, sink_rule: ipc.android.broadcast, function: ProfileSync.publish}
       - {data_type: dob, sink_rule: log.android.logcat, function: ProfileSync.publish}
+      # Python recommender service
+      - {data_type: email, sink_rule: log.py.logging, function: "views:recommendations"}
+      - {data_type: phone, sink_rule: sdk.py.sentry, function: "views:recommendations"}
+      - {data_type: dob, sink_rule: net.py.http, function: "views:recommendations"}
+      - {data_type: email, sink_rule: log.py.print, function: "views:debug_attempt", note: "the caller's email reaches a parameter named user"}
+      - {data_type: password, sink_rule: log.py.print, function: "views:debug_attempt"}
+      - {data_type: email, sink_rule: storage.py.file, function: "store:save_profile", note: "the whole Shopper dataclass is pickled"}
+      - {data_type: phone, sink_rule: storage.py.file, function: "store:save_profile"}
+      - {data_type: dob, sink_rule: storage.py.file, function: "store:save_profile"}
+      # Swift iOS app
+      - {data_type: email, sink_rule: sdk.swift.firebase.crashlytics, function: CheckoutViewModel.placeOrder}
+      - {data_type: phone, sink_rule: sdk.swift.firebase.analytics, function: CheckoutViewModel.placeOrder}
+      - {data_type: credit_card, sink_rule: log.swift.os_log, function: CheckoutViewModel.placeOrder, note: "marked privacy: .public"}
+      - {data_type: email, sink_rule: storage.swift.user_defaults, function: CheckoutViewModel.placeOrder}
+      - {data_type: credit_card, sink_rule: ipc.swift.pasteboard, function: CheckoutViewModel.copyCard}
+      - {data_type: email, sink_rule: net.swift.urlsession, function: CheckoutViewModel.sendReceipt}
     literals:
       - {data_type: phone, file: seed/customers.csv, line: 2}
       - {data_type: email, file: seed/customers.csv, line: 2}

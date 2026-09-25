@@ -6,17 +6,18 @@ All notable changes to datawarden are documented here. The format follows [Keep 
 
 ### Added
 
+- Python and Swift frontends, with rules for their logging, crash-reporting, analytics, messaging, HTTP, storage and IPC APIs, annotated examples for every rule, the shared conformance scenarios and construct programs, and planted leaks in `testdata/vulnshop` (a Flask recommender and an iOS app). Swift unified logging (`Logger`, `os_log`) counts only values marked public, since the rest are redacted.
 - `datawarden scan` with full, path, PR (`--diff <ref>`, changed files plus their callers from the cached call graph) and pre-commit (`--literals-only`, `--staged`) modes. Exit codes: 0 clean, 1 new violation, 2 error.
 - Frontends lowering to a shared IR: Go (`go/packages` + SSA), Kotlin, Java and TypeScript/JavaScript (tree-sitter).
 - Source detectors: identifier names (`phoneNumber`, `dateOfBirth`, `fullName`, `ssn`, …), schema hints (Go struct tags and GORM, JPA/Room/Gson/Moshi, TypeORM, protobuf, SQL migrations, explicit `pii` annotations) and validated literal values (phone numbers, national IDs, cards with Luhn, IBAN, SSN, email).
-- 89 embedded sink, source and transform rules for logging, crash reporting, analytics, HTTP clients, storage and IPC, overridable per repository.
+- 123 embedded sink, source and transform rules for logging, crash reporting, analytics, HTTP clients, storage and IPC, overridable per repository.
 - Interprocedural taint analysis with function summaries cached by file content hash.
 - Baseline with line-independent fingerprints (data type, sink rule, destination, enclosing function).
 - Reports: text, JSON, SARIF 2.1.0, Markdown PR summary, GitLab SAST.
 - `datawarden map` data inventory for DPIAs (Markdown, JSON, CSV, Mermaid).
 - GitHub Action, pre-commit hooks and a multi-arch container image.
 - `datawarden-bench` and a labelled corpus (`testdata/eval.yaml`): precision, recall and F1 per case, data type and sink, a confidence-threshold sweep, and scan timings; CI fails when accuracy drops below the corpus minimums.
-- `testdata/vulnshop`, a vulnerable-by-design shop (Go, TypeScript, Kotlin, Java, CSV) with 37 labelled leaks of personal data, health data and credentials, and a `demo` workflow to scan it or any directory on demand.
+- `testdata/vulnshop`, a vulnerable-by-design shop (Go, Python, TypeScript, Kotlin, Java, Swift, CSV) with 51 labelled leaks of personal data, health data and credentials, and a `demo` workflow to scan it or any directory on demand.
 - `datawarden rules test DIR`: check repository rules against annotated example code (`ruleid:`, `ok:`, `todoruleid:`, `todook:`). `.datawarden/rules/examples/` is never scanned as part of the repository.
 - Every built-in rule has an annotated example (`internal/rules/testdata/examples/`), and every frontend passes the same conformance scenarios (`internal/frontend/testdata/conformance/`).
 - Data classes: every data type belongs to `pii`, `phi`, `pci` or `credential`, findings carry a `class` (JSON, a SARIF tag, a data-map column), and the policy has `ignore_classes` and per-class `fail_on`/`safe_transforms` overrides (`policy.classes`). Phi, pci and credential findings are high severity.

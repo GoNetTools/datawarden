@@ -25,7 +25,7 @@ datawarden is a static analyzer. It reads a repository without running it and re
 
 What counts as sensitive is data, not code: the [taxonomy](#the-taxonomy-data-types-and-classes) groups data types into classes (personal data, health information, cardholder data, credentials), and the analysis, the policy and the reports treat a new type or class like the built-in ones.
 
-Four languages are analysed (Go, Kotlin, Java, TypeScript/JavaScript). Each is converted into one shared intermediate representation (IR), so the analysis, the rules and the reports are written once.
+Six languages are analysed (Go, Python, Java, Kotlin, Swift, TypeScript/JavaScript). Each is converted into one shared intermediate representation (IR), so the analysis, the rules and the reports are written once.
 
 ## The scan pipeline
 
@@ -126,7 +126,7 @@ What each component does:
 |---|---|
 | `frontend` | The `Frontend` interface, the `Registry` of frontends per language, the `Registrar` plugin contract. |
 | `frontend/golang` | Go via `go/packages` and SSA: full type information. |
-| `frontend/treesitter` | Kotlin, Java, TypeScript via tree-sitter (cgo): syntax plus import and declaration resolution. |
+| `frontend/treesitter` | Python, Java, Kotlin, Swift, TypeScript via tree-sitter (cgo): syntax plus import and declaration resolution. |
 | `analysis` | The taint engine: sources, propagation, function summaries, flows. |
 | `detect` | Identifier classifier and taxonomy, schema index, literal validators. |
 | `rules` | Loading, validating and matching YAML sink, source and transform rules. |
@@ -242,7 +242,7 @@ classDiagram
 ```
 
 - **Five operations.** `assign` (copies, concatenation, conversions, container construction), `load` and `store` (fields and constant map keys), `call`, `return`. Anything else a language has lowers to these.
-- **Callee names are qualified** the way rules are written: `importpath.Type.Method` for Go, `package.Class.method` for Kotlin/Java, `<module>.<export>` for TypeScript. `Target` is set when the callee is code datawarden analyses, so its summary can be applied.
+- **Callee names are qualified** the way rules are written: `importpath.Type.Method` for Go, `package.Class.method` for Kotlin/Java, `<module>.<export>` for TypeScript, `<module>.<name>` for Python, the type as written for Swift. `Target` is set when the callee is code datawarden analyses, so its summary can be applied.
 - **Positions are slash-separated and root-relative** on every platform.
 
 ### Findings (`internal/finding`)
@@ -322,7 +322,7 @@ The full checklists for rules and languages are in [CONTRIBUTING](../CONTRIBUTIN
 
 ```mermaid
 flowchart LR
-    U["Unit tests<br/>fakes, fstest.MapFS,<br/>httptest"] --> C["Contract tests<br/>rule examples (all 89 rules)<br/>frontend conformance (15 × 4)"]
+    U["Unit tests<br/>fakes, fstest.MapFS,<br/>httptest"] --> C["Contract tests<br/>rule examples (all 123 rules)<br/>frontend conformance (15 × 6)"]
     C --> E["End-to-end<br/>fixtures through the real app"]
     E --> A["Accuracy<br/>labelled corpus:<br/>precision / recall / F1"]
     S["Structure tests<br/>architecture, wiring,<br/>rule conventions, language table"] -.-> U

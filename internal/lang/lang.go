@@ -19,6 +19,8 @@ const (
 	Kotlin     = "kotlin"
 	Java       = "java"
 	TypeScript = "typescript"
+	Python     = "python"
+	Swift      = "swift"
 	Proto      = "proto"
 	SQL        = "sql"
 )
@@ -49,6 +51,10 @@ type Language struct {
 	// directories (src/test/, __tests__/) and the .test./.spec. infixes
 	// apply to every language and are handled by the file walker.
 	TestSuffixes []string
+	// TestPrefixes mark test files by the start of their base name
+	// (test_user.py), and TestNames by the whole name (conftest.py).
+	TestPrefixes []string
+	TestNames    []string
 	// Ignore reports whether the language's own toolchain skips the file
 	// (the go tool ignores testdata/, _dir/ and .dir/). May be nil.
 	Ignore func(rel string) bool
@@ -63,7 +69,11 @@ var table = []Language{
 	{Name: Kotlin, Kind: Code, Aliases: []string{"kt", "kts"}, Extensions: []string{".kt", ".kts"},
 		TestSuffixes: []string{"Test.kt", "Tests.kt"}},
 	{Name: Proto, Kind: Schema, Aliases: []string{"protobuf"}, Extensions: []string{".proto"}},
+	{Name: Python, Kind: Code, Aliases: []string{"py"}, Extensions: []string{".py"},
+		TestPrefixes: []string{"test_"}, TestSuffixes: []string{"_test.py"}, TestNames: []string{"conftest.py"}},
 	{Name: SQL, Kind: Schema, Extensions: []string{".sql"}},
+	{Name: Swift, Kind: Code, Extensions: []string{".swift"},
+		TestSuffixes: []string{"Tests.swift", "Test.swift"}},
 	{Name: TypeScript, Kind: Code, Aliases: []string{"ts", "tsx", "javascript", "js", "jsx"},
 		Extensions: []string{".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"},
 		NotSource:  []string{".d.ts", ".d.mts", ".d.cts"}},
@@ -156,6 +166,16 @@ func ForPath(rel string) (Language, bool) {
 func (l Language) IsTestFile(base string) bool {
 	for _, s := range l.TestSuffixes {
 		if strings.HasSuffix(base, s) {
+			return true
+		}
+	}
+	for _, p := range l.TestPrefixes {
+		if strings.HasPrefix(base, p) {
+			return true
+		}
+	}
+	for _, n := range l.TestNames {
+		if base == n {
 			return true
 		}
 	}
