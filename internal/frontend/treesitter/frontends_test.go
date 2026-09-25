@@ -163,3 +163,63 @@ class Service:
 		t.Errorf("__init__ fields typed from parameters: %+v", f)
 	}
 }
+
+func TestSwiftResolvesTypesAndMethods(t *testing.T) {
+	m := lower(t, NewSwift, map[string]string{
+		"App/Repo.swift": `import Sentry
+final class Repo {
+    let store = Store()
+    func save(phone: String) {
+        SentrySDK.setUser(phone)
+        audit(phone)
+        store.put(phone)
+        Crashlytics.crashlytics().setUserID(phone)
+    }
+    func audit(_ x: String) {}
+}`,
+		"App/Store.swift": "final class Store {}\nextension Store {\n    func put(_ v: String) {}\n}\n",
+	})
+	c := calls(m)
+	if c["setUser"] == nil || c["setUser"].Callee != "SentrySDK.setUser" {
+		t.Errorf("type reference: %+v", c["setUser"])
+	}
+	if c["audit"] == nil || c["audit"].Target != "Repo.audit" || !c["audit"].HasRecv {
+		t.Errorf("implicit self method: %+v", c["audit"])
+	}
+	if c["put"] == nil || c["put"].Target != "Store.put" {
+		t.Errorf("extension method on a typed field: %+v", c["put"])
+	}
+	if c["setUserID"] == nil || c["setUserID"].Callee != "Crashlytics.crashlytics().setUserID" {
+		t.Errorf("factory call: %+v", c["setUserID"])
+	}
+}
+
+// Logger privacy is covered end to end by the Swift construct programs.
+func TestSwiftSchemaHints(t *testing.T) {
+	m := lower(t, NewSwift, map[string]string{"App/Models.swift": `struct Customer: Codable {
+    let email: String
+    let phone: String?
+    enum CodingKeys: String, CodingKey {
+        case email = "email_address"
+        case phone
+    }
+}
+@Model final class Item { var email: String = "" }
+final class Service {
+    let repo = Repo()
+    func run(email: String) {}
+}`})
+	kinds := map[string]*ir.TypeDecl{}
+	for _, td := range m.Types {
+		kinds[td.Name] = td
+	}
+	if td := kinds["Customer"]; td == nil || td.Kind != "data" || td.Fields[0].Tags["json"] != "email_address" {
+		t.Errorf("Codable struct with CodingKeys: %+v", td)
+	}
+	if td := kinds["Item"]; td == nil || td.Kind != "entity" {
+		t.Errorf("SwiftData @Model: %+v", td)
+	}
+	if td := kinds["Service"]; td == nil || td.Kind != "class" {
+		t.Errorf("a class with behaviour: %+v", td)
+	}
+}

@@ -16,6 +16,7 @@ func Register(r frontend.Registrar) {
 		lang.Java:       NewJava,
 		lang.Kotlin:     NewKotlin,
 		lang.Python:     NewPython,
+		lang.Swift:      NewSwift,
 		lang.TypeScript: NewTypeScript,
 	}
 	for _, l := range Languages() {

@@ -113,3 +113,29 @@
   lang: python
   call: ["base64.b64encode", "base64.urlsafe_b64encode"]
   transform: base64
+
+- id: xform.swift.sha256
+  kind: transform
+  lang: swift
+  call: ["SHA256.hash", "CryptoKit.SHA256.hash", "HMAC.authenticationCode"]
+  transform: sha256
+- id: xform.swift.sha512
+  kind: transform
+  lang: swift
+  call: ["SHA512.hash", "CryptoKit.SHA512.hash"]
+  transform: sha512
+- id: xform.swift.weak_hash
+  kind: transform
+  lang: swift
+  call: ["Insecure.MD5.hash", "Insecure.SHA1.hash", "CC_MD5", "CC_SHA1"]
+  transform: md5_or_sha1
+- id: xform.swift.encrypt
+  kind: transform
+  lang: swift
+  call: ["AES.GCM.seal", "ChaChaPoly.seal", "SecKeyCreateEncryptedData"]
+  transform: encrypted
+- id: xform.swift.base64
+  kind: transform
+  lang: swift
+  call: ["Data.base64EncodedString", "Data.base64EncodedData"]
+  transform: base64

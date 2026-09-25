@@ -72,6 +72,8 @@ var table = []Language{
 	{Name: Python, Kind: Code, Aliases: []string{"py"}, Extensions: []string{".py"},
 		TestPrefixes: []string{"test_"}, TestSuffixes: []string{"_test.py"}, TestNames: []string{"conftest.py"}},
 	{Name: SQL, Kind: Schema, Extensions: []string{".sql"}},
+	{Name: Swift, Kind: Code, Extensions: []string{".swift"},
+		TestSuffixes: []string{"Tests.swift", "Test.swift"}},
 	{Name: TypeScript, Kind: Code, Aliases: []string{"ts", "tsx", "javascript", "js", "jsx"},
 		Extensions: []string{".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"},
 		NotSource:  []string{".d.ts", ".d.mts", ".d.cts"}},
