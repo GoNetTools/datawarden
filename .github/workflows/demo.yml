@@ -1,4 +1,4 @@
-# Copyright 2026 The piiflow Authors
+# Copyright 2026 The pii-scanner Authors
 # SPDX-License-Identifier: Apache-2.0
 #
 # Scans the vulnerable-by-design demo (testdata/vulnshop), or any directory
@@ -23,7 +23,7 @@ on:
         default: ""
         type: string
       upload_sarif:
-        description: Also upload the findings to code scanning (category piiflow-demo)
+        description: Also upload the findings to code scanning (category pii-scanner-demo)
         default: false
         type: boolean
   pull_request:
@@ -75,37 +75,37 @@ jobs:
       - name: Build
         run: |
           bash scripts/release/build.sh "demo-${GITHUB_SHA::12}" "$RUNNER_TEMP/bin"
-          echo "PIIFLOW=$RUNNER_TEMP/bin/linux_amd64/piiflow" >> "$GITHUB_ENV"
+          echo "PII_SCANNER=$RUNNER_TEMP/bin/linux_amd64/pii-scanner" >> "$GITHUB_ENV"
           mkdir -p "$RUNNER_TEMP/out"
           echo "OUT=$RUNNER_TEMP/out" >> "$GITHUB_ENV"
       - name: Scan
         run: |
           args=(scan "$TARGET" --root "$TARGET" --no-baseline --no-cache --no-fail
-                --sarif "$OUT/piiflow.sarif" --markdown "$OUT/piiflow.md" --json "$OUT/piiflow.json")
+                --sarif "$OUT/pii-scanner.sarif" --markdown "$OUT/pii-scanner.md" --json "$OUT/pii-scanner.json")
           if [ -n "$MIN_CONFIDENCE" ]; then args+=(--min-confidence "$MIN_CONFIDENCE"); fi
-          "$PIIFLOW" "${args[@]}" | tee "$OUT/piiflow.txt"
+          "$PII_SCANNER" "${args[@]}" | tee "$OUT/pii-scanner.txt"
       - name: Data map
         run: |
-          "$PIIFLOW" map --root "$TARGET" --no-cache --format dpia --output "$OUT/data-map.md"
-          "$PIIFLOW" map --root "$TARGET" --no-cache --format mermaid --output "$OUT/data-map.mmd"
+          "$PII_SCANNER" map --root "$TARGET" --no-cache --format dpia --output "$OUT/data-map.md"
+          "$PII_SCANNER" map --root "$TARGET" --no-cache --format mermaid --output "$OUT/data-map.mmd"
       - name: Accuracy on the labelled corpus
         if: env.TARGET == 'testdata/vulnshop'
         env:
           CGO_ENABLED: "1"
-        run: go run ./cmd/piiflow-bench -json "$OUT/eval.json" -markdown "$OUT/eval.md" | tee "$OUT/eval.txt"
+        run: go run ./cmd/pii-scanner-bench -json "$OUT/eval.json" -markdown "$OUT/eval.md" | tee "$OUT/eval.txt"
       - name: Job summary
         if: always()
         run: |
           {
-            echo "# piiflow demo: \`$TARGET\`"
+            echo "# pii-scanner demo: \`$TARGET\`"
             echo
-            if [ -f "$OUT/piiflow.json" ]; then
-              jq -r '"**\(.flows | map(select(.violation)) | length) leaking flow(s), \(.literals | map(select(.violation)) | length) committed value(s)** in \(.files_scanned) files (\(.files_analyzed | to_entries | map("\(.key): \(.value)") | join(", "))), \(.functions) functions, \(.duration)"' "$OUT/piiflow.json"
+            if [ -f "$OUT/pii-scanner.json" ]; then
+              jq -r '"**\(.flows | map(select(.violation)) | length) leaking flow(s), \(.literals | map(select(.violation)) | length) committed value(s)** in \(.files_scanned) files (\(.files_analyzed | to_entries | map("\(.key): \(.value)") | join(", "))), \(.functions) functions, \(.duration)"' "$OUT/pii-scanner.json"
               echo
               echo "| Severity | Data type | Destination | Rule | Where |"
               echo "|---|---|---|---|---|"
-              jq -r '.flows[] | select(.violation) | "| \(.severity) | `\(.data_type)` | \(.dest.vendor // .dest.host // .dest.kind) (\(.dest.kind)) | `\(.sink_rule)` | `\(.sink.file):\(.sink.line)` |"' "$OUT/piiflow.json"
-              jq -r '.literals[] | select(.violation) | "| \(.severity) | `\(.data_type)` | committed value `\(.masked)` | `\(.detector)` | `\(.pos.file):\(.pos.line)` |"' "$OUT/piiflow.json"
+              jq -r '.flows[] | select(.violation) | "| \(.severity) | `\(.data_type)` | \(.dest.vendor // .dest.host // .dest.kind) (\(.dest.kind)) | `\(.sink_rule)` | `\(.sink.file):\(.sink.line)` |"' "$OUT/pii-scanner.json"
+              jq -r '.literals[] | select(.violation) | "| \(.severity) | `\(.data_type)` | committed value `\(.masked)` | `\(.detector)` | `\(.pos.file):\(.pos.line)` |"' "$OUT/pii-scanner.json"
               echo
             fi
             if [ -f "$OUT/eval.md" ]; then cat "$OUT/eval.md"; echo; fi
@@ -117,10 +117,10 @@ jobs:
               echo '```'
               echo
             fi
-            if [ -f "$OUT/piiflow.md" ]; then
+            if [ -f "$OUT/pii-scanner.md" ]; then
               echo "<details><summary>PR comment preview</summary>"
               echo
-              cat "$OUT/piiflow.md"
+              cat "$OUT/pii-scanner.md"
               echo
               echo "</details>"
             fi
@@ -128,7 +128,7 @@ jobs:
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
-          name: piiflow-demo
+          name: pii-scanner-demo
           path: ${{ runner.temp }}/out
           if-no-files-found: warn
           retention-days: 14
@@ -136,5 +136,5 @@ jobs:
         if: inputs.upload_sarif
         uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
-          sarif_file: ${{ runner.temp }}/out/piiflow.sarif
-          category: piiflow-demo
+          sarif_file: ${{ runner.temp }}/out/pii-scanner.sarif
+          category: pii-scanner-demo

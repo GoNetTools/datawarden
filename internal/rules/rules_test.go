@@ -1,4 +1,4 @@
-// Copyright 2026 The piiflow Authors
+// Copyright 2026 The pii-scanner Authors
 // SPDX-License-Identifier: Apache-2.0
 
 package rules
@@ -115,7 +115,7 @@ func TestRuleFilesAreStrict(t *testing.T) {
 }
 
 func TestOverrides(t *testing.T) {
-	repo := fstest.MapFS{".piiflow/rules/repo.yaml": {Data: []byte(`
+	repo := fstest.MapFS{".pii-scanner/rules/repo.yaml": {Data: []byte(`
 - id: log.go.fmt_print
   disabled: true
 - id: sdk.acme.telemetry
@@ -124,7 +124,7 @@ func TestOverrides(t *testing.T) {
   arg: 0
   dest: { host: telemetry.acme.vn, kind: third_party }
 `)}}
-	s, err := Load(repo, ".piiflow/rules", "missing/dir")
+	s, err := Load(repo, ".pii-scanner/rules", "missing/dir")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,8 +138,8 @@ func TestOverrides(t *testing.T) {
 	if s.Hash() == base.Hash() {
 		t.Error("hash should change with overrides")
 	}
-	repo[".piiflow/rules/bad.yaml"] = &fstest.MapFile{Data: []byte("- id: x\n  lang: go\n  call: a.b\n  dest: {kind: nowhere}\n")}
-	if _, err := Load(repo, ".piiflow/rules"); err == nil {
+	repo[".pii-scanner/rules/bad.yaml"] = &fstest.MapFile{Data: []byte("- id: x\n  lang: go\n  call: a.b\n  dest: {kind: nowhere}\n")}
+	if _, err := Load(repo, ".pii-scanner/rules"); err == nil {
 		t.Error("invalid dest kind accepted")
 	}
 }

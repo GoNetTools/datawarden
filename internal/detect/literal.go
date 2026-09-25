@@ -1,4 +1,4 @@
-// Copyright 2026 The piiflow Authors
+// Copyright 2026 The pii-scanner Authors
 // SPDX-License-Identifier: Apache-2.0
 
 package detect
@@ -464,7 +464,7 @@ func validCCCD(d string, now time.Time) bool {
 }
 
 func valueHash(dt, v string) string {
-	h := sha256.Sum256([]byte("piiflow-literal\x00" + dt + "\x00" + strings.ToLower(v)))
+	h := sha256.Sum256([]byte("pii-scanner-literal\x00" + dt + "\x00" + strings.ToLower(v)))
 	return hex.EncodeToString(h[:12])
 }
 

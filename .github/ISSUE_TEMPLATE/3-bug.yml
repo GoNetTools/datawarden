@@ -5,14 +5,14 @@ body:
   - type: input
     id: version
     attributes:
-      label: piiflow version
-      description: Output of `piiflow version`.
+      label: pii-scanner version
+      description: Output of `pii-scanner version`.
     validations:
       required: true
   - type: dropdown
     id: install
     attributes:
-      label: How do you run piiflow?
+      label: How do you run pii-scanner?
       options: [Release binary, Docker image, go install, GitHub Action, pre-commit, Built from source]
     validations:
       required: true

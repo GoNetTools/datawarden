@@ -1,14 +1,14 @@
-// Copyright 2026 The piiflow Authors
+// Copyright 2026 The pii-scanner Authors
 // SPDX-License-Identifier: Apache-2.0
 
-// Command piiflow-bench measures piiflow's accuracy and speed on a labelled
+// Command pii-scanner-bench measures pii-scanner's accuracy and speed on a labelled
 // corpus (testdata/eval.yaml): precision, recall and F1 per case, data type
 // and sink, a confidence-threshold sweep, and scan time and allocations.
 //
-//	go run ./cmd/piiflow-bench [-manifest testdata/eval.yaml] [-runs 3] [-check]
+//	go run ./cmd/pii-scanner-bench [-manifest testdata/eval.yaml] [-runs 3] [-check]
 //	                           [-json eval.json] [-markdown eval.md]
 //
-// Scans go through the same code as `piiflow scan --no-cache --no-baseline`.
+// Scans go through the same code as `pii-scanner scan --no-cache --no-baseline`.
 // Exit codes: 0 ok, 1 a case scored below its min_precision/min_recall
 // (with -check), 2 error.
 package main
@@ -42,7 +42,7 @@ func main() {
 }
 
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("piiflow-bench", flag.ContinueOnError)
+	fs := flag.NewFlagSet("pii-scanner-bench", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	manifest := fs.String("manifest", filepath.Join("testdata", "eval.yaml"), "labelled corpus")
 	runs := fs.Int("runs", 1, "scans per case for timing (the median is reported)")
@@ -56,7 +56,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	fail := func(err error) int {
-		fmt.Fprintf(stderr, "piiflow-bench: %v\n", err)
+		fmt.Fprintf(stderr, "pii-scanner-bench: %v\n", err)
 		return 2
 	}
 
@@ -107,14 +107,14 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 	if *check {
 		if fails := res.Check(m); len(fails) > 0 {
-			fmt.Fprintf(stderr, "\npiiflow-bench: accuracy below the manifest's minimums:\n  %s\n", strings.Join(fails, "\n  "))
+			fmt.Fprintf(stderr, "\npii-scanner-bench: accuracy below the manifest's minimums:\n  %s\n", strings.Join(fails, "\n  "))
 			return 1
 		}
 	}
 	return 0
 }
 
-// scan runs `piiflow scan` in-process and measures it.
+// scan runs `pii-scanner scan` in-process and measures it.
 func scan(ctx context.Context, dir string, minConf float64) (*eval.Scan, error) {
 	args := []string{"scan", "--root", dir, "--no-cache", "--no-baseline", "--no-fail", "--format", "json"}
 	if minConf > 0 {

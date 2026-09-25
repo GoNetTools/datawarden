@@ -1,8 +1,8 @@
 /bin/
 /dist/
 /.scratch/
-.piiflow/cache/
+.pii-scanner/cache/
 *.sarif
-piiflow.md
+pii-scanner.md
 gl-sast-report.json
 coverage.out

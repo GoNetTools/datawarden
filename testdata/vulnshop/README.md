@@ -1,6 +1,6 @@
 # vulnshop: vulnerable by design
 
-A small online shop that leaks personal data on purpose, so you can see what piiflow reports. **Do not copy this code.** All personal data in it is synthetic.
+A small online shop that leaks personal data on purpose, so you can see what pii-scanner reports. **Do not copy this code.** All personal data in it is synthetic.
 
 | Part | Path | Language |
 |---|---|---|
@@ -14,9 +14,9 @@ In the sources, `// LEAK:` marks a planted leak and `// SAFE:` marks a look-alik
 ## Run it
 
 ```sh
-go run ./cmd/piiflow scan testdata/vulnshop --root testdata/vulnshop --no-baseline --no-cache
-go run ./cmd/piiflow map --root testdata/vulnshop --no-cache --format dpia
-go run ./cmd/piiflow-bench                     # precision/recall for every labelled case
+go run ./cmd/pii-scanner scan testdata/vulnshop --root testdata/vulnshop --no-baseline --no-cache
+go run ./cmd/pii-scanner map --root testdata/vulnshop --no-cache --format dpia
+go run ./cmd/pii-scanner-bench                     # precision/recall for every labelled case
 ```
 
 Or on GitHub: **Actions → demo → Run workflow**. The job summary shows the findings, the data map and the accuracy tables, and the reports are attached as an artifact.
@@ -56,7 +56,7 @@ Traps that must stay quiet: database inserts (first party), customer and order I
 
 ## Known results
 
-piiflow finds 30 of the 32 leaks with one false positive (precision 0.97, recall 0.94):
+pii-scanner finds 30 of the 32 leaks with one false positive (precision 0.97, recall 0.94):
 
 - **Missed #24:** Kotlin's property syntax `telephony.line1Number` is not matched by the source rule for `getLine1Number()`.
 - **Missed #30:** the CCCD detector needs a label on the same line as the value; in a CSV the label is in the header row.

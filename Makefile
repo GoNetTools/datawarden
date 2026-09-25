@@ -1,4 +1,4 @@
-# Copyright 2026 The piiflow Authors
+# Copyright 2026 The pii-scanner Authors
 # SPDX-License-Identifier: Apache-2.0
 
 VERSION     ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
@@ -10,11 +10,11 @@ STATICCHECK := honnef.co/go/tools/cmd/staticcheck@v0.8.1
 
 ## build: full binary (Go + Kotlin + Java + TypeScript); needs a C compiler
 build:
-	CGO_ENABLED=1 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/piiflow ./cmd/piiflow
+	CGO_ENABLED=1 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/pii-scanner ./cmd/pii-scanner
 
 ## build-nocgo: portable binary with the Go frontend and literal detector only
 build-nocgo:
-	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/piiflow-nocgo ./cmd/piiflow
+	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/pii-scanner-nocgo ./cmd/pii-scanner
 
 test:
 	CGO_ENABLED=1 go test ./...
@@ -41,7 +41,7 @@ check: vet lint headers test test-nocgo
 
 ## eval: precision/recall/F1 and scan timings on the labelled corpus (testdata/eval.yaml)
 eval:
-	CGO_ENABLED=1 go run ./cmd/piiflow-bench -runs 3 -check
+	CGO_ENABLED=1 go run ./cmd/pii-scanner-bench -runs 3 -check
 
 ## bench: Go benchmarks (engine scaling, detectors, end-to-end fixture scans)
 bench:
@@ -53,10 +53,10 @@ release-local:
 	bash scripts/release/package.sh dist/bin dist
 
 docker:
-	docker build --build-arg VERSION=$(VERSION) -t piiflow:$(VERSION) .
+	docker build --build-arg VERSION=$(VERSION) -t pii-scanner:$(VERSION) .
 
 scan-self: build
-	./bin/piiflow scan . --no-fail
+	./bin/pii-scanner scan . --no-fail
 
 clean:
 	rm -rf bin dist

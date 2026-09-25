@@ -1,13 +1,13 @@
-# Copyright 2026 The piiflow Authors
+# Copyright 2026 The pii-scanner Authors
 # SPDX-License-Identifier: Apache-2.0
 #
-# Labelled corpus for measuring piiflow's accuracy:
+# Labelled corpus for measuring pii-scanner's accuracy:
 #
-#   go run ./cmd/piiflow-bench            # precision, recall, F1, sweep, timings
-#   go run ./cmd/piiflow-bench -check     # also fail below min_precision/min_recall
+#   go run ./cmd/pii-scanner-bench            # precision, recall, F1, sweep, timings
+#   go run ./cmd/pii-scanner-bench -check     # also fail below min_precision/min_recall
 #
 # Labels are the ground truth: what a careful reviewer reading the fixture
-# would report, not what piiflow reports today. A known miss stays labelled
+# would report, not what pii-scanner reports today. A known miss stays labelled
 # (it shows up as a false negative) and min_recall is set to today's score,
 # so the gate catches regressions and the miss stays visible.
 #

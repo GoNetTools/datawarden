@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-# Copyright 2026 The piiflow Authors
+# Copyright 2026 The pii-scanner Authors
 # SPDX-License-Identifier: Apache-2.0
 #
 # Multi-arch image (linux/amd64, linux/arm64). The binary is cross-compiled
@@ -32,11 +32,11 @@ RUN set -eux; \
       amd64:*) export CC=x86_64-linux-gnu-gcc ;; \
     esac; \
     GOOS="$TARGETOS" GOARCH="$TARGETARCH" bash scripts/release/build.sh "$VERSION" /out; \
-    cp "/out/${TARGETOS}_${TARGETARCH}/piiflow" /out/piiflow; \
+    cp "/out/${TARGETOS}_${TARGETARCH}/pii-scanner" /out/pii-scanner; \
     bash scripts/third-party-licenses.sh > /out/THIRD_PARTY_LICENSES.txt
 
 FROM golang:1.27-trixie
-LABEL org.opencontainers.image.title="piiflow" \
+LABEL org.opencontainers.image.title="pii-scanner" \
       org.opencontainers.image.description="Finds personal data (PII) flowing to logs, analytics/crash SDKs and third parties" \
       org.opencontainers.image.source="https://github.com/GoNetTools/pii-scanner" \
       org.opencontainers.image.licenses="Apache-2.0"
@@ -45,9 +45,9 @@ COPY <<EOT /etc/gitconfig
 [safe]
 	directory = *
 EOT
-COPY --from=build /out/piiflow /usr/local/bin/piiflow
-COPY --from=build /out/THIRD_PARTY_LICENSES.txt /usr/share/doc/piiflow/
-COPY LICENSE NOTICE /usr/share/doc/piiflow/
+COPY --from=build /out/pii-scanner /usr/local/bin/pii-scanner
+COPY --from=build /out/THIRD_PARTY_LICENSES.txt /usr/share/doc/pii-scanner/
+COPY LICENSE NOTICE /usr/share/doc/pii-scanner/
 WORKDIR /src
-ENTRYPOINT ["piiflow"]
+ENTRYPOINT ["pii-scanner"]
 CMD ["scan", "."]

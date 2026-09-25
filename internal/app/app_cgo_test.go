@@ -1,4 +1,4 @@
-// Copyright 2026 The piiflow Authors
+// Copyright 2026 The pii-scanner Authors
 // SPDX-License-Identifier: Apache-2.0
 
 //go:build cgo
@@ -160,7 +160,7 @@ func TestBaselineDiffAndSARIF(t *testing.T) {
 	}
 	newCount := 0
 	for _, res := range s.Runs[0].Results {
-		if res.PartialFingerprints["piiflow/v1"] == "" || res.Locations[0].PhysicalLocation.Region.StartLine == 0 || strings.HasPrefix(res.Locations[0].PhysicalLocation.ArtifactLocation.URI, "/") {
+		if res.PartialFingerprints["pii-scanner/v1"] == "" || res.Locations[0].PhysicalLocation.Region.StartLine == 0 || strings.HasPrefix(res.Locations[0].PhysicalLocation.ArtifactLocation.URI, "/") {
 			t.Errorf("bad sarif result: %+v", res)
 		}
 		if res.BaselineState == "new" {

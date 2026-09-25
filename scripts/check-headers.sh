@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Copyright 2026 The piiflow Authors
+# Copyright 2026 The pii-scanner Authors
 # SPDX-License-Identifier: Apache-2.0
 #
 # Fails if a Go source file (outside testdata/ directories) lacks the license header.
@@ -19,7 +19,7 @@ if [ "$missing" -ne 0 ]; then
 
 Start each Go file with:
 
-// Copyright 2026 The piiflow Authors
+// Copyright 2026 The pii-scanner Authors
 // SPDX-License-Identifier: Apache-2.0
 MSG
   exit 1

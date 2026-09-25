@@ -1,4 +1,4 @@
-// Copyright 2026 The piiflow Authors
+// Copyright 2026 The pii-scanner Authors
 // SPDX-License-Identifier: Apache-2.0
 
 //go:build !cgo
@@ -12,7 +12,7 @@ import "github.com/GoNetTools/pii-scanner/internal/frontend"
 
 // Register records the tree-sitter languages as unavailable.
 func Register(r frontend.Registrar) {
-	const why = "this piiflow binary was built without cgo; use a release binary or the Docker image for Kotlin/Java/TypeScript"
+	const why = "this pii-scanner binary was built without cgo; use a release binary or the Docker image for Kotlin/Java/TypeScript"
 	for _, l := range Languages() {
 		r.RegisterUnavailable(l, why)
 	}

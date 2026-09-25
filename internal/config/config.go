@@ -1,7 +1,7 @@
-// Copyright 2026 The piiflow Authors
+// Copyright 2026 The pii-scanner Authors
 // SPDX-License-Identifier: Apache-2.0
 
-// Package config loads .piiflow.yaml.
+// Package config loads .pii-scanner.yaml.
 package config
 
 import (
@@ -17,7 +17,7 @@ import (
 )
 
 // FileName is the default config file name at the repository root.
-const FileName = ".piiflow.yaml"
+const FileName = ".pii-scanner.yaml"
 
 // Allow suppresses matching flows as accepted by policy.
 type Allow struct {
@@ -50,7 +50,7 @@ type Literals struct {
 	MinConfidence float64 `yaml:"min_confidence" json:"min_confidence"`
 }
 
-// Config is .piiflow.yaml.
+// Config is .pii-scanner.yaml.
 type Config struct {
 	Version int `yaml:"version" json:"version"`
 	// Languages restricts analysis (default: every supported language found).
@@ -59,7 +59,7 @@ type Config struct {
 	IncludeTests bool `yaml:"include_tests" json:"include_tests"`
 	// FirstPartyDomains turns network sinks to these hosts into first-party.
 	FirstPartyDomains []string `yaml:"first_party_domains" json:"first_party_domains,omitempty"`
-	// Rules are extra rule files or directories (default .piiflow/rules).
+	// Rules are extra rule files or directories (default .pii-scanner/rules).
 	Rules    []string `yaml:"rules" json:"rules,omitempty"`
 	Baseline string   `yaml:"baseline" json:"baseline"`
 	CacheDir string   `yaml:"cache_dir" json:"cache_dir"`
@@ -78,9 +78,9 @@ func Default() *Config {
 	t := true
 	return &Config{
 		Version:       1,
-		Rules:         []string{".piiflow/rules"},
-		Baseline:      ".piiflow/baseline.json",
-		CacheDir:      ".piiflow/cache",
+		Rules:         []string{".pii-scanner/rules"},
+		Baseline:      ".pii-scanner/baseline.json",
+		CacheDir:      ".pii-scanner/cache",
 		MinConfidence: 0.35,
 		Literals:      Literals{Enabled: &t, MinConfidence: 0.6},
 		Policy: Policy{
@@ -146,8 +146,8 @@ func Abs(root, p string) string {
 	return filepath.Join(root, filepath.FromSlash(p))
 }
 
-// Template is written by `piiflow init`.
-const Template = `# piiflow configuration. All keys are optional.
+// Template is written by `pii-scanner init`.
+const Template = `# pii-scanner configuration. All keys are optional.
 version: 1
 
 # Languages to analyze for flows (default: all supported that are present).
@@ -162,10 +162,10 @@ first_party_domains: []
 
 # Extra rule files/directories; rules with the same id replace built-ins,
 # and "- {id: <id>, disabled: true}" turns one off.
-rules: [.piiflow/rules]
+rules: [.pii-scanner/rules]
 
-baseline: .piiflow/baseline.json
-cache_dir: .piiflow/cache
+baseline: .pii-scanner/baseline.json
+cache_dir: .pii-scanner/cache
 
 literals:
   enabled: true

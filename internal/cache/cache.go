@@ -1,4 +1,4 @@
-// Copyright 2026 The piiflow Authors
+// Copyright 2026 The pii-scanner Authors
 // SPDX-License-Identifier: Apache-2.0
 
 // Package cache persists function summaries, the call graph and schema
@@ -24,7 +24,7 @@ import (
 const FormatVersion = 3
 
 // FileName is the cache file inside the cache directory.
-const FileName = "piiflow-cache.json"
+const FileName = "pii-scanner-cache.json"
 
 // Persister loads and stores the serialized cache.
 type Persister interface {

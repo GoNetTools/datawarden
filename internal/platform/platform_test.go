@@ -1,4 +1,4 @@
-// Copyright 2026 The piiflow Authors
+// Copyright 2026 The pii-scanner Authors
 // SPDX-License-Identifier: Apache-2.0
 
 package platform
@@ -36,7 +36,7 @@ func TestFileBlob(t *testing.T) {
 func TestOSWorkspace(t *testing.T) {
 	root := t.TempDir()
 	o := OS{Git: ExecGit}
-	if err := o.WriteFile(filepath.Join(root, ".piiflow.yaml"), []byte("version: 1\n")); err != nil {
+	if err := o.WriteFile(filepath.Join(root, ".pii-scanner.yaml"), []byte("version: 1\n")); err != nil {
 		t.Fatal(err)
 	}
 	if err := o.WriteFile(filepath.Join(root, "src", "a.go"), []byte("package a")); err != nil {

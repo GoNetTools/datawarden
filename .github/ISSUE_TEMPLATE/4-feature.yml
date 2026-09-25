@@ -12,9 +12,9 @@ body:
     id: proposal
     attributes:
       label: Proposal
-      description: What piiflow should do. For a new sink, name the library, the call and where the data goes.
+      description: What pii-scanner should do. For a new sink, name the library, the call and where the data goes.
   - type: textarea
     id: alternatives
     attributes:
       label: Workarounds you use today
-      description: For example, a rule in `.piiflow/rules/`.
+      description: For example, a rule in `.pii-scanner/rules/`.

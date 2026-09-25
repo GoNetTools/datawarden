@@ -1,4 +1,4 @@
-# Contributing to piiflow
+# Contributing to pii-scanner
 
 Thanks for helping. Bug reports, false-positive and missed-leak reports, new sink rules and new language frontends are all welcome.
 
@@ -9,8 +9,8 @@ By taking part you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md). Se
 This is a PII scanner, so issues, pull requests and fixtures are full of phone numbers, ID numbers and emails. **Use synthetic values only.**
 
 - Invent values that still pass validation: an unallocated phone number with a valid carrier prefix, a CCCD with a valid province code, a card number that passes Luhn, `@example.com` emails.
-- Put fixture files under `testdata/` (excluded in `.piiflowignore`) so piiflow's own CI scan does not flag them.
-- When you paste piiflow output into an issue, the values are already masked. Keep them that way.
+- Put fixture files under `testdata/` (excluded in `.pii-scannerignore`) so pii-scanner's own CI scan does not flag them.
+- When you paste pii-scanner output into an issue, the values are already masked. Keep them that way.
 
 ## Development setup
 
@@ -24,7 +24,7 @@ You need:
 git clone https://github.com/GoNetTools/pii-scanner && cd pii-scanner
 go test ./...                    # everything (cgo)
 CGO_ENABLED=0 go test ./...      # Go frontend + literal detector only
-go build -o bin/piiflow ./cmd/piiflow && ./bin/piiflow scan testdata/web --root testdata/web --no-baseline
+go build -o bin/pii-scanner ./cmd/pii-scanner && ./bin/pii-scanner scan testdata/web --root testdata/web --no-baseline
 ```
 
 `make` wraps the common commands (`make test test-nocgo vet lint build`).
@@ -52,7 +52,7 @@ scripts/check-headers.sh                                        # SPDX header on
 
 ### Report a false positive or a missed leak
 
-Use the issue templates. The most useful report is a **minimal snippet** (synthetic data) plus the piiflow output line, which names the rule (`[sdk.ts.sentry.set_user]`), data type and confidence.
+Use the issue templates. The most useful report is a **minimal snippet** (synthetic data) plus the pii-scanner output line, which names the rule (`[sdk.ts.sentry.set_user]`), data type and confidence.
 
 ### Add or fix a rule
 
@@ -72,11 +72,11 @@ Built-in rules are YAML files in `internal/rules/builtin/` (`go.yaml`, `jvm.yaml
 3. **Run** `go test ./internal/app -run TestRuleExamples`. It also fails when any built-in rule has no example.
 4. If a fixture under `testdata/` exercises the rule, label the flow in `testdata/eval.yaml`.
 
-A rule for one repository's own SDK belongs in that repository's `.piiflow/rules/*.yaml`. Test it the same way: put annotated examples in `.piiflow/rules/examples/` (scans never report that directory) and run `piiflow rules test .piiflow/rules/examples`.
+A rule for one repository's own SDK belongs in that repository's `.pii-scanner/rules/*.yaml`. Test it the same way: put annotated examples in `.pii-scanner/rules/examples/` (scans never report that directory) and run `pii-scanner rules test .pii-scanner/rules/examples`.
 
 ### Keep the accuracy corpus honest
 
-`testdata/eval.yaml` labels what a reviewer would report in each fixture, not what piiflow reports today. When you add or change a fixture, label every real leak in it, including ones piiflow misses (add a `note`), and use `ambiguous` only for flows that are genuinely acceptable either way. `go run ./cmd/piiflow-bench -check` (`make eval`) prints precision, recall and every miss and false positive. Raise `min_precision`/`min_recall` when your change improves them; lowering one needs a reason in the pull request.
+`testdata/eval.yaml` labels what a reviewer would report in each fixture, not what pii-scanner reports today. When you add or change a fixture, label every real leak in it, including ones pii-scanner misses (add a `note`), and use `ambiguous` only for flows that are genuinely acceptable either way. `go run ./cmd/pii-scanner-bench -check` (`make eval`) prints precision, recall and every miss and false positive. Raise `min_precision`/`min_recall` when your change improves them; lowering one needs a reason in the pull request.
 
 ### Add a data type or identifier name
 
@@ -99,7 +99,7 @@ A new language touches five places, and a test checks each one:
 - New Go files start with the license header:
 
   ```go
-  // Copyright 2026 The piiflow Authors
+  // Copyright 2026 The pii-scanner Authors
   // SPDX-License-Identifier: Apache-2.0
   ```
 
@@ -109,4 +109,4 @@ A new language touches five places, and a test checks each one:
 
 1. Move the **Unreleased** entries in `CHANGELOG.md` under the new version and merge that to `main`.
 2. Tag and push: `git tag -a v0.2.0 -m v0.2.0 && git push origin v0.2.0`.
-3. The `release` workflow tests the tag, builds the binaries (linux/macOS/windows, amd64/arm64), publishes the GitHub Release with checksums, pushes `ghcr.io/gonettools/piiflow`, and moves the `v0` tag that `uses: GoNetTools/pii-scanner@v0` resolves to. Tags with a suffix (`v0.2.0-rc.1`) become pre-releases and leave `v0` and `latest` alone.
+3. The `release` workflow tests the tag, builds the binaries (linux/macOS/windows, amd64/arm64), publishes the GitHub Release with checksums, pushes `ghcr.io/gonettools/pii-scanner`, and moves the `v0` tag that `uses: GoNetTools/pii-scanner@v0` resolves to. Tags with a suffix (`v0.2.0-rc.1`) become pre-releases and leave `v0` and `latest` alone.

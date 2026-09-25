@@ -1,7 +1,7 @@
-// Copyright 2026 The piiflow Authors
+// Copyright 2026 The pii-scanner Authors
 // SPDX-License-Identifier: Apache-2.0
 
-// Package lang is the one description of the languages piiflow reads:
+// Package lang is the one description of the languages pii-scanner reads:
 // their names, aliases, file extensions and test-file conventions. The file
 // walker, rule and config validation, and the scanner all look languages
 // up here, so adding a language starts with one entry in the table below.
@@ -23,7 +23,7 @@ const (
 	SQL        = "sql"
 )
 
-// Kind says what piiflow does with a language's files.
+// Kind says what pii-scanner does with a language's files.
 type Kind int
 
 const (
@@ -119,7 +119,7 @@ func IsCode(name string) bool {
 }
 
 // OfPath returns the language of a slash-separated path by its extension,
-// or "" for files piiflow does not parse.
+// or "" for files pii-scanner does not parse.
 func OfPath(rel string) string {
 	l, ok := ForPath(rel)
 	if !ok {

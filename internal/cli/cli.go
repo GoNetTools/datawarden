@@ -1,7 +1,7 @@
-// Copyright 2026 The piiflow Authors
+// Copyright 2026 The pii-scanner Authors
 // SPDX-License-Identifier: Apache-2.0
 
-// Package cli implements the piiflow command line as an App whose
+// Package cli implements the pii-scanner command line as an App whose
 // collaborators (workspace, scanner, cache, commenter, clock) are injected.
 // internal/app wires the production implementations; tests wire fakes.
 package cli
@@ -41,7 +41,7 @@ type Workspace interface {
 	// Abs resolves path against the working directory.
 	Abs(path string) (string, error)
 	// FindRoot returns the repository root enclosing dir: the nearest
-	// directory with .git or .piiflow.yaml, or dir itself.
+	// directory with .git or .pii-scanner.yaml, or dir itself.
 	FindRoot(dir string) string
 	IsDir(path string) bool
 	// Open returns the file system and version control of a repository.
@@ -90,27 +90,27 @@ type App struct {
 	Clock func() time.Time
 }
 
-const usage = `piiflow — find personal data (PII) flowing to logs, SDKs and third parties.
+const usage = `pii-scanner — find personal data (PII) flowing to logs, SDKs and third parties.
 
 Usage:
-  piiflow scan [paths...] [flags]      scan the repository (or only the given paths)
-  piiflow scan --diff origin/main      PR mode: changed files plus their callers
-  piiflow baseline                     accept the current findings
-  piiflow map --format dpia            personal-data map (dpia, json, csv, mermaid)
-  piiflow rules                        print the effective sink/source/transform rules
-  piiflow rules test DIR               check annotated examples in DIR against the rules
-  piiflow init                         write .piiflow.yaml and .piiflowignore
-  piiflow comment piiflow.md           create/update the PR (GitHub) or MR (GitLab) summary comment
-  piiflow version
+  pii-scanner scan [paths...] [flags]      scan the repository (or only the given paths)
+  pii-scanner scan --diff origin/main      PR mode: changed files plus their callers
+  pii-scanner baseline                     accept the current findings
+  pii-scanner map --format dpia            personal-data map (dpia, json, csv, mermaid)
+  pii-scanner rules                        print the effective sink/source/transform rules
+  pii-scanner rules test DIR               check annotated examples in DIR against the rules
+  pii-scanner init                         write .pii-scanner.yaml and .pii-scannerignore
+  pii-scanner comment pii-scanner.md           create/update the PR (GitHub) or MR (GitLab) summary comment
+  pii-scanner version
 
 Exit codes: 0 clean, 1 new policy violation, 2 error.
-Run "piiflow <command> -h" for flags.
+Run "pii-scanner <command> -h" for flags.
 `
 
 // Run executes the command line and returns the process exit code.
 func (a *App) Run(ctx context.Context, args []string) int {
 	if err := a.check(); err != nil {
-		fmt.Fprintf(a.Stderr, "piiflow: %v\n", err)
+		fmt.Fprintf(a.Stderr, "pii-scanner: %v\n", err)
 		return ExitError
 	}
 	if len(args) == 0 {
@@ -141,18 +141,18 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		if a.Languages != nil {
 			langs = a.Languages()
 		}
-		fmt.Fprintf(a.Stdout, "piiflow %s (frontends: %s)\n", a.Version, strings.Join(langs, ", "))
+		fmt.Fprintf(a.Stdout, "pii-scanner %s (frontends: %s)\n", a.Version, strings.Join(langs, ", "))
 	case "help", "-h", "--help":
 		fmt.Fprint(a.Stdout, usage)
 	default:
-		fmt.Fprintf(a.Stderr, "piiflow: unknown command %q\n\n%s", args[0], usage)
+		fmt.Fprintf(a.Stderr, "pii-scanner: unknown command %q\n\n%s", args[0], usage)
 		return ExitError
 	}
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return ExitClean
 		}
-		fmt.Fprintf(a.Stderr, "piiflow: %v\n", err)
+		fmt.Fprintf(a.Stderr, "pii-scanner: %v\n", err)
 		return ExitError
 	}
 	return code
