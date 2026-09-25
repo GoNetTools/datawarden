@@ -350,6 +350,8 @@ go tool pprof -sample_index=alloc_space mem.out
 
 ### Design: inversion of control
 
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) describes the pipeline, the layers, the data model, the analysis and the extension points in detail.
+
 Components talk to each other only through interfaces. Each package declares the small interfaces it needs, next to the code that uses them, and receives its collaborators through struct fields. Only the composition root (`internal/app`) picks concrete implementations, and only `internal/platform` touches the operating system. `TestComponentsTalkThroughInterfaces` type-checks the module and fails on any call from one component into another's concrete code; the shared vocabulary (`ir`, `finding`, `lang`) is the only exception:
 
 ```

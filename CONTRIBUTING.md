@@ -41,7 +41,7 @@ scripts/check-headers.sh                                        # SPDX header on
 
 ## How the code is organised
 
-The README's [Development](README.md#development) section has the full layout. The rules that keep the code testable:
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) explains the pipeline, the layers and the interfaces between components; the README's [Development](README.md#development) section has the full layout. The rules that keep the code testable:
 
 - **Components talk only through interfaces.** A package declares the small interface it needs next to the code that uses it (`scan` declares `FileLister`, `Frontends`, `Analyzer`; `cli` declares `Scanner`, `Policy`, `Reporter`, ...), and the other package implements it. `TestComponentsTalkThroughInterfaces` (in `internal/app`) fails on any call into another component's concrete functions or methods. Calls into `ir`, `finding` and `lang` are fine: they are the shared vocabulary. To use a new service, add an interface where you need it, a field to inject it, and the wiring in `internal/app`.
 - **Only `internal/app` builds concrete types**, and only `internal/platform` touches the OS (files, `git`, the cache on disk). Everything else reads files through `fs.FS` and receives its clock, environment and HTTP client.

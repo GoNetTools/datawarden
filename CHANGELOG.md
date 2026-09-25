@@ -24,6 +24,7 @@ All notable changes to piiflow are documented here. The format follows [Keep a C
 ### Changed
 
 - Rule files are read strictly: unknown keys, unknown `lang` values and ids defined twice in one file are errors.
+- `docs/ARCHITECTURE.md`: the scan pipeline, layers, design rules, interfaces, data model, analysis, extension points and test strategy.
 - Components communicate only through interfaces: the CLI reaches configuration, rules, policy, baselines, reports, the data map and rule tests through injected services, the scanner lists files through `FileLister`, frontends register through `frontend.Registrar`. An architecture test enforces it.
 - Languages are defined in one table (`internal/lang`); `languages:` in `.piiflow.yaml` accepts the same aliases as rules (`kt`, `ts`, `js`, `golang`).
 
