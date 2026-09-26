@@ -4,6 +4,10 @@ All notable changes to datawarden are documented here. The format follows [Keep 
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-09-26
+
+First public release.
+
 ### Added
 
 - `datawarden graph` draws the call graph behind the violations: sources, the functions the data goes through, their callers, and the sinks colored by destination. It writes an SVG image laid out by datawarden (no Graphviz needed), or Graphviz DOT or Mermaid (`--format`); `--all`, `--function` and `--data-type` choose the flows.
@@ -93,4 +97,5 @@ All notable changes to datawarden are documented here. The format follows [Keep 
 - A network call's response no longer inherits the taint of its request (a login reply was reported as the password it was sent with).
 - A map or object literal key labels its value (`map[string]any{"email": v}`) even when some type in the repository has a field of the same name.
 
-[Unreleased]: https://github.com/GoNetTools/datawarden/commits/main
+[Unreleased]: https://github.com/GoNetTools/datawarden/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/GoNetTools/datawarden/releases/tag/v0.1.0
