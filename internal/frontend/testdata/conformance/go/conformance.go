@@ -411,3 +411,14 @@ func sanitizerCheck(email string) {
 		log.Println(email)
 	}
 }
+
+// scenario: alias
+type card struct{ holder string }
+
+func aliasStore(email string) {
+	a := &card{}
+	b := a
+	b.holder = email
+	// ruleid: log.go.stdlib
+	log.Println(a.holder)
+}

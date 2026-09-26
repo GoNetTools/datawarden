@@ -415,4 +415,15 @@ class Conformance {
             System.out.println(email);
         }
     }
+
+    // scenario: alias
+    static class Card { String holder = ""; }
+
+    void aliasStore(String email) {
+        Card a = new Card();
+        Card b = a;
+        b.holder = email;
+        // ruleid: log.jvm.stdout
+        System.out.println(a.holder);
+    }
 }

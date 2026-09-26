@@ -423,3 +423,16 @@ export function sanitizerCheck(email: string) {
     console.log(email);
   }
 }
+
+// scenario: alias
+class Card {
+  holder = "";
+}
+
+export function aliasStore(email: string) {
+  const a = new Card();
+  const b = a;
+  b.holder = email;
+  // ruleid: log.ts.console
+  console.log(a.holder);
+}

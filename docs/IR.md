@@ -144,6 +144,13 @@ dominates `P`. Dominance is computed over normal and exceptional edges
   is reported with that check as a guard (`analysis/guard.go`). A call
   of a function whose every return is a consent check is one, and a
   function every call of which is guarded inherits the checks.
+- **Aliasing**: a points-to analysis per function (`analysis/pointsto.go`)
+  finds the variables that may refer to the same object: allocations,
+  parameters and call results are objects, `assign` and `phi` merge
+  what their arguments refer to, a `load` refers to the object in that
+  field of its base's objects, and a builder call's result to its
+  receiver. A mutation through one variable is a mutation through all of
+  them.
 - **Checks**: a branch on a predicate about a value refines it where it
   passes: `isMasked(v)` (and `isRedacted`, `isEncrypted`, … : the
   transform), `!containsPii(v)` (the `pii-checked` transform), and

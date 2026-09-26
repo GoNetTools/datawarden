@@ -554,3 +554,55 @@ func TestChecks(t *testing.T) {
 		}
 	}
 }
+
+// Points-to: a mutation through one variable is seen through every
+// variable that may refer to the same object, and only there; a field
+// store stays in its field.
+func TestPointsTo(t *testing.T) {
+	f := newFunc("p.f")
+	email := f.AddParam("email", "String", pos(1))
+	c := f.AddParam("c", "Boolean", pos(1))
+	alloc := func(line int) ir.VarID {
+		v := f.Temp(pos(line))
+		f.Emit(ir.Instr{Op: ir.OpNew, Dst: v, Call: &ir.Call{Callee: "p.Box", Name: "Box"}, Pos: pos(line)})
+		return v
+	}
+	load := func(obj ir.VarID, field string, line int) ir.VarID {
+		v := f.Temp(pos(line))
+		f.Emit(ir.Instr{Op: ir.OpLoad, Dst: v, Args: []ir.VarID{obj}, Field: field, Pos: pos(line)})
+		return v
+	}
+	a, b, other := alloc(2), alloc(2), alloc(2)
+	x := f.Temp(pos(3))
+	f.Emit(ir.Instr{Op: ir.OpAssign, Dst: x, Args: []ir.VarID{a}, Pos: pos(3)})
+	f.Emit(ir.Instr{Op: ir.OpStore, Dst: ir.NoVar, Args: []ir.VarID{x, email}, Field: "f", Pos: pos(4)})
+	logTo(f, load(a, "f", 5), 5)     // through the alias: reported
+	logTo(f, load(b, "f", 6), 6)     // another object: not reported
+	logTo(f, load(a, "g", 7), 7)     // another field: not reported
+	logTo(f, load(other, "f", 8), 8) // not reported
+	// y = c ? b : other; y.f = email; log(b.f) at 12
+	then := f.NewBlock(0)
+	join := f.NewBlock(0, then)
+	f.Branch(0, c, then, join)
+	y := f.Temp(pos(10))
+	f.Emit(ir.Instr{Op: ir.OpPhi, Dst: y, Args: []ir.VarID{b, other}, From: []int32{0, then}, Pos: pos(10)})
+	f.Emit(ir.Instr{Op: ir.OpStore, Dst: ir.NoVar, Args: []ir.VarID{y, email}, Field: "h", Pos: pos(11)})
+	logTo(f, load(b, "h", 12), 12)
+
+	res := analyze(t, nil, f)
+	if flowAt(res, 5) == nil || flowAt(res, 12) == nil {
+		t.Errorf("alias or phi alias missed: %+v", res.Flows)
+	}
+	for _, line := range []int{6, 7, 8} {
+		if fl := flowAt(res, line); fl != nil {
+			t.Errorf("line %d: %+v", line, fl)
+		}
+	}
+	pt := newPointsTo(f, nil, nil)
+	if !slices.Contains(pt.mutated(x), a) || slices.Contains(pt.mutated(a), b) || !slices.Contains(pt.mutated(y), other) {
+		t.Errorf("aliases: x %v, a %v, y %v", pt.mutated(x), pt.mutated(a), pt.mutated(y))
+	}
+	if got := (*pointsTo)(nil).mutated(a); len(got) != 1 {
+		t.Errorf("nil points-to: %v", got)
+	}
+}

@@ -119,6 +119,10 @@ type fact struct {
 	xf    []string
 	conf  float64
 	seed  bool // seeded on this very variable (by its own name/type)
+	// stored is the field a store put this fact into, when the fact is
+	// on the object itself because one of its fields holds it: reading
+	// another field of an object of unknown type does not give it.
+	stored string
 	// at is 1 + the index of the instruction that put this fact on an
 	// object by mutating it (a field store, list.add, a callee writing
 	// into an argument), or 0 for a fact the value has from its
@@ -134,6 +138,9 @@ func (f *fact) key() string {
 	}
 	if f.at > 0 {
 		k += fmt.Sprintf("@%d", f.at)
+	}
+	if f.stored != "" {
+		k += "^" + f.stored
 	}
 	return k
 }
@@ -161,6 +168,9 @@ type state struct {
 	guards [][]string
 	// checks are the values a branch on a check refined (checks.go).
 	checks map[ir.VarID]check
+	// pt is the points-to result: which variables may refer to the same
+	// object (pointsto.go).
+	pt *pointsTo
 	// last is the index of each block's last instruction, or -1.
 	last []int
 }
@@ -227,6 +237,23 @@ func (s *state) guardsAt(fn *ir.Func) []string {
 // visible reports whether f can be seen by the current instruction.
 func (s *state) visible(f *fact) bool {
 	return f.at == 0 || s.order.before(f.at-1, s.cur)
+}
+
+// mutate puts f on the object v refers to, in field when it is set, as a
+// mutation of the object: every variable that may refer to it gets it.
+func (s *state) mutate(v ir.VarID, field string, f *fact) bool {
+	changed := false
+	for _, w := range s.pt.mutated(v) {
+		if field != "" {
+			changed = s.addStore(w, field, f) || changed
+			g := *f
+			g.stored = field
+			changed = s.add(w, &g) || changed
+			continue
+		}
+		changed = s.add(w, f) || changed
+	}
+	return changed
 }
 
 // mutation marks a fact as put on an object by the current instruction.
@@ -717,6 +744,7 @@ func (a *analyzer) analyzeFunc(fn *ir.Func) *Summary {
 	st := &state{facts: make([]map[string]*fact, len(fn.Vars)), stores: map[ir.VarID]map[string]map[string]*fact{}, minC: a.opts.MinConf,
 		order: newOrder(fn), multi: multiDefined(fn), fluent: fluentResults(fn), loads: loadsOf(fn), guards: a.guards[fn.ID], last: lastInstrs(fn),
 		closures: a.flow.local(fn.ID), checks: a.checks[fn.ID]}
+	st.pt = newPointsTo(fn, st.fluent, st.checks)
 	a.seed(st, fn)
 	sum := &Summary{}
 	for iter := 0; iter < 40; iter++ {
@@ -886,6 +914,9 @@ func (a *analyzer) fieldFacts(st *state, fn *ir.Func, obj ir.VarID, owner, field
 	known := a.opts.Schema.KnownType(owner)
 	for _, f := range st.of(obj) {
 		switch {
+		case f.stored != "":
+			// Held by one of the object's fields: read from st.stores
+			// above when it is this one.
 		case !known:
 			out = append(out, derive(f, pos, 0.8))
 		case f.dt == "" && f.at == 0:
@@ -963,8 +994,7 @@ func (a *analyzer) step(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 		obj, val := in.Args[0], in.Args[1]
 		for _, f := range st.of(val) {
 			d := st.mutation(derive(f, in.Pos, 1))
-			changed = st.addStore(obj, in.Field, d) || changed
-			changed = st.add(obj, d) || changed
+			changed = st.mutate(obj, in.Field, d) || changed
 			// A store into an object read from another one's field is a
 			// store into a longer access path of that one: t = user.addr;
 			// t.city = email stores user.addr.city.
@@ -975,8 +1005,7 @@ func (a *analyzer) step(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 					break
 				}
 				path, base = ref.field+"."+path, ref.obj
-				changed = st.addStore(base, path, d) || changed
-				changed = st.add(base, d) || changed
+				changed = st.mutate(base, path, d) || changed
 			}
 		}
 		// A store without a declared owner type is a map or object literal
@@ -985,7 +1014,10 @@ func (a *analyzer) step(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 		untyped := in.Owner == ""
 		if _, fs := a.opts.Schema.Field(in.Owner, in.Field); untyped || (fs == detect.FieldUnknown && !a.opts.Schema.KnownType(in.Owner)) {
 			if m, ok := a.opts.Names.Key(in.Field); ok {
-				changed = st.add(obj, st.mutation(&fact{dt: m.DataType, param: -1, src: in.Pos, desc: fmt.Sprintf("key %q", in.Field), path: []ir.Pos{in.Pos}, conf: m.Conf})) || changed
+				f := st.mutation(&fact{dt: m.DataType, param: -1, src: in.Pos, desc: fmt.Sprintf("key %q", in.Field), path: []ir.Pos{in.Pos}, conf: m.Conf, stored: in.Field})
+				for _, w := range st.pt.mutated(obj) {
+					changed = st.add(w, f) || changed
+				}
 			}
 		}
 	case ir.OpCall, ir.OpNew:
@@ -1026,7 +1058,7 @@ func (a *analyzer) alias(st *state, in *ir.Instr, dst, src ir.VarID) bool {
 	changed := false
 	for _, f := range st.all(src) {
 		d := derive(f, in.Pos, 1)
-		d.at = f.at
+		d.at, d.stored = f.at, f.stored
 		changed = st.add(dst, d) || changed
 	}
 	for field, m := range st.stores[src] {
@@ -1333,7 +1365,7 @@ func (a *analyzer) call(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 				// builder call's result (sb.append(a).append(email)).
 				r := in.Args[0]
 				for depth := 0; r >= 0 && depth < 8; depth++ {
-					changed = st.add(r, st.mutation(derive(f, in.Pos, 0.9))) || changed
+					changed = st.mutate(r, "", st.mutation(derive(f, in.Pos, 0.9))) || changed
 					next, ok := st.fluent[r]
 					if !ok {
 						break
@@ -1424,11 +1456,7 @@ func (a *analyzer) apply(st *state, fn *ir.Func, in *ir.Instr, s *Summary, args 
 		if target < 0 {
 			return
 		}
-		f = st.mutation(f)
-		if field != "" {
-			changed = st.addStore(target, field, f) || changed
-		}
-		changed = st.add(target, f) || changed
+		changed = st.mutate(target, field, st.mutation(f)) || changed
 	}
 	for i := range args {
 		for _, t := range s.ParamReturn[i] {

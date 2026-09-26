@@ -395,3 +395,16 @@ fun sanitizerCheck(email: String) {
         println(email)
     }
 }
+
+// scenario: alias
+class Card {
+    var holder = ""
+}
+
+fun aliasStore(email: String) {
+    val a = Card()
+    val b = a
+    b.holder = email
+    // ruleid: log.jvm.stdout
+    println(a.holder)
+}

@@ -64,6 +64,7 @@ var conformanceScenarios = map[string]string{
 	"consent-helper":           "after a call of a helper that returns a consent check, the flow is reported with it as its guard",
 	"consent-caller":           "a function only ever called after a consent check reports its flows with that check",
 	"validation-check":         "a value that passed a validation check (isValidEmail) is that kind of data where it passed",
+	"alias":                    "stored into a field through one variable, read through another that refers to the same object",
 	"sanitizer-check":          "a value checked to be masked (isMasked) is treated as masked where the check passed (ok)",
 }
 

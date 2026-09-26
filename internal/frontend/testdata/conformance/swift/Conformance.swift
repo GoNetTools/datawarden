@@ -437,3 +437,16 @@ func sanitizerCheck(email: String) {
         print(email)
     }
 }
+
+// scenario: alias
+class Card {
+    var holder = ""
+}
+
+func aliasStore(email: String) {
+    let a = Card()
+    let b = a
+    b.holder = email
+    // ruleid: log.swift.print
+    print(a.holder)
+}

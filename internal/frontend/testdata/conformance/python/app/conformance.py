@@ -414,3 +414,17 @@ def sanitizer_check(email: str):
     if is_masked(email):
         # ok: log.py.print
         print(email)
+
+
+# scenario: alias
+class Card:
+    def __init__(self):
+        self.holder = ""
+
+
+def alias_store(email: str):
+    a = Card()
+    b = a
+    b.holder = email
+    # ruleid: log.py.print
+    print(a.holder)
