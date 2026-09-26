@@ -6,7 +6,7 @@ MODULE      := $(shell go list -m)
 LDFLAGS     := -s -w -X $(MODULE)/internal/app.Version=$(VERSION)
 STATICCHECK := honnef.co/go/tools/cmd/staticcheck@v0.8.1
 
-.PHONY: build build-nocgo test test-nocgo race vet lint headers check eval bench release-local docker scan-self clean
+.PHONY: build build-nocgo test test-nocgo race vet lint headers check eval eval-external bench release-local docker scan-self clean
 
 ## build: full binary (Go + Kotlin + Java + TypeScript); needs a C compiler
 build:
@@ -42,6 +42,10 @@ check: vet lint headers test test-nocgo
 ## eval: precision/recall/F1 and scan timings on the labelled corpus (testdata/eval.yaml)
 eval:
 	CGO_ENABLED=1 go run ./cmd/datawarden-bench -runs 3 -check
+
+## eval-external: eval plus the open-source apps pinned in testdata/eval.yaml (fetched with git)
+eval-external:
+	CGO_ENABLED=1 go run ./cmd/datawarden-bench -runs 1 -check -external
 
 ## bench: Go benchmarks (engine scaling, detectors, end-to-end fixture scans)
 bench:

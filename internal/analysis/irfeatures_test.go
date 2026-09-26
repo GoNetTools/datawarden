@@ -664,3 +664,76 @@ func TestStrongUpdates(t *testing.T) {
 		t.Errorf("a field overwritten on one path only is lost: %+v", res.Flows)
 	}
 }
+
+// Text before a value names it; names and definitions refine what a value
+// is.
+func TestLabelsAndNames(t *testing.T) {
+	f := newFunc("p.f")
+	cc := f.AddParam("cctxt", "String", pos(1))
+	n := f.AddParam("n", "Int", pos(1))
+	pw := f.AddParam("pw", "String", pos(1))
+	// "Error with credit card: " + cctxt → a card number (line 2).
+	msg := f.Temp(pos(2))
+	f.Compute(msg, pos(2), "+", f.ConstVar("Error with credit card: ", pos(2)), cc)
+	logTo(f, msg, 2)
+	// "count: " + n → nothing (line 3).
+	cnt := f.Temp(pos(3))
+	f.Compute(cnt, pos(3), "+", f.ConstVar("count: ", pos(3)), n)
+	logTo(f, cnt, 3)
+	// Log.d(TAG, "user email=%s", cctxt): a format string (line 4).
+	f.Emit(ir.Instr{Op: ir.OpCall, Dst: f.Temp(pos(4)), Args: []ir.VarID{f.ConstVar("TAG", pos(4)), f.ConstVar("user email=%s", pos(4)), cc},
+		Call: &ir.Call{Callee: "android.util.Log.d", Name: "d"}, Pos: pos(4)})
+	// val password = encryptString(pw); prefs.putString("password", password)
+	// is encrypted, key or no key (line 5).
+	enc := f.Named("password", "String", pos(5))
+	f.Emit(ir.Instr{Op: ir.OpCall, Dst: enc, Args: []ir.VarID{pw}, Call: &ir.Call{Name: "encryptString"}, Pos: pos(5)})
+	editor := f.Named("editor", "android.content.SharedPreferences.Editor", pos(5))
+	f.Emit(ir.Instr{Op: ir.OpCall, Dst: f.Temp(pos(5)), Args: []ir.VarID{editor, f.ConstVar("password", pos(5)), enc},
+		Call: &ir.Call{Callee: "android.content.SharedPreferences.Editor.putString", Name: "putString", HasRecv: true}, Pos: pos(5)})
+	// val derivationStatus = derive(pw): a status, not the password (line 6).
+	st := f.Temp(pos(6))
+	f.Emit(ir.Instr{Op: ir.OpCall, Dst: st, Args: []ir.VarID{f.Named("password", "String", pos(6))}, Call: &ir.Call{Name: "derive"}, Pos: pos(6)})
+	status := f.Named("derivationStatus", "", pos(6))
+	f.Assign(status, pos(6), st)
+	logTo(f, status, 6)
+
+	res := analyze(t, nil, f)
+	if fl := flowAt(res, 2); fl == nil || fl.DataType != "credit_card" {
+		t.Errorf("labelled concatenation: %+v", fl)
+	}
+	if fl := flowAt(res, 3); fl != nil {
+		t.Errorf("count: %+v", fl)
+	}
+	if fl := flowAt(res, 4); fl == nil || fl.DataType != "email" {
+		t.Errorf("format string: %+v", fl)
+	}
+	for _, fl := range res.Flows {
+		if fl.Sink.Line == 5 && !slices.Contains(fl.Transforms, "encrypted") {
+			t.Errorf("an encrypted value stored under a password key: %+v", fl)
+		}
+	}
+	if fl := flowAt(res, 6); fl != nil {
+		t.Errorf("status: %+v", fl)
+	}
+	for name, want := range map[string]bool{"derivationStatus": true, "rowCount": true, "count": true, "discount": false, "status": true, "is_ok": true, "token": false} {
+		if dataFreeName(name) != want {
+			t.Errorf("dataFreeName(%s) = %v", name, !want)
+		}
+	}
+}
+
+// Dispatch stays within the caller's language.
+func TestDispatchStaysInLanguage(t *testing.T) {
+	h := newHierarchy([]*ir.Class{
+		{Name: "error", Lang: "go"},
+		{Name: "jsError", Lang: "typescript", Supers: []string{"error"}, Methods: map[string]string{"Error": "js.Error"}},
+		{Name: "myErr", Lang: "go", Supers: []string{"error"}, Methods: map[string]string{"Error": "p.myErr.Error"}},
+	})
+	c := &ir.Call{Name: "Error", HasRecv: true, RecvType: "error"}
+	if got := h.targets(c, "go"); len(got) != 1 || got[0] != "p.myErr.Error" {
+		t.Errorf("go targets: %v", got)
+	}
+	if got := h.targets(c, ""); len(got) != 2 {
+		t.Errorf("any language: %v", got)
+	}
+}

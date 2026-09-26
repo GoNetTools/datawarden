@@ -208,13 +208,13 @@ datawarden looks for secrets *in data flows* as well as in files: a password log
 
 ## Sink rules
 
-Rules are YAML files embedded in the binary (`internal/rules/builtin/`: 123 rules for Go, Python, Java/Kotlin, Swift and TypeScript). A repository adds, replaces or disables rules in `.datawarden/rules/*.yaml` (or any path listed under `rules:` in `.datawarden.yaml`).
+Rules are YAML files embedded in the binary (`internal/rules/builtin/`: 126 rules for Go, Python, Java/Kotlin, Swift and TypeScript). A repository adds, replaces or disables rules in `.datawarden/rules/*.yaml` (or any path listed under `rules:` in `.datawarden.yaml`).
 
 ```yaml
 - id: sdk.sentry.set_user
   lang: kotlin                       # or a list: [kotlin, java]
   call: io.sentry.Sentry.setUser     # qualified callee; '*' is a wildcard; may be a list
-  arg: 0                             # 0-based, receiver excluded; a list, or "*" for all
+  arg: 0                             # 0-based, receiver excluded; a list, "*" for all, -1 for the receiver
   dest: { host: sentry.io, kind: third_party, vendor: Sentry, region: us }
 
 - id: sdk.acme.telemetry             # a repository-specific SDK
@@ -372,12 +372,15 @@ datawarden favours explainable, low-noise results over completeness. Every findi
 go run ./cmd/datawarden-bench                     # or: make eval
 go run ./cmd/datawarden-bench -runs 5 -json eval.json -markdown eval.md
 go run ./cmd/datawarden-bench -manifest my-corpus.yaml -check
+go run ./cmd/datawarden-bench -external -check      # or: make eval-external
 ```
+
+Besides the fixtures, the corpus has **external cases**: deliberately insecure open-source apps pinned by repository and commit, labelled from their source and fetched with git only when `-external` is given (into `-cache`, the user cache directory by default), so their code is never copied into this repository. They are DIVA and InsecureBankv2 (Android, Java), the OWASP MASTG playground (Android Java and Kotlin, iOS Swift), DVIA-v2 (iOS, Swift), pygoat (Python/Django) and govwa (Go), which has no personal-data leak and checks that none is reported. CI runs them too. Known misses stay labelled with a note.
 
 - **Precision** = TP / (TP + FP) and **recall** = TP / (TP + FN), per case, per data type and per sink category (`log`, `sdk`, `net`, `storage`, `literal`). A label matched by several findings is one true positive; any other reported violation is a false positive. Findings matching an `ambiguous` label (for example data sent to a host that may be first party) count as neither.
 - A **confidence sweep** rescores every case at each threshold in `thresholds`, which shows what raising `policy.min_confidence` would cost in recall.
 - **Timings**: median wall time over `-runs` cold scans, memory allocated by the scan, files and functions. The Go frontend's `go list` runs in a child process, so its time is included but its memory is not.
-- `-check` exits 1 when a case scores below its `min_precision` or `min_recall`. CI runs it on every pull request and publishes the tables in the job summary; timings are reported but not gated.
+- `-check` exits 1 when a case scores below its `min_precision` or `min_recall` (external cases that did not run are skipped). CI runs it on every pull request and publishes the tables in the job summary; timings are reported but not gated.
 
 **See it on a realistic app:** [`testdata/vulnshop`](testdata/vulnshop) is a small shop (Go API, Python recommender, TypeScript checkout, Kotlin/Java Android app, Swift iOS app, CSV seed data, an env file) with 51 planted leaks of personal data, health data and credentials, and a set of traps. Run **Actions → demo → Run workflow** to scan it, or any other directory, and get the findings, the data map and the accuracy tables in the job summary.
 

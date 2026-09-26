@@ -6,7 +6,10 @@
 // and sink, a confidence-threshold sweep, and scan time and allocations.
 //
 //	go run ./cmd/datawarden-bench [-manifest testdata/eval.yaml] [-runs 3] [-check]
-//	                           [-json eval.json] [-markdown eval.md]
+//	                           [-json eval.json] [-markdown eval.md] [-external]
+//
+// External cases (open-source apps pinned by repo and commit) are fetched
+// with git into -cache and scanned only with -external.
 //
 // Scans go through the same code as `datawarden scan --no-cache --no-baseline`.
 // Exit codes: 0 ok, 1 a case scored below its min_precision/min_recall
@@ -21,6 +24,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"runtime"
@@ -49,6 +53,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	check := fs.Bool("check", false, "exit 1 when a case scores below its min_precision or min_recall")
 	jsonOut := fs.String("json", "", "also write the result as JSON to `file`")
 	mdOut := fs.String("markdown", "", "also write a Markdown summary to `file`")
+	external := fs.Bool("external", false, "also run external cases: fetch their repositories with git")
+	cacheDir := fs.String("cache", defaultCache(), "where external repositories are checked out")
 	if err := fs.Parse(args); err != nil {
 		if err == flag.ErrHelp {
 			return 0
@@ -76,13 +82,19 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	for _, l := range app.NewComponents(time.Now).Frontends.Languages() {
 		langs[l] = true
 	}
-	res, err := eval.Run(ctx, eval.Options{
+	opts := eval.Options{
 		Manifest:  m,
 		BaseDir:   base,
 		Scan:      scan,
 		Available: func(l string) bool { return langs[l] },
 		Runs:      *runs,
-	})
+	}
+	if *external {
+		opts.Fetch = func(ctx context.Context, repo, commit string) (string, error) {
+			return fetch(ctx, *cacheDir, repo, commit, stderr)
+		}
+	}
+	res, err := eval.Run(ctx, opts)
 	if err != nil {
 		return fail(err)
 	}
@@ -112,6 +124,44 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	return 0
+}
+
+func defaultCache() string {
+	if d, err := os.UserCacheDir(); err == nil {
+		return filepath.Join(d, "datawarden-eval")
+	}
+	return filepath.Join(os.TempDir(), "datawarden-eval")
+}
+
+// fetch checks out repo at commit under cache (once) and returns the
+// checkout.
+func fetch(ctx context.Context, cache, repo, commit string, log io.Writer) (string, error) {
+	name := strings.NewReplacer("https://", "", "http://", "", "/", "_", ":", "_").Replace(strings.TrimSuffix(repo, ".git"))
+	dir := filepath.Join(cache, name+"-"+commit[:12])
+	git := func(args ...string) (string, error) {
+		cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return "", fmt.Errorf("git %s: %v: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+		}
+		return strings.TrimSpace(string(out)), nil
+	}
+	if head, err := git("rev-parse", "HEAD"); err == nil && head == commit {
+		return dir, nil
+	}
+	fmt.Fprintf(log, "fetching %s at %s\n", repo, commit[:12])
+	if err := os.RemoveAll(dir); err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	for _, args := range [][]string{{"init", "-q"}, {"remote", "add", "origin", repo}, {"fetch", "-q", "--depth", "1", "origin", commit}, {"checkout", "-q", "--detach", "FETCH_HEAD"}} {
+		if _, err := git(args...); err != nil {
+			return "", err
+		}
+	}
+	return dir, nil
 }
 
 // scan runs `datawarden scan` in-process and measures it.

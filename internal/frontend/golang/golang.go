@@ -420,6 +420,86 @@ func (l *lowerer) classes() []*ir.Class {
 	return out
 }
 
+// echoingPackages return errors that quote their input: strconv.Atoi(s)
+// fails with `parsing "s": invalid syntax`, url.Parse and time.Parse with
+// the string, os.Open with the path.
+var echoingPackages = map[string]bool{"strconv": true, "net/url": true, "time": true, "os": true, "io/fs": true,
+	"path/filepath": true, "net/mail": true, "net/netip": true, "net": true, "mime": true, "regexp": true}
+
+// errorCtors build an error from their arguments, so the error carries
+// them.
+var errorCtors = map[string]bool{"fmt.Errorf": true, "errors.New": true, "errors.Join": true,
+	"github.com/pkg/errors.Wrap": true, "github.com/pkg/errors.Wrapf": true, "github.com/pkg/errors.Errorf": true,
+	"github.com/pkg/errors.New": true, "github.com/pkg/errors.WithMessage": true, "github.com/pkg/errors.WithMessagef": true}
+
+// handleCtors open connections and clients: their results are handles
+// that do not carry the configuration (DSN, credentials) they were made
+// from.
+var handleCtors = map[string]bool{
+	"database/sql.Open": true, "database/sql.OpenDB": true, "gorm.io/gorm.Open": true,
+	"github.com/jmoiron/sqlx.Open": true, "github.com/jmoiron/sqlx.Connect": true,
+	"github.com/jackc/pgx/v5.Connect": true, "github.com/jackc/pgx/v5/pgxpool.New": true,
+	"github.com/redis/go-redis/v9.NewClient": true, "github.com/go-redis/redis/v8.NewClient": true,
+	"go.mongodb.org/mongo-driver/mongo.Connect": true, "google.golang.org/grpc.Dial": true,
+	"google.golang.org/grpc.NewClient": true, "net/smtp.Dial": true, "net.Dial": true,
+}
+
+func (l *lowerer) handleCtor(c *ssa.CallCommon) bool {
+	fn := c.StaticCallee()
+	if fn == nil {
+		return false
+	}
+	obj, ok := fn.Object().(*types.Func)
+	return ok && obj != nil && handleCtors[canonObj(obj)]
+}
+
+// opaqueError reports whether x extracts the error result of a call into
+// library code (outside the module) that is not an error constructor.
+func (l *lowerer) opaqueError(x *ssa.Extract) bool {
+	if !types.Identical(x.Type(), types.Universe.Lookup("error").Type()) {
+		return false
+	}
+	c, ok := x.Tuple.(*ssa.Call)
+	return ok && l.libraryCall(c)
+}
+
+// opaqueErrorCall reports whether c is a call into library code (not an
+// error constructor) whose only result is an error.
+func (l *lowerer) opaqueErrorCall(c *ssa.Call) bool {
+	return types.Identical(c.Type(), types.Universe.Lookup("error").Type()) && l.libraryCall(c)
+}
+
+// libraryCall reports whether c calls code outside the module that is not
+// an error constructor.
+func (l *lowerer) libraryCall(c *ssa.Call) bool {
+	fn := c.Call.StaticCallee()
+	if fn == nil {
+		return c.Call.IsInvoke() && !l.internalType(c.Call.Value.Type())
+	}
+	if l.internal(fn) || fn.Pkg != nil && echoingPackages[fn.Pkg.Pkg.Path()] {
+		return false
+	}
+	if obj, ok := fn.Object().(*types.Func); ok && obj != nil {
+		if errorCtors[canonObj(obj)] || obj.Pkg() != nil && echoingPackages[obj.Pkg().Path()] {
+			return false
+		}
+	}
+	return true
+}
+
+// internalType reports whether t is declared in the module.
+func (l *lowerer) internalType(t types.Type) bool {
+	if p, ok := t.(*types.Pointer); ok {
+		t = p.Elem()
+	}
+	n, ok := t.(*types.Named)
+	if !ok || n.Obj().Pkg() == nil || l.modPath == "" {
+		return false
+	}
+	p := n.Obj().Pkg().Path()
+	return p == l.modPath || strings.HasPrefix(p, l.modPath+"/")
+}
+
 func (l *lowerer) internal(fn *ssa.Function) bool {
 	if fn.Pkg == nil || l.modPath == "" {
 		return false
@@ -782,6 +862,13 @@ func (l *lowerer) instr(ins ssa.Instruction) {
 	case *ssa.TypeAssert:
 		F.Assign(l.v(x), pos, l.v(x.X))
 	case *ssa.Extract:
+		if l.opaqueError(x) {
+			// The error a library call returns does not carry its
+			// arguments: sql.Open(dsn) fails without the password in
+			// the DSN. It is a value of its own.
+			F.Emit(ir.Instr{Op: ir.OpCall, Dst: l.v(x), Call: &ir.Call{Name: "error"}, Pos: pos})
+			return
+		}
 		F.Assign(l.v(x), pos, l.v(x.Tuple))
 	case *ssa.Phi:
 		// One argument per live predecessor.
@@ -843,6 +930,15 @@ func (l *lowerer) instr(ins ssa.Instruction) {
 	case *ssa.Panic:
 		F.Throw(pos, l.v(x.X))
 	case *ssa.Call:
+		if l.handleCtor(x.Common()) || l.opaqueErrorCall(x) {
+			// A connection or client made from a DSN or options: the
+			// handle does not carry them (a *sql.DB from a DSN with a
+			// password is not the password). Nor does the error a
+			// library call returns (rows.Scan(&p.Phone) failing).
+			l.call(x.Common(), F.Temp(pos), pos)
+			F.Emit(ir.Instr{Op: ir.OpCall, Dst: l.v(x), Call: &ir.Call{Name: "handle"}, Pos: pos})
+			return
+		}
 		l.call(x.Common(), l.v(x), pos)
 	case *ssa.Go:
 		l.call(x.Common(), ir.NoVar, pos)

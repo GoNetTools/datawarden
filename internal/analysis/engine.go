@@ -170,6 +170,8 @@ type state struct {
 	guards [][]string
 	// checks are the values a branch on a check refined (checks.go).
 	checks map[ir.VarID]check
+	// defs maps each variable to its defining instruction (definitions).
+	defs []int
 	// pt is the points-to result: which variables may refer to the same
 	// object (pointsto.go).
 	pt *pointsTo
@@ -518,7 +520,7 @@ func Analyze(ctx context.Context, funcs []*ir.Func, opts Options) (*Result, erro
 			case in.Op == ir.OpNew && in.Call != nil:
 				ts = []string{in.Call.Target}
 			case in.Op == ir.OpCall && in.Call != nil:
-				ts = a.cha.targets(in.Call)
+				ts = a.cha.targets(in.Call, f.Lang)
 				// The closures it may call (held in a field, returned
 				// by a function).
 				cls, _ := a.flow.invoked(f, in, func(v ir.VarID) []closure { return a.flow.of(f.ID, v) })
@@ -596,7 +598,7 @@ func (a *analyzer) consentGuards(funcs []*ir.Func) map[string][][]string {
 			case in.Op == ir.OpNew && in.Call != nil:
 				ts = []string{in.Call.Target}
 			case in.Op == ir.OpCall && in.Call != nil:
-				ts = a.cha.targets(in.Call)
+				ts = a.cha.targets(in.Call, f.Lang)
 			}
 			for _, t := range ts {
 				if _, ok := a.funcs[t]; ok && t != f.ID {
@@ -673,6 +675,32 @@ func isBoolOrFunc(t string) bool {
 
 func (a *analyzer) seed(st *state, fn *ir.Func) {
 	redef := redefinitions(fn)
+	// A variable defined by a transform (hashed = sha256(x), token =
+	// encrypt(pw)) holds the transformed value whatever its name says.
+	defs := definitions(fn)
+	definedBy := func(v ir.VarID) []string {
+		var in *ir.Instr
+		for depth := 0; depth < 4; depth++ {
+			if v < 0 || int(v) >= len(defs) || defs[v] < 0 {
+				return nil
+			}
+			in = &fn.Instrs[defs[v]]
+			if in.Op != ir.OpAssign || len(in.Args) != 1 {
+				break
+			}
+			v = in.Args[0] // a copy: what it copies
+		}
+		if in.Op != ir.OpCall || in.Call == nil {
+			return nil
+		}
+		if x := a.opts.Names.FuncTransform(in.Call.Name); x != "" {
+			return []string{x}
+		}
+		if hits := a.opts.Rules.Match(fn.Lang, rules.KindTransform, in.Call); len(hits) > 0 {
+			return []string{hits[0].Rule.Transform}
+		}
+		return nil
+	}
 	for i, pid := range fn.Params {
 		v := fn.Vars[pid]
 		st.add(pid, &fact{dt: "", param: i, src: v.Pos, desc: "parameter " + v.Name, path: []ir.Pos{v.Pos}, conf: 1})
@@ -686,9 +714,7 @@ func (a *analyzer) seed(st *state, fn *ir.Func) {
 		if v.Name != "" && !isBoolOrFunc(v.Type) && !redef[vid] {
 			if m, ok := a.opts.Names.Ident(v.Name); ok {
 				f := &fact{dt: m.DataType, param: -1, src: v.Pos, desc: fmt.Sprintf("identifier %q", v.Name), path: []ir.Pos{v.Pos}, conf: m.Conf, seed: true}
-				if m.Transform != "" {
-					f.xf = []string{m.Transform}
-				}
+				f.xf = mergeXf(nil, append(definedBy(vid), m.Transform)...)
 				st.add(vid, f)
 			}
 		}
@@ -829,6 +855,7 @@ func (a *analyzer) analyzeFunc(fn *ir.Func) *Summary {
 		order: newOrder(fn), multi: multiDefined(fn), fluent: fluentResults(fn), loads: loadsOf(fn), guards: a.guards[fn.ID], last: lastInstrs(fn),
 		closures: a.flow.local(fn.ID), checks: a.checks[fn.ID]}
 	st.pt = newPointsTo(fn, st.fluent, st.checks, st.order)
+	st.defs = definitions(fn)
 	st.kills = strongUpdates(fn, st.pt)
 	a.seed(st, fn)
 	sum := &Summary{}
@@ -999,7 +1026,7 @@ func (a *analyzer) fieldFacts(st *state, fn *ir.Func, obj ir.VarID, owner, field
 	known := a.opts.Schema.KnownType(owner)
 	for _, f := range st.of(obj) {
 		switch {
-		case f.stored != "":
+		case f.stored != "" && !wholeValueFields[name]:
 			// Held by one of the object's fields: read from st.stores
 			// above when it is this one.
 		case !known:
@@ -1031,9 +1058,18 @@ func (a *analyzer) step(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 				changed = st.add(in.Dst, derive(f, in.Pos, 1)) || changed
 			}
 		}
+		// "credit card: " + cc: the text names the value after it.
+		for _, fs := range a.textLabels(fn, st.defs, in.Args, in.Pos) {
+			for _, f := range fs {
+				changed = st.add(in.Dst, f) || changed
+			}
+		}
 	case ir.OpAssign, ir.OpPhi:
 		if ck, ok := st.checks[in.Dst]; ok {
 			return a.checkedValue(st, in, ck)
+		}
+		if in.Dst >= 0 && dataFreeName(fn.Vars[in.Dst].Name) && !fn.Vars[in.Dst].Cell {
+			return false // a status or count computed from the data
 		}
 		for _, arg := range in.Args {
 			if in.Dst >= 0 && int(in.Dst) < len(st.multi) && st.multi[in.Dst] {
@@ -1195,25 +1231,48 @@ func fieldLabel(owner, field string) string {
 // keyLabels applies the "key names its value" heuristic: in
 // put("email", x), setCustomKey("phone", x), zap.String("phone", x) or
 // mapOf("ssn" to x) the literal key says what the next argument is.
-func (a *analyzer) keyLabels(fn *ir.Func, in *ir.Instr, recvOff int) map[int][]*fact {
+func (a *analyzer) keyLabels(fn *ir.Func, defs []int, in *ir.Instr, recvOff int) map[int][]*fact {
 	var out map[int][]*fact
 	for i := recvOff; i+1 < len(in.Args); i++ {
-		v := in.Args[i]
-		if v < 0 || !fn.Vars[v].IsConst() {
+		key, ok := constOf(fn, defs, in.Args[i])
+		if !ok {
 			continue
 		}
-		if m, ok := a.opts.Names.Key(*fn.Vars[v].Const); ok {
+		if m, ok := a.opts.Names.Key(key); ok {
 			if out == nil {
 				out = map[int][]*fact{}
 			}
-			f := &fact{dt: m.DataType, param: -1, src: in.Pos, desc: fmt.Sprintf("key %q", *fn.Vars[v].Const), path: []ir.Pos{in.Pos}, conf: m.Conf}
+			f := &fact{dt: m.DataType, param: -1, src: in.Pos, desc: fmt.Sprintf("key %q", key), path: []ir.Pos{in.Pos}, conf: m.Conf}
 			out[i+1] = append(out[i+1], f)
 		}
 	}
 	return out
 }
 
-var getterVerbs = []string{"get", "opt", "form", "postform", "query", "param", "header", "lookup", "read", "cookie", "extra"}
+var getterVerbs = []string{"get", "opt", "form", "postform", "query", "param", "header", "lookup", "read", "cookie", "extra", "value", "object", "string"}
+
+// wholeValueFields are properties that render the whole object
+// (user.description in Swift): they hold what any of its fields holds.
+var wholeValueFields = map[string]bool{"description": true, "debugDescription": true, "dictionaryRepresentation": true, "allValues": true}
+
+// dataFreeSuffixes end the names of variables that hold a status, a count
+// or a flag computed from data, not the data: derivationStatus, rowCount.
+var dataFreeSuffixes = []string{"status", "count", "length", "size", "success", "succeeded", "exists", "ok"}
+
+func dataFreeName(name string) bool {
+	n := strings.ToLower(name)
+	for _, s := range dataFreeSuffixes {
+		if n == s || strings.HasSuffix(n, s) && len(n) > len(s) && (n[len(n)-len(s)-1] == '_' || name[len(name)-len(s)] >= 'A' && name[len(name)-len(s)] <= 'Z') {
+			return true
+		}
+	}
+	return false
+}
+
+// publicParts are accessors that return the public part of what they are
+// called on: a key entry's certificate or public key is not its private
+// key.
+var publicParts = map[string]bool{"getcertificate": true, "getcertificatechain": true, "getpublickey": true, "getpublic": true, "publickey": true, "certificate": true}
 
 func isGetterName(name string) bool {
 	n := strings.ToLower(name)
@@ -1248,11 +1307,23 @@ func (a *analyzer) call(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 	if (c.HasRecv || c.Indirect) && len(in.Args) > 0 {
 		recvOff = 1
 	}
-	keyed := a.keyLabels(fn, in, recvOff)
+	keyed := a.keyLabels(fn, st.defs, in, recvOff)
+	for i, fs := range a.textLabels(fn, st.defs, in.Args, in.Pos) {
+		if i >= recvOff {
+			if keyed == nil {
+				keyed = map[int][]*fact{}
+			}
+			keyed[i] = append(keyed[i], fs...)
+		}
+	}
 	factsOf := func(i int) []*fact {
 		fs := st.of(in.Args[i])
-		if k := keyed[i]; len(k) > 0 {
-			fs = append(fs, k...)
+		// A key or label names a value that does not already say what
+		// it is: putString("password", encrypt(pw)) stays encrypted.
+		for _, k := range keyed[i] {
+			if !slices.ContainsFunc(fs, func(f *fact) bool { return f.dt == k.dt }) {
+				fs = append(fs, k)
+			}
 		}
 		return fs
 	}
@@ -1272,8 +1343,8 @@ func (a *analyzer) call(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 		r := hit.Rule
 		remote = remote || r.Category == "network"
 		dest := a.dest(r, fn, in, recvOff)
-		for i := recvOff; i < len(in.Args); i++ {
-			if !r.Arg.Selects(i - recvOff) {
+		for i := 0; i < len(in.Args); i++ {
+			if i < recvOff && !(c.HasRecv && r.Arg.Selects(-1)) || !r.Arg.Selects(i-recvOff) {
 				continue
 			}
 			for _, f := range factsOf(i) {
@@ -1399,7 +1470,7 @@ func (a *analyzer) call(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 	}
 	applied := false
 	if !isNew && !c.Indirect {
-		for _, t := range a.cha.targets(c) {
+		for _, t := range a.cha.targets(c, fn.Lang) {
 			if s := a.summaryFor(t); s != nil {
 				args, idx := a.arrange(t, in.Args, c.ArgNames)
 				factsAt := func(i int) []*fact {
@@ -1421,7 +1492,7 @@ func (a *analyzer) call(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 	// type the schema knows (profile.getBio()) is answered from the schema
 	// instead of smearing every field of the object onto the result.
 	nonRecv := len(in.Args) - recvOff
-	skipRecv := false
+	skipRecv := c.HasRecv && recvOff == 1 && nonRecv == 0 && publicParts[strings.ToLower(c.Name)]
 	if c.HasRecv && recvOff == 1 && nonRecv == 0 && in.Args[0] >= 0 {
 		if owner := fn.Vars[in.Args[0]].Type; owner != "" && a.opts.Schema.KnownType(owner) {
 			if field, ok := getterField(c.Name); ok {
@@ -1476,9 +1547,9 @@ func (a *analyzer) call(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 		}
 	}
 	if nonRecv >= 1 && in.Dst >= 0 && isGetterName(c.Name) {
-		if v := in.Args[recvOff]; v >= 0 && fn.Vars[v].IsConst() {
-			if m, ok := a.opts.Names.Key(*fn.Vars[v].Const); ok {
-				changed = st.add(in.Dst, &fact{dt: m.DataType, param: -1, src: in.Pos, desc: fmt.Sprintf("%s(%q)", c.Name, *fn.Vars[v].Const), path: []ir.Pos{in.Pos}, conf: m.Conf}) || changed
+		if key, ok := constOf(fn, st.defs, in.Args[recvOff]); ok {
+			if m, ok := a.opts.Names.Key(key); ok {
+				changed = st.add(in.Dst, &fact{dt: m.DataType, param: -1, src: in.Pos, desc: fmt.Sprintf("%s(%q)", c.Name, key), path: []ir.Pos{in.Pos}, conf: m.Conf}) || changed
 			}
 		}
 	}

@@ -256,7 +256,7 @@ func (cf *closureFlow) invoked(fn *ir.Func, in *ir.Instr, of func(ir.VarID) []cl
 		}
 		return of(in.Args[0]), 1
 	}
-	if c.Target != "" || len(cf.a.cha.targets(c)) > 0 {
+	if c.Target != "" || len(cf.a.cha.targets(c, fn.Lang)) > 0 {
 		return nil, 0
 	}
 	if c.HasRecv && len(in.Args) > 0 {
@@ -351,7 +351,7 @@ func (cf *closureFlow) call(fn *ir.Func, in *ir.Instr, of func(ir.VarID) []closu
 			args = append([]ir.VarID{in.Dst}, in.Args...)
 		}
 	case !c.Indirect:
-		targets = cf.a.cha.targets(c)
+		targets = cf.a.cha.targets(c, fn.Lang)
 	}
 	for _, t := range targets {
 		tf := cf.a.funcs[t]

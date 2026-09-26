@@ -82,6 +82,8 @@ func TestParseValidates(t *testing.T) {
 		"literal no line":  "cases: [{name: a, dir: a, literals: [{data_type: phone, file: x}]}]",
 		"literal win path": `cases: [{name: a, dir: a, literals: [{data_type: phone, file: 'a\b', line: 1}]}]`,
 		"min out of range": "cases: [{name: a, dir: a, min_recall: 2}]",
+		"repo, no commit":  "cases: [{name: a, dir: ., repo: https://github.com/x/y}]",
+		"short commit":     "cases: [{name: a, dir: ., repo: https://github.com/x/y, commit: 2bb63b5}]",
 	} {
 		if _, err := Parse([]byte(bad)); err == nil {
 			t.Errorf("%s: accepted", name)
@@ -212,5 +214,39 @@ func TestCheckTolerance(t *testing.T) {
 	r := &Result{Cases: []CaseResult{{Name: "a", Outcome: Outcome{Counts: Counts{TP: 9, FN: 1}}}}}
 	if fails := r.Check(m); len(fails) != 0 {
 		t.Errorf("9/10 against 0.9: %q", fails)
+	}
+}
+
+// External cases are skipped without a fetcher, and scanned in the
+// checkout it returns otherwise.
+func TestExternalCases(t *testing.T) {
+	m, err := Parse([]byte("cases: [{name: ext, dir: app, repo: https://github.com/x/y, commit: 2bb63b531ba66c22563ac0911973389e2a0cb723}]"))
+	if err != nil || !m.Cases[0].External() {
+		t.Fatalf("parse: %v", err)
+	}
+	var dirs []string
+	scan := func(_ context.Context, dir string, _ float64) (*Scan, error) {
+		dirs = append(dirs, filepath.ToSlash(dir))
+		return &Scan{}, nil
+	}
+	r, err := Run(context.Background(), Options{Manifest: m, Scan: scan})
+	if err != nil || !strings.Contains(r.Cases[0].Skipped, "-external") || len(dirs) != 0 {
+		t.Fatalf("without fetch: %+v %v", r, err)
+	}
+	checkout := filepath.Join(string(filepath.Separator), "cache", "y")
+	var fetched []string
+	fetch := func(_ context.Context, repo, commit string) (string, error) {
+		fetched = append(fetched, repo+"@"+commit[:7])
+		return checkout, nil
+	}
+	if _, err := Run(context.Background(), Options{Manifest: m, Scan: scan, Fetch: fetch}); err != nil {
+		t.Fatal(err)
+	}
+	if len(fetched) != 1 || fetched[0] != "https://github.com/x/y@2bb63b5" || dirs[0] != filepath.ToSlash(filepath.Join(checkout, "app")) {
+		t.Errorf("fetched %v, scanned %v", fetched, dirs)
+	}
+	boom := errors.New("network down")
+	if _, err := Run(context.Background(), Options{Manifest: m, Scan: scan, Fetch: func(context.Context, string, string) (string, error) { return "", boom }}); !errors.Is(err, boom) {
+		t.Errorf("fetch error: %v", err)
 	}
 }

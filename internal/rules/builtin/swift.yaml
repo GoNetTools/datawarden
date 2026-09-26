@@ -78,10 +78,18 @@
   dest: { kind: storage, host: local-file }
   category: storage
 
+- id: storage.swift.write_file
+  lang: swift
+  call: ["NSDictionary.write", "NSMutableDictionary.write", "NSArray.write", "NSMutableArray.write", "NSData.write", "Data.write", "String.write"]
+  arg: -1
+  dest: { kind: storage, host: local-file }
+  category: storage
+  description: The value writes itself to a file (dict.write(toFile:), data.write(to:)), unencrypted unless the file is protected.
+
 - id: net.swift.urlsession
   lang: swift
   call: ["URLSession.shared.data", "URLSession.shared.dataTask", "URLSession.shared.upload", "URLSession.shared.uploadTask", "URLSession.data",
-         "URLSession.dataTask", "URLSession.upload", "URLSession.uploadTask", "AF.request", "Alamofire.AF.request", "Session.request"]
+         "URLSession.dataTask", "URLSession.upload", "URLSession.uploadTask", "AF.request", "Alamofire.AF.request", "Alamofire.request", "Session.request"]
   receiver: "(?i)^(self\\.)?_?(session|urlsession|url_session)$"
   arg: "*"
   dest: { kind: network }

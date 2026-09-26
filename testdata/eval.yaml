@@ -5,6 +5,7 @@
 #
 #   go run ./cmd/datawarden-bench            # precision, recall, F1, sweep, timings
 #   go run ./cmd/datawarden-bench -check     # also fail below min_precision/min_recall
+#   go run ./cmd/datawarden-bench -external  # also fetch and score the external cases
 #
 # Labels are the ground truth: what a careful reviewer reading the fixture
 # would report, not what datawarden reports today. A known miss stays labelled
@@ -151,3 +152,135 @@ cases:
       - {data_type: access_token, file: backend/deploy/staging.env, line: 5}
     # Known false positive, left unlabelled on purpose: the web checkout's
     # localStorage.setItem("emailOptIn", "true") is reported as an email.
+
+  # External cases: deliberately insecure open-source apps, fetched with git
+  # at a pinned commit (datawarden-bench -external) and never copied here.
+  # Their labels come from reading each app's source: the leaks its authors
+  # planted plus any other personal data or credential reaching a log, a
+  # file, a third party or another app. Known misses stay labelled.
+
+  - name: diva-android
+    repo: https://github.com/payatu/diva-android
+    commit: 2bb63b531ba66c22563ac0911973389e2a0cb723
+    dir: .
+    langs: [java]
+    min_precision: 1.0
+    min_recall: 0.83
+    flows:
+      - {data_type: credit_card, sink_rule: log.android.logcat, function: LogActivity.checkout, note: "the log message labels the value: \"transaction with credit card: \" + cctxt"}
+      - {data_type: password, sink_rule: storage.android.shared_prefs, function: InsecureDataStorage1Activity.saveCredentials}
+      - {data_type: password, sink_rule: storage.android.sqlite, function: InsecureDataStorage2Activity.saveCredentials}
+      - {data_type: password, sink_rule: storage.jvm.file, function: InsecureDataStorage3Activity.saveCredentials, note: "a temporary file"}
+      - {data_type: password, sink_rule: storage.jvm.file, function: InsecureDataStorage4Activity.saveCredentials, note: "external storage"}
+      - {data_type: password, sink_rule: storage.android.shared_prefs, function: AccessControl3Activity.addPin,
+         note: "known miss: an access PIN, and there is no PIN data type"}
+
+  - name: insecurebankv2
+    repo: https://github.com/dineshshetty/Android-InsecureBankv2
+    commit: 3c8cc3a3ce45ed56d0f58f236b541b41f992e51f
+    dir: InsecureBankv2
+    langs: [java]
+    min_precision: 1.0
+    min_recall: 0.62
+    flows:
+      - {data_type: password, sink_rule: log.android.logcat, function: DoLogin.RequestTask.postData}
+      - {data_type: password, sink_rule: log.jvm.stdout, function: MyBroadCastReceiver.onReceive, note: "the decrypted old password and the new one"}
+      - {data_type: phone, sink_rule: log.jvm.stdout, function: MyBroadCastReceiver.onReceive}
+      - {data_type: password, sink_rule: sdk.android.sms, function: MyBroadCastReceiver.onReceive, note: "the SMS text holds both passwords"}
+      - {data_type: phone, sink_rule: log.jvm.stdout, function: ChangePassword.RequestChangePasswordTask.postData}
+      - {data_type: password, sink_rule: ipc.android.broadcast, function: ChangePassword.broadcastChangepasswordSMS,
+         note: "known miss: the new password is a parameter named pass, put in an implicit broadcast as newpass"}
+      - {data_type: phone, sink_rule: ipc.android.broadcast, function: ChangePassword.broadcastChangepasswordSMS,
+         note: "known miss: found below the policy's confidence threshold"}
+      - {data_type: bank_account, sink_rule: log.jvm.stdout, function: DoTransfer.RequestDoTransferTask.doInBackground,
+         note: "known miss: the account numbers come from fields named from and to"}
+    ambiguous:
+      # The password is stored AES-encrypted, with a key hardcoded in the app:
+      # a weak-crypto finding more than a plaintext one.
+      - {data_type: password, sink_rule: storage.android.shared_prefs, function: DoLogin.RequestTask.saveCreds}
+
+  - name: mastg-playground
+    repo: https://github.com/OWASP/MASTG-Hacking-Playground
+    commit: db219a1011e6735cf0c6c08ba929a27ef40e1873
+    dir: .
+    langs: [java, kotlin, swift]
+    min_precision: 1.0
+    min_recall: 0.86
+    flows:
+      # Android, Kotlin
+      - {data_type: access_token, sink_rule: log.android.logcat, function: MainActivity.onCreate}
+      - {data_type: access_token, sink_rule: storage.android.shared_prefs, function: MainActivity.onCreate, note: "the clear-text JWT; the KeyStore-encrypted copy is fine"}
+      # Android, Java
+      - {data_type: password, sink_rule: storage.jvm.file, function: OMTG_DATAST_001_ExternalStorage.onCreate}
+      - {data_type: password, sink_rule: storage.android.shared_prefs, function: OMTG_DATAST_001_SharedPreferences.onCreate}
+      - {data_type: password, sink_rule: log.android.logcat, function: OMTG_DATAST_002_Logging.CreateLogs}
+      - {data_type: private_key, sink_rule: log.android.logcat, function: OMTG_DATAST_001_KeyStore.decryptString}
+      - {data_type: credit_card, sink_rule: storage.jvm.file, function: OMTG_DATAST_001_InternalStorage.writeFile,
+         note: "known miss: the card number is part of a string constant"}
+      - {data_type: password, sink_rule: storage.android.sqlite, function: OMTG_DATAST_001_SQLite_Not_Encrypted.SQLiteUnsafe,
+         note: "known miss: the password is part of a constant SQL statement"}
+      # iOS
+      - {data_type: access_token, sink_rule: log.swift.print, function: LoginViewController.buttonLogin}
+      - {data_type: access_token, sink_rule: storage.swift.write_file, function: LoginViewController.buttonLogin, note: "JWT.plist"}
+      - {data_type: access_token, sink_rule: log.swift.print, function: ViewController.Register}
+      - {data_type: access_token, sink_rule: storage.swift.write_file, function: ViewController.Register}
+      - {data_type: password, sink_rule: storage.swift.write_file, function: CreateSensitiveData.pListCreation, note: "debug.plist"}
+    literals:
+      - {data_type: access_token, file: Serverside/rails-api-original/README.md, line: 83, note: "a JWT in the API documentation"}
+      - {data_type: email, file: iOS/MSTG-JWT/MSTG-JWT/CreateSensitiveData.swift, line: 78, note: "hardcoded debug account"}
+    ambiguous:
+      # Credentials sent to the app's own backend at login and sign-up.
+      - {data_type: email, sink_rule: net.swift.urlsession, function: LoginViewController.buttonLogin}
+      - {data_type: email, sink_rule: net.swift.urlsession, function: ViewController.Register}
+      - {data_type: password, sink_rule: net.swift.urlsession, function: LoginViewController.buttonLogin}
+      - {data_type: password, sink_rule: net.swift.urlsession, function: ViewController.Register}
+
+  - name: dvia-v2
+    repo: https://github.com/prateek147/DVIA-v2
+    commit: 96466ab85569dbcd37c69b2d15d22ff666f57031
+    dir: .
+    langs: [swift]
+    min_precision: 1.0
+    min_recall: 0.83
+    flows:
+      - {data_type: password, sink_rule: storage.swift.write_file, function: PListViewController.saveInPlistFileTapped, note: "userInfo.plist"}
+      - {data_type: password, sink_rule: log.swift.print, function: DeviceLogsViewController.signupTapped, note: "print(user.description) of the sign-up object"}
+      - {data_type: email, sink_rule: log.swift.print, function: DeviceLogsViewController.signupTapped}
+      - {data_type: phone, sink_rule: log.swift.print, function: DeviceLogsViewController.signupTapped}
+      - {data_type: credit_card, sink_rule: net.swift.urlsession, function: TransportLayerProtectionViewController.sendRequestOverUrl, note: "over plain HTTP"}
+      - {data_type: person_name, sink_rule: log.swift.print, function: DeviceLogsViewController.signupTapped,
+         note: "known miss: stored under the key name, which alone does not say person name"}
+
+  - name: pygoat
+    repo: https://github.com/adeyosemanputra/pygoat
+    commit: 19d17cc8874861142b330636d068bbde54e86b85
+    dir: .
+    langs: [python]
+    min_precision: 1.0
+    min_recall: 1.0
+    flows:
+      - {data_type: password, sink_rule: log.py.print, function: "views:sql_lab", note: "the SQL string built with the password"}
+      - {data_type: password, sink_rule: log.py.print, function: "views:auth_lab_login"}
+      - {data_type: password, sink_rule: log.py.print, function: "views:a1_broken_access_lab_1"}
+      - {data_type: password, sink_rule: log.py.print, function: "views:injection_sql_lab"}
+      - {data_type: ip_address, sink_rule: log.py.logging, function: "views:a10_lab2", note: "client addresses written to app.log"}
+    literals:
+      - {data_type: access_token, file: introduction/static/js/a7.js, line: 4, note: "a JWT in a commented-out request"}
+      - {data_type: access_token, file: introduction/static/js/a9.js, line: 18}
+      - {data_type: email, file: introduction/templates/Lab_2021/A7_auth_failure/a7.html, line: 96, note: "the lab's admin account"}
+      - {data_type: email, file: introduction/templates/mitre/mitre_top14.html, line: 81}
+      - {data_type: email, file: introduction/views.py, line: 1119, note: "a comment with the admin password"}
+
+  - name: govwa
+    repo: https://github.com/0c34/govwa
+    commit: 4058f79f31eeb4a36d8f1e64bba1f0c899646e6f
+    dir: .
+    langs: [go]
+    min_precision: 1.0
+    min_recall: 1.0
+    # No personal data reaches a log or a third party: the planted flaws are
+    # SQL injection, XSS and IDOR. The errors of database calls made with a
+    # DSN holding the database password, and of row scans into profile
+    # fields, are logged; neither carries the data. Profile updates go to the
+    # app's own database (first party).
+    flows: []

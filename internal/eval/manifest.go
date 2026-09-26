@@ -15,6 +15,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -34,8 +35,14 @@ type Manifest struct {
 // Case is one directory scanned as a repository root, with its labels.
 type Case struct {
 	Name string `yaml:"name"`
-	// Dir is relative to the manifest's directory (or absolute).
+	// Dir is relative to the manifest's directory (or absolute); for an
+	// external case, relative to the fetched repository.
 	Dir string `yaml:"dir"`
+	// Repo and Commit make the case external: an open-source repository
+	// fetched at that commit (datawarden-bench -external), so its code is
+	// scanned as published and never copied into this repository.
+	Repo   string `yaml:"repo"`
+	Commit string `yaml:"commit"`
 	// Langs are the frontends the case needs; it is skipped when one is
 	// missing from the build (tree-sitter languages without cgo).
 	Langs []string `yaml:"langs"`
@@ -97,6 +104,11 @@ func Parse(b []byte) (*Manifest, error) {
 	return &m, nil
 }
 
+var fullCommit = regexp.MustCompile(`^[0-9a-f]{40}$`)
+
+// External reports whether the case is fetched from a repository.
+func (c *Case) External() bool { return c.Repo != "" }
+
 func (m *Manifest) validate() error {
 	var errs []error
 	for i, t := range m.Thresholds {
@@ -123,6 +135,9 @@ func (m *Manifest) validate() error {
 		seen[c.Name] = true
 		if c.Dir == "" {
 			errs = append(errs, fmt.Errorf("%s: missing dir", where))
+		}
+		if (c.Repo == "") != (c.Commit == "") || c.Commit != "" && !fullCommit.MatchString(c.Commit) {
+			errs = append(errs, fmt.Errorf("%s: an external case needs a repo and a full commit hash", where))
 		}
 		if c.MinPrecision < 0 || c.MinPrecision > 1 || c.MinRecall < 0 || c.MinRecall > 1 {
 			errs = append(errs, fmt.Errorf("%s: min_precision and min_recall must be in [0, 1]", where))

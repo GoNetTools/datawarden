@@ -24,7 +24,7 @@ var DefaultIgnore = []string{
 	"build/", "dist/", "out/", "target/", ".gradle/", ".idea/", ".vscode/", ".next/", ".nuxt/", ".expo/",
 	"coverage/", ".cache/", ".terraform/", "__pycache__/", ".venv/", "venv/", ".datawarden/cache/",
 	".datawarden/rules/examples/", // planted leaks for `datawarden rules test`
-	"*.min.js", "*.min.css", "*.map", "*.lock", "package-lock.json", "pnpm-lock.yaml", "go.sum", "gradle.lockfile",
+	"*.min.js", "*-min.js", "*.min.css", "*.map", "*.lock", "package-lock.json", "pnpm-lock.yaml", "go.sum", "gradle.lockfile",
 	"*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp", "*.ico", "*.bmp", "*.tiff", "*.svg", "*.mp3", "*.mp4", "*.mov", "*.webm", "*.wav",
 	"*.ttf", "*.otf", "*.woff", "*.woff2", "*.eot", "*.zip", "*.gz", "*.tgz", "*.bz2", "*.xz", "*.7z", "*.rar", "*.jar", "*.aar",
 	"*.apk", "*.aab", "*.ipa", "*.dex", "*.so", "*.dylib", "*.dll", "*.exe", "*.class", "*.o", "*.a", "*.pdf", "*.keystore", "*.jks",

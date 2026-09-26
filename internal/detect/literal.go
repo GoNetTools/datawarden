@@ -10,6 +10,7 @@ import (
 	"math"
 	"math/big"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -137,6 +138,9 @@ func (s *LiteralScanner) Scan(content []byte) []LiteralHit {
 				continue
 			}
 			d := onlyDigits(str[m[0]:m[1]])
+			if !cardGrouping(str[m[0]:m[1]]) || decimalPart(str, m[0], m[1]) {
+				continue
+			}
 			if conf := cardConf(d); conf > 0 {
 				if ctxFor()["credit_card"] {
 					conf += 0.1
@@ -215,6 +219,11 @@ func emailConf(v, line string, at int) float64 {
 		return 0
 	}
 	if roleLocalParts[local] || strings.HasPrefix(local, "noreply") || strings.HasPrefix(local, "no-reply") {
+		return 0
+	}
+	// Test and demo accounts: test123@gmail.com, dummy@acme.io.
+	switch strings.TrimRight(local, "0123456789._-") {
+	case "test", "testuser", "tester", "testing", "dummy", "demo", "fake", "sample", "example", "foo", "bar", "foobar", "john.doe", "jane.doe", "johndoe", "janedoe":
 		return 0
 	}
 	// npm scopes / version pins: "@sentry/browser@7.1.0", "pkg@1.2.3".
@@ -300,6 +309,42 @@ func luhn(d string) bool {
 		alt = !alt
 	}
 	return sum%10 == 0
+}
+
+// decimalPart reports whether str[start:end] is the fraction or the
+// integer part of a decimal number (y="1424.4377811094455").
+func decimalPart(str string, start, end int) bool {
+	digit := func(i int) bool { return i >= 0 && i < len(str) && str[i] >= '0' && str[i] <= '9' }
+	return start >= 2 && str[start-1] == '.' && digit(start-2) || end+1 < len(str) && str[end] == '.' && digit(end+1)
+}
+
+// cardGrouping reports whether a digit run with separators is grouped the
+// way card numbers are written (4-4-4-4, 4-6-5 for American Express,
+// 4-6-4 for Diners), with one kind of separator: "4097 1 829805 0 0" in a
+// log is a list of numbers, not a card.
+func cardGrouping(raw string) bool {
+	sep := strings.IndexAny(raw, " -")
+	if sep < 0 {
+		return true
+	}
+	groups := strings.Split(raw, raw[sep:sep+1])
+	lens := make([]int, len(groups))
+	for i, g := range groups {
+		if g == "" || strings.ContainsAny(g, " -") {
+			return false
+		}
+		lens[i] = len(g)
+	}
+	switch {
+	case slices.Equal(lens, []int{4, 6, 5}), slices.Equal(lens, []int{4, 6, 4}):
+		return true
+	}
+	for i, n := range lens {
+		if n != 4 && !(i == len(lens)-1 && n >= 1 && n <= 3) {
+			return false
+		}
+	}
+	return true
 }
 
 func cardConf(d string) float64 {

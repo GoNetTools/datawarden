@@ -43,6 +43,9 @@ type Options struct {
 	// Runs is how many times each case is scanned for timing (default 1).
 	// Findings come from the first run.
 	Runs int
+	// Fetch checks out an external case's repository at its commit and
+	// returns the directory; nil skips external cases.
+	Fetch func(ctx context.Context, repo, commit string) (string, error)
 }
 
 // Timing summarises the runs of one case.
@@ -102,9 +105,22 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 			res.Cases = append(res.Cases, cr)
 			continue
 		}
+		base := o.BaseDir
+		if c.External() {
+			if o.Fetch == nil {
+				cr.Skipped = "external repository (run datawarden-bench -external)"
+				res.Cases = append(res.Cases, cr)
+				continue
+			}
+			root, err := o.Fetch(ctx, c.Repo, c.Commit)
+			if err != nil {
+				return nil, fmt.Errorf("case %s: fetch %s: %w", c.Name, c.Repo, err)
+			}
+			base = root
+		}
 		dir := c.Dir
 		if !filepath.IsAbs(dir) {
-			dir = filepath.Join(o.BaseDir, filepath.FromSlash(dir))
+			dir = filepath.Join(base, filepath.FromSlash(dir))
 		}
 		scans := make([]*Scan, 0, runs)
 		for r := 0; r < runs; r++ {

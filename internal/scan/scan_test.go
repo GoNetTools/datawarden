@@ -292,3 +292,14 @@ func TestLowerRunsFrontendsWithoutAnalysis(t *testing.T) {
 		t.Error("missing dependencies accepted")
 	}
 }
+
+func TestContactEmailsInCommunityDocsAreNotLiterals(t *testing.T) {
+	fx := newFixture(t, map[string]string{"go.mod": "module x", "CODE_OF_CONDUCT.md": "PII", "docs/SECURITY.md": "PII", "notes.txt": "PII"}, fakeVCS{})
+	res, err := fx.scanner.Run(context.Background(), fx.req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Literals) != 1 || res.Literals[0].Pos.File != "notes.txt" {
+		t.Errorf("literals: %+v", res.Literals)
+	}
+}

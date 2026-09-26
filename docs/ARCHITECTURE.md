@@ -339,7 +339,7 @@ The cache stores function summaries, the call graph, schema declarations and the
 | **A negative-context or transform word** | `internal/detect/names.go` | `detect_test.go` |
 | **An output format** | a case in `report.Write` (or a new `Reporter` implementation wired in `app`) | report tests |
 | **A service or replacement component** | an interface where it is used, a field to inject it, the wiring in `internal/app` | `TestComponentsTalkThroughInterfaces` |
-| **A labelled benchmark case** | a directory under `testdata/` and its labels in `testdata/eval.yaml` | `datawarden-bench -check` in CI |
+| **A labelled benchmark case** | a directory under `testdata/`, or an open-source repository pinned by `repo` and `commit`, and its labels in `testdata/eval.yaml` | `datawarden-bench -check` (`-external` for pinned repositories) in CI |
 
 The full checklists for rules and languages are in [CONTRIBUTING](../CONTRIBUTING.md#add-or-fix-a-rule).
 
@@ -347,7 +347,7 @@ The full checklists for rules and languages are in [CONTRIBUTING](../CONTRIBUTIN
 
 ```mermaid
 flowchart LR
-    U["Unit tests<br/>fakes, fstest.MapFS,<br/>httptest"] --> C["Contract tests<br/>rule examples (all 123 rules)<br/>frontend conformance (29 × 6)"]
+    U["Unit tests<br/>fakes, fstest.MapFS,<br/>httptest"] --> C["Contract tests<br/>rule examples (all 126 rules)<br/>frontend conformance (42 × 6)"]
     C --> E["End-to-end<br/>fixtures through the real app"]
     E --> A["Accuracy<br/>labelled corpus:<br/>precision / recall / F1"]
     S["Structure tests<br/>architecture, wiring,<br/>rule conventions, language table"] -.-> U
@@ -356,7 +356,7 @@ flowchart LR
 - **Unit tests** exercise each component with fakes of its interfaces: the CLI with an in-memory workspace and a fake scanner, the scanner with fake frontends and analyzer, the engine with a fake rule matcher.
 - **Contract tests** run real code through the full scan. Every built-in rule has an annotated example (`internal/rules/testdata/examples/`). Every frontend implements the same 32 conformance scenarios (`internal/frontend/testdata/conformance/`), and the IR it produces for them, the rule examples and the test repositories passes `ir.Verify` (`TestLoweredIRVerifies`). Known gaps are marked `todoruleid:`, and the test fails once one is fixed, so the list stays accurate.
 - **End-to-end tests** scan the fixtures in `testdata/` with the production wiring.
-- **Accuracy** is measured on the labelled corpus (`testdata/eval.yaml`, including the vulnerable-by-design `testdata/vulnshop`). CI fails when a case drops below its minimum precision or recall.
+- **Accuracy** is measured on the labelled corpus (`testdata/eval.yaml`, including the vulnerable-by-design `testdata/vulnshop` and six deliberately insecure open-source apps fetched at pinned commits). CI fails when a case drops below its minimum precision or recall.
 - **Structure tests** keep the architecture from eroding: interface-only communication, every language wired, rule conventions, a consistent language table.
 - **Coverage** is measured across packages (`go test -coverpkg=./internal/... ./...`, about 87%); CI fails below 85%.
 - **Benchmarks** (`make bench`) cover the engine's scaling, the detectors and end-to-end scans; `--cpuprofile`/`--memprofile` profile real runs.

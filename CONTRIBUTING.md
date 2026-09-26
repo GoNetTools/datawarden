@@ -76,7 +76,7 @@ A rule for one repository's own SDK belongs in that repository's `.datawarden/ru
 
 ### Keep the accuracy corpus honest
 
-`testdata/eval.yaml` labels what a reviewer would report in each fixture, not what datawarden reports today. When you add or change a fixture, label every real leak in it, including ones datawarden misses (add a `note`), and use `ambiguous` only for flows that are genuinely acceptable either way. `go run ./cmd/datawarden-bench -check` (`make eval`) prints precision, recall and every miss and false positive. Raise `min_precision`/`min_recall` when your change improves them; lowering one needs a reason in the pull request.
+`testdata/eval.yaml` labels what a reviewer would report in each fixture, not what datawarden reports today. When you add or change a fixture, label every real leak in it, including ones datawarden misses (add a `note`), and use `ambiguous` only for flows that are genuinely acceptable either way. `go run ./cmd/datawarden-bench -check` (`make eval`) prints precision, recall and every miss and false positive. Raise `min_precision`/`min_recall` when your change improves them; lowering one needs a reason in the pull request. Changes to the engine or the rules should also pass `make eval-external`, which fetches the open-source apps the corpus pins (`repo` and `commit` in a case) and scores them; to add one, pin a full commit hash and label it from reading its source.
 
 ### Add a data type, a class or a secret pattern
 

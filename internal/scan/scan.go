@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"path"
 	"sort"
 	"strings"
 	"time"
@@ -340,6 +341,19 @@ func (s *Scanner) selectTargets(ctx context.Context, req Request, all []ingest.F
 	return targets, literalTargets, nil
 }
 
+// contactDoc reports community files whose email addresses are published
+// contacts (a code of conduct, the maintainers), not personal data that
+// leaked into the repository.
+func contactDoc(rel string) bool {
+	base := strings.ToUpper(path.Base(rel))
+	for _, p := range []string{"CODE_OF_CONDUCT", "CODE-OF-CONDUCT", "CONTRIBUTING", "AUTHORS", "MAINTAINERS", "SECURITY", "CODEOWNERS", "CONTRIBUTORS", "GOVERNANCE", "SUPPORT"} {
+		if strings.HasPrefix(base, p) {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Scanner) scanLiterals(ctx context.Context, req Request, files []ingest.File) ([]*finding.Literal, error) {
 	var out []*finding.Literal
 	minConf := req.Config.Literals.MinConfidence
@@ -360,8 +374,9 @@ func (s *Scanner) scanLiterals(ctx context.Context, req Request, files []ingest.
 		if err != nil {
 			continue
 		}
+		contacts := contactDoc(f.Rel)
 		for _, h := range s.Literals.Scan(b) {
-			if h.Conf < minConf {
+			if h.Conf < minConf || contacts && h.DataType == "email" {
 				continue
 			}
 			out = append(out, &finding.Literal{
