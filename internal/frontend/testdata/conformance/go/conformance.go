@@ -322,3 +322,49 @@ func callbackBeforeMutation(email string, items []string) {
 	xs = append(xs, email)
 	_ = xs
 }
+
+// scenario: closure-field
+type sender struct{ onSend func(string) }
+
+func (n *sender) send(v string) { n.onSend(v) }
+
+func closureField(email string) {
+	n := &sender{onSend: func(v string) {
+		// ruleid: log.go.stdlib
+		log.Println(v)
+	}}
+	n.send(email)
+}
+
+// scenario: closure-collection
+type eventBus struct{ handlers []func(string) }
+
+func (b *eventBus) subscribe(h func(string)) { b.handlers = append(b.handlers, h) }
+
+func (b *eventBus) publish(v string) {
+	for _, h := range b.handlers {
+		h(v)
+	}
+}
+
+func closureCollection(email string) {
+	bus := &eventBus{}
+	bus.subscribe(func(v string) {
+		// ruleid: log.go.stdlib
+		log.Println(v)
+	})
+	bus.publish(email)
+}
+
+// scenario: closure-return
+func makePrinter() func(string) {
+	return func(v string) {
+		// ruleid: log.go.stdlib
+		log.Println(v)
+	}
+}
+
+func closureReturn(email string) {
+	printer := makePrinter()
+	printer(email)
+}

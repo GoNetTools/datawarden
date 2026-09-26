@@ -111,3 +111,23 @@ func (h *hierarchy) targets(c *ir.Call) []string {
 	}
 	return out
 }
+
+// ancestors lists the short names of a class and of its supertypes,
+// nearest first.
+func (h *hierarchy) ancestors(name string) []string {
+	out := []string{name}
+	c := h.class(name)
+	for i := 0; c != nil && i < len(out) && len(out) < maxTargets; i++ {
+		if i > 0 {
+			if c = h.class(out[i]); c == nil {
+				continue
+			}
+		}
+		for _, s := range c.Supers {
+			if k := ownerKey(s); k != "" && !slices.Contains(out, k) {
+				out = append(out, k)
+			}
+		}
+	}
+	return out
+}

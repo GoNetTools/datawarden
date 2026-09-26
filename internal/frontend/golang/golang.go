@@ -564,16 +564,50 @@ func (l *lowerer) lowerFunc(fn *ssa.Function) *ir.Func {
 		}
 	}
 	l.live = live
+	funcVals := l.funcValues(fn)
 	for _, b := range fn.Blocks {
 		if !live[b.Index] {
 			continue
 		}
 		F.SetBlock(int32(b.Index))
+		if b.Index == 0 {
+			// Functions of the module used as values (a func literal
+			// capturing nothing, a named function passed or stored) are
+			// closures without captures, defined on entry.
+			for _, f := range funcVals {
+				F.Emit(ir.Instr{Op: ir.OpClosure, Dst: l.v(f), Func: funcID(f), Pos: F.Pos})
+			}
+		}
 		for _, ins := range b.Instrs {
 			l.instr(ins)
 		}
 	}
 	return F
+}
+
+// funcValues lists the functions of the module that fn uses as values
+// rather than calls, in the order they appear.
+func (l *lowerer) funcValues(fn *ssa.Function) []*ssa.Function {
+	var out []*ssa.Function
+	seen := map[*ssa.Function]bool{}
+	for _, b := range fn.Blocks {
+		if !l.live[b.Index] {
+			continue
+		}
+		for _, ins := range b.Instrs {
+			_, call := ins.(ssa.CallInstruction)
+			for i, op := range ins.Operands(nil) {
+				if call && i == 0 {
+					continue // the function called
+				}
+				if f, ok := (*op).(*ssa.Function); ok && !seen[f] && l.internal(f) {
+					seen[f] = true
+					out = append(out, f)
+				}
+			}
+		}
+	}
+	return out
 }
 
 // liveSuccs returns the successors control can reach from b: both arms of

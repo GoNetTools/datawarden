@@ -58,6 +58,9 @@ var conformanceScenarios = map[string]string{
 	"nested-field":             "stored two fields deep (a.b.c = v), then read back",
 	"closure-assign":           "a closure assigns the data to a variable it captured, read after the call",
 	"callback-before-mutation": "a callback that runs immediately (forEach, map) logs a collection before data is added to it (ok)",
+	"closure-field":            "a closure passed to a constructor, kept in a field and called by another method with the data",
+	"closure-collection":       "closures added to a collection in a field and called in a loop with the data",
+	"closure-return":           "a closure returned by a function and called by the caller with the data",
 }
 
 var scenarioRe = regexp.MustCompile(`(?m)^\s*(?://+|#+)\s*scenario:\s*([a-z-]+)\s*$`)

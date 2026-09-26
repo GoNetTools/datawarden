@@ -21,7 +21,7 @@ import (
 
 // FormatVersion changes whenever the on-disk format or the analysis
 // semantics change incompatibly, including every new ir.Version.
-const FormatVersion = 8
+const FormatVersion = 9
 
 // FileName is the cache file inside the cache directory.
 const FileName = "datawarden-cache.json"

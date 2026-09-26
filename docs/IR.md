@@ -72,7 +72,7 @@ defines nothing). Every argument **must** be a variable of the function.
 | `store` | `Args[0].Field = Args[1]` | 2 arguments, no destination |
 | `call` | `Dst = Call(Args…)` (`Dst` may be `NoVar`). With `Call.HasRecv`, `Args[0]` is the receiver; with `Call.Indirect`, `Args[0]` is the function value called (a closure held in a variable) and the rest are its arguments. | a `Call`; `Args[0]` present with a receiver or an indirect call; `ArgNames`, when set, as long as `Args` |
 | `new` | `Dst = new Call.Callee(Args…)`. `Call.Target` is the constructor when it is code under analysis; its first parameter is the new object. | a `Call`, a destination |
-| `closure` | `Dst` = a closure of function `Func`, binding `Args` to its capture parameters in order. | `Func` set, a destination |
+| `closure` | `Dst` = a closure of function `Func`, binding `Args` to its capture parameters in order. A function of the module used as a value (a Go func literal that captures nothing, a named function passed as a callback) is a closure with no captures. | `Func` set, a destination |
 | `return` | Return `Args…` to the caller. | last in its block, which is `TermReturn` |
 | `throw` | Throw `Args[0]`. The exception goes to the block's `Exc` handlers, or leaves the function when there are none. | 1 argument, last in its block, which is `TermThrow` |
 | `catch` | `Dst` = the exception being handled. | first after the phis of a block that is entered by an exceptional edge |
@@ -134,11 +134,21 @@ dominates `P`. Dominance is computed over normal and exceptional edges
   given" successor of a branch on a consent check (`hasConsent()`,
   `user.optedIn`, `!consents.hasConsent()` with the successors swapped)
   is reported with that check as a guard (`analysis/guard.go`).
-- **Closures**: `closure` values flow through assigns and phis; an
-  indirect call runs the closures its function value may hold, and a
-  closure passed as an argument is called back with the call's other
-  arguments: at the call when the callee runs callbacks before returning
-  (`forEach`, `map`, …), at any later time otherwise.
+- **Closures**: `closure` values flow, over the whole program, through
+  assigns and phis, into and out of fields (by owner type and field
+  name) and collections, into the parameters of the functions they are
+  passed to and out of the functions that return them
+  (`analysis/closures.go`). A call runs the closures held in the variable
+  it calls (an indirect call), in the receiver of a method call that
+  resolves to no code under analysis (`h.accept(v)`, but not
+  `handlers.add(h)`), or in the field of the receiver that the method is
+  named after (`this.onSend(v)`). A closure that reached a function
+  through one of its parameters is not run there: the caller passing it
+  runs it with the call's other arguments, at the call when the callee
+  runs callbacks before returning (`forEach`, `map`, …), at any later
+  time otherwise. Captures are bound only in the function that created
+  the closure; a closure that leaves it (stored in a field, returned) is
+  run there, reading its captures with every mutation made to them.
 - **Exceptions**: a `catch` receives the value of each `throw`, and what
   each call throws, in the blocks whose exceptional edges lead to it.
 - **Dispatch**: the class table (`Module.Classes`).

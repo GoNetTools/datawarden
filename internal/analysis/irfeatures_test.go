@@ -170,6 +170,121 @@ func TestClosureWritesCapture(t *testing.T) {
 	}
 }
 
+// Closures travel through fields, parameters and returns (closureFlow).
+func TestClosureFlow(t *testing.T) {
+	// class Box(val cb) { fun fire(x) = cb(x) }; Box { v -> log(v) }.fire(email)
+	handler := newFunc("p.register$1")
+	handler.Parent = "p.register"
+	logTo(handler, handler.AddParam("v", "", pos(3)), 3)
+	ctor := newFunc("p.Box.<init>")
+	this := ctor.AddParam("this", "p.Box", pos(5))
+	cb := ctor.AddParam("cb", "", pos(5))
+	ctor.Emit(ir.Instr{Op: ir.OpStore, Dst: ir.NoVar, Args: []ir.VarID{this, cb}, Field: "cb", Pos: pos(5)})
+	fire := newFunc("p.Box.fire")
+	fthis := fire.AddParam("this", "p.Box", pos(6))
+	x := fire.AddParam("x", "", pos(6))
+	fire.Emit(ir.Instr{Op: ir.OpCall, Dst: fire.Temp(pos(6)), Args: []ir.VarID{fthis, x}, Call: &ir.Call{Name: "cb", HasRecv: true, RecvType: "p.Box"}, Pos: pos(6)})
+	register := newFunc("p.register")
+	email := register.AddParam("email", "String", pos(2))
+	cl := register.Temp(pos(3))
+	register.Emit(ir.Instr{Op: ir.OpClosure, Dst: cl, Func: "p.register$1", Pos: pos(3)})
+	box := register.Temp(pos(4))
+	register.Emit(ir.Instr{Op: ir.OpNew, Dst: box, Args: []ir.VarID{cl}, Call: &ir.Call{Callee: "p.Box", Name: "Box", Target: "p.Box.<init>"}, Pos: pos(4)})
+	register.Emit(ir.Instr{Op: ir.OpCall, Dst: register.Temp(pos(4)), Args: []ir.VarID{box, email}, Call: &ir.Call{Name: "fire", HasRecv: true, RecvType: "p.Box", Target: "p.Box.fire"}, Pos: pos(4)})
+
+	// fun each(items, action) = action(items): a() passes a logging
+	// closure, b() passes personal data with a closure that does nothing.
+	each := newFunc("p.each")
+	items := each.AddParam("items", "", pos(20))
+	action := each.AddParam("action", "", pos(20))
+	each.Emit(ir.Instr{Op: ir.OpCall, Dst: each.Temp(pos(20)), Args: []ir.VarID{action, items}, Call: &ir.Call{Name: "action", Indirect: true}, Pos: pos(20)})
+	aLog := newFunc("p.a$1")
+	aLog.Parent = "p.a"
+	logTo(aLog, aLog.AddParam("v", "", pos(22)), 22)
+	fa := newFunc("p.a")
+	ids := fa.AddParam("ids", "", pos(21))
+	acl := fa.Temp(pos(22))
+	fa.Emit(ir.Instr{Op: ir.OpClosure, Dst: acl, Func: "p.a$1", Pos: pos(22)})
+	fa.Emit(ir.Instr{Op: ir.OpCall, Dst: fa.Temp(pos(22)), Args: []ir.VarID{ids, acl}, Call: &ir.Call{Name: "each", Target: "p.each"}, Pos: pos(22)})
+	bNop := newFunc("p.b$1")
+	bNop.Parent = "p.b"
+	bNop.AddParam("v", "", pos(24))
+	fb := newFunc("p.b")
+	emails := fb.AddParam("email", "String", pos(23))
+	bcl := fb.Temp(pos(24))
+	fb.Emit(ir.Instr{Op: ir.OpClosure, Dst: bcl, Func: "p.b$1", Pos: pos(24)})
+	fb.Emit(ir.Instr{Op: ir.OpCall, Dst: fb.Temp(pos(24)), Args: []ir.VarID{emails, bcl}, Call: &ir.Call{Name: "each", Target: "p.each"}, Pos: pos(24)})
+
+	// fun mk() = { v -> log(v) }; mk()(email)
+	mkLog := newFunc("p.mk$1")
+	mkLog.Parent = "p.mk"
+	logTo(mkLog, mkLog.AddParam("v", "", pos(31)), 31)
+	mk := newFunc("p.mk")
+	mcl := mk.Temp(pos(30))
+	mk.Emit(ir.Instr{Op: ir.OpClosure, Dst: mcl, Func: "p.mk$1", Pos: pos(30)})
+	mk.Return(pos(30), mcl)
+	useMk := newFunc("p.useMk")
+	uemail := useMk.AddParam("email", "String", pos(32))
+	r := useMk.Temp(pos(33))
+	useMk.Emit(ir.Instr{Op: ir.OpCall, Dst: r, Call: &ir.Call{Name: "mk", Target: "p.mk"}, Pos: pos(33)})
+	useMk.Emit(ir.Instr{Op: ir.OpCall, Dst: useMk.Temp(pos(34)), Args: []ir.VarID{r, uemail}, Call: &ir.Call{Name: "r", Indirect: true}, Pos: pos(34)})
+
+	// fun capture(x) = { log(x) }; capture(email): the returned closure
+	// reads its capture wherever it is called.
+	capLog := newFunc("p.capture$1")
+	capLog.Parent = "p.capture"
+	logTo(capLog, capLog.AddCapture("c", "", pos(41)), 41)
+	capture := newFunc("p.capture")
+	cx := capture.AddParam("x", "", pos(40))
+	ccl := capture.Temp(pos(41))
+	capture.Emit(ir.Instr{Op: ir.OpClosure, Dst: ccl, Args: []ir.VarID{cx}, Func: "p.capture$1", Pos: pos(41)})
+	capture.Return(pos(41), ccl)
+	useCap := newFunc("p.useCap")
+	cemail := useCap.AddParam("email", "String", pos(42))
+	useCap.Emit(ir.Instr{Op: ir.OpCall, Dst: useCap.Temp(pos(43)), Args: []ir.VarID{cemail}, Call: &ir.Call{Name: "capture", Target: "p.capture"}, Pos: pos(43)})
+
+	classes := []*ir.Class{{Name: "p.Box", Methods: map[string]string{"fire": "p.Box.fire", "<init>": "p.Box.<init>"}}}
+	res := analyze(t, classes, handler, ctor, fire, register, each, aLog, fa, bNop, fb, mkLog, mk, useMk, capLog, capture, useCap)
+	if fl := flowAt(res, 3); fl == nil || fl.Function != "p.register" {
+		t.Errorf("closure kept in a field and called by another method: %+v", fl)
+	}
+	if fl := flowAt(res, 22); fl != nil {
+		t.Errorf("a closure passed to a function is run with what other callers pass: %+v", fl)
+	}
+	if fl := flowAt(res, 31); fl == nil {
+		t.Errorf("returned closure called by the caller: %+v", res.Flows)
+	}
+	if fl := flowAt(res, 41); fl == nil {
+		t.Errorf("returned closure reading its capture: %+v", res.Flows)
+	}
+}
+
+func TestRunsReceiver(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		nargs      int
+		closureArg bool
+		want       bool
+	}{
+		{"accept", 1, false, true},
+		{"invoke", 1, false, true},
+		{"run", 0, false, true},
+		{"get", 0, false, true},
+		{"get", 1, false, false},
+		{"add", 1, false, false},
+		{"forEach", 1, true, false},
+		{"apply", 1, false, true},
+		{"apply", 1, true, false},
+	} {
+		if got := runsReceiver(&ir.Call{Name: tc.name}, tc.nargs, tc.closureArg); got != tc.want {
+			t.Errorf("runsReceiver(%s, %d, %v) = %v", tc.name, tc.nargs, tc.closureArg, got)
+		}
+	}
+	if ownerKey("*app.List<T>?") != "List" || ownerKey("") != "" {
+		t.Error("ownerKey")
+	}
+}
+
 // What a callee throws reaches the handler its call's block leads to, or
 // leaves the caller.
 func TestExceptionEdges(t *testing.T) {

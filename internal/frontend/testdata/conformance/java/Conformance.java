@@ -316,4 +316,54 @@ class Conformance {
         items.forEach(item -> System.out.println(xs));
         xs.add(email);
     }
+
+    // scenario: closure-field
+    static class Notifier {
+        private final java.util.function.Consumer<String> onSend;
+
+        Notifier(java.util.function.Consumer<String> onSend) { this.onSend = onSend; }
+
+        void send(String v) { onSend.accept(v); }
+    }
+
+    void closureField(String email) {
+        Notifier n = new Notifier(v -> {
+            // ruleid: log.jvm.stdout
+            System.out.println(v);
+        });
+        n.send(email);
+    }
+
+    // scenario: closure-collection
+    static class EventBus {
+        private final List<java.util.function.Consumer<String>> handlers = new ArrayList<>();
+
+        void subscribe(java.util.function.Consumer<String> h) { handlers.add(h); }
+
+        void publish(String v) {
+            for (java.util.function.Consumer<String> h : handlers) h.accept(v);
+        }
+    }
+
+    void closureCollection(String email) {
+        EventBus bus = new EventBus();
+        bus.subscribe(v -> {
+            // ruleid: log.jvm.stdout
+            System.out.println(v);
+        });
+        bus.publish(email);
+    }
+
+    // scenario: closure-return
+    static java.util.function.Consumer<String> makePrinter() {
+        return v -> {
+            // ruleid: log.jvm.stdout
+            System.out.println(v);
+        };
+    }
+
+    void closureReturn(String email) {
+        java.util.function.Consumer<String> printer = makePrinter();
+        printer.accept(email);
+    }
 }
