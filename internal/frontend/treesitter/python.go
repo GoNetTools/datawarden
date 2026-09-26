@@ -609,7 +609,7 @@ func (pb *pyBuilder) stmt(n *sitter.Node) ir.VarID {
 			switch c.Type() {
 			case "as_pattern":
 				if t := c.ChildByFieldName("alias"); t != nil {
-					pb.bind(firstOf(t, "identifier"), pb.temp(c))
+					pb.bind(firstOf(t, "identifier"), pb.caughtValue(c))
 				}
 			case "block":
 				pb.stmt(c)
@@ -638,7 +638,14 @@ func (pb *pyBuilder) stmt(n *sitter.Node) ir.VarID {
 		dst := pb.declare(pb.text(n.ChildByFieldName("name")), "", n)
 		pb.assign(dst, n, fv)
 		return ir.NoVar
-	case "raise_statement", "assert_statement":
+	case "raise_statement":
+		for i, c := range named(n) {
+			if v := pb.expr(c); i == 0 {
+				pb.throwValue(v, n) // raise X from cause: X is thrown
+			}
+		}
+		return ir.NoVar
+	case "assert_statement":
 		for _, c := range named(n) {
 			pb.expr(c)
 		}

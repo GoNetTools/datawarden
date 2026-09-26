@@ -391,6 +391,13 @@ type builder struct {
 	terminated bool
 	targets    []*jumpTarget // enclosing loops and switches, innermost last
 	label      string        // label of the statement being lowered
+
+	// Exceptions. catchers holds, per enclosing try body, the variable its
+	// handlers catch; caught is the one the handler being lowered binds;
+	// escaped collects what leaves the function (NoVar until needed).
+	catchers []ir.VarID
+	caught   ir.VarID
+	escaped  ir.VarID
 }
 
 // exit is where a path leaves a construct: its scope and block.
@@ -453,7 +460,8 @@ func (b *builder) jump(isContinue bool, label string) {
 }
 
 func (p *program) newBuilder(f *srcFile, cls *classInfo, id, name string, n *sitter.Node) *builder {
-	b := &builder{p: p, f: f, cls: cls, scope: map[string]ir.VarID{}, this: ir.NoVar, names: map[string]ir.VarID{}, lambdas: map[ir.VarID]ir.VarID{}}
+	b := &builder{p: p, f: f, cls: cls, scope: map[string]ir.VarID{}, this: ir.NoVar, names: map[string]ir.VarID{}, lambdas: map[ir.VarID]ir.VarID{},
+		caught: ir.NoVar, escaped: ir.NoVar}
 	b.fn = &ir.Func{ID: id, Name: name, Lang: p.lang, File: f.rel, Pos: b.pos(n)}
 	b.fn.NewBlock(false) // entry
 	return b
@@ -862,7 +870,10 @@ func (b *builder) tryCatch(n *sitter.Node, body func(), handlers []func(), final
 	entry, from, dead := b.snapshot(), b.fn.CurBlock(), b.terminated
 	start := b.newBlock(from)
 	b.terminated = false
+	thrown := b.fn.Temp(b.pos(n))
+	b.catchers = append(b.catchers, thrown)
 	body()
+	b.catchers = b.catchers[:len(b.catchers)-1]
 	done, doneBlock := b.snapshot(), b.fn.CurBlock()
 	var scopes []map[string]ir.VarID
 	var ends []int32
@@ -873,7 +884,10 @@ func (b *builder) tryCatch(n *sitter.Node, body func(), handlers []func(), final
 		b.newBlock(from, start, doneBlock)
 		b.terminated = false
 		b.join(n, entry, done)
+		saved := b.caught
+		b.caught = thrown
 		h()
+		b.caught = saved
 		if !b.terminated {
 			scopes, ends = append(scopes, b.scope), append(ends, b.fn.CurBlock())
 		}
@@ -978,14 +992,39 @@ func (b *builder) newBlock(preds ...int32) int32 {
 // a lambda or local function body, which may run when it is created, later
 // or never. Its blocks are unordered, and a return inside it ends only it.
 func (b *builder) floatingRegion(body func()) {
-	from, terminated, targets := b.fn.CurBlock(), b.terminated, b.targets
+	from, terminated, targets, catchers := b.fn.CurBlock(), b.terminated, b.targets, b.catchers
 	b.floating++
-	b.targets = nil
+	b.targets, b.catchers = nil, nil
 	b.newBlock()
 	body()
 	b.floating--
 	b.fn.SetBlock(from)
-	b.terminated, b.targets = terminated, targets
+	b.terminated, b.targets, b.catchers = terminated, targets, catchers
+}
+
+// thrown is the variable a throw at this point reaches: the innermost
+// enclosing handler's, or the function's escaping exception.
+func (b *builder) thrown() ir.VarID {
+	if n := len(b.catchers); n > 0 {
+		return b.catchers[n-1]
+	}
+	if b.escaped == ir.NoVar {
+		b.escaped = b.fn.Temp(b.fn.Pos)
+	}
+	return b.escaped
+}
+
+// throwValue lowers throw/raise v.
+func (b *builder) throwValue(v ir.VarID, n *sitter.Node) {
+	b.assign(b.thrown(), n, v)
+}
+
+// caughtValue is the value a catch clause binds: what the try body threw.
+func (b *builder) caughtValue(n *sitter.Node) ir.VarID {
+	if b.caught != ir.NoVar {
+		return b.caught
+	}
+	return b.temp(n)
 }
 
 // emitCall emits a call and returns its result variable.
@@ -994,6 +1033,7 @@ func (b *builder) emitCall(n *sitter.Node, c *ir.Call, args []ir.VarID, resultTy
 	if c.Construct && c.Ctor == "" {
 		c.Ctor = b.p.ctorID(c.Callee)
 	}
+	c.Catch = []ir.VarID{b.thrown()}
 	if !c.Construct && c.RecvType != "" && c.Targets == nil {
 		c.Targets = b.p.overrides(c.RecvType, c.Name, c.Target)
 	}
@@ -1056,6 +1096,11 @@ func (b *builder) lambda(n *sitter.Node, params []*sitter.Node, paramNames []str
 }
 
 func (b *builder) finish() *ir.Func {
+	if b.escaped != ir.NoVar {
+		// What the function throws, from wherever it is thrown.
+		b.fn.NewBlock(true)
+		b.fn.Emit(ir.Instr{Op: ir.OpReturn, Dst: ir.NoVar, Args: []ir.VarID{b.escaped}, Throw: true, Pos: b.fn.Pos})
+	}
 	b.p.mod.Funcs = append(b.p.mod.Funcs, b.fn)
 	return b.fn
 }

@@ -507,10 +507,17 @@ func (a *analyzer) analyzeFunc(fn *ir.Func) *Summary {
 		st.cur = i
 		for _, arg := range in.Args {
 			for _, f := range st.of(arg) {
-				if f.dt == "" {
-					sum.addParamReturn(f.param, Transfer{Xf: f.xf, Conf: f.conf, Path: appendPath(f.path, in.Pos), Field: f.field})
-				} else {
-					sum.addReturnFact(RealFact{DataType: f.dt, Desc: f.desc, Src: f.src, Path: appendPath(f.path, in.Pos), Xf: f.xf, Conf: f.conf})
+				t := Transfer{Xf: f.xf, Conf: f.conf, Path: appendPath(f.path, in.Pos), Field: f.field}
+				rf := RealFact{DataType: f.dt, Desc: f.desc, Src: f.src, Path: appendPath(f.path, in.Pos), Xf: f.xf, Conf: f.conf}
+				switch {
+				case in.Throw && f.dt == "":
+					sum.addParamThrow(f.param, t)
+				case in.Throw:
+					sum.addThrowFact(rf)
+				case f.dt == "":
+					sum.addParamReturn(f.param, t)
+				default:
+					sum.addReturnFact(rf)
 				}
 			}
 		}
@@ -964,6 +971,21 @@ func (a *analyzer) apply(st *state, fn *ir.Func, in *ir.Instr, s *Summary, args 
 		f := realToFact(rf, in.Pos)
 		f.xf = mergeXf(f.xf, nameXf)
 		changed = st.add(dst, f) || changed
+	}
+	// What the callee throws reaches the handler (or escapes further).
+	for _, cv := range in.Call.Catch {
+		for i := range args {
+			for _, t := range s.ParamThrow[i] {
+				for _, f := range of(i, t.Field) {
+					d := derive(f, in.Pos, t.Conf, t.Xf...)
+					d.path = appendPath(d.path, t.Path...)
+					put(cv, "", d)
+				}
+			}
+		}
+		for _, rf := range s.ThrowFacts {
+			put(cv, "", realToFact(rf, in.Pos))
+		}
 	}
 	return changed
 }

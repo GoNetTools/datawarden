@@ -559,6 +559,10 @@ func (kb *ktBuilder) stmt(n *sitter.Node) ir.VarID {
 				v = kb.expr(kids[len(kids)-1])
 			}
 			kb.ret(n, v)
+		case strings.HasPrefix(t, "throw"):
+			if len(kids) > 0 {
+				kb.throwValue(kb.expr(kids[len(kids)-1]), n)
+			}
 		case strings.HasPrefix(t, "break") || strings.HasPrefix(t, "continue"):
 			label := ""
 			if l := firstOf(n, "label"); l != nil {
@@ -948,7 +952,7 @@ func (kb *ktBuilder) conditional(n *sitter.Node) ir.VarID {
 			case "catch_block":
 				handlers = append(handlers, func() {
 					if id := firstOf(c, "simple_identifier"); id != nil {
-						kb.declare(kb.text(id), "", id)
+						kb.assign(kb.declare(kb.text(id), "", id), id, kb.caughtValue(id))
 					}
 					if b := firstOf(c, "statements"); b != nil {
 						kb.assign(result, b, kb.block(b))

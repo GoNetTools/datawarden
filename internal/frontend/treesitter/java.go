@@ -432,10 +432,15 @@ func (jb *jvBuilder) stmt(n *sitter.Node) ir.VarID {
 		}
 		jb.switchCases(n, fallsThrough, exhaustive, cases)
 		return result
+	case "throw_statement":
+		if k := named(n); len(k) > 0 {
+			jb.throwValue(jb.expr(k[0]), n)
+		}
+		return ir.NoVar
 	case "catch_clause":
 		if p := firstOf(n, "catch_formal_parameter"); p != nil {
 			if nn := p.ChildByFieldName("name"); nn != nil {
-				jb.declare(jb.text(nn), "", nn)
+				jb.assign(jb.declare(jb.text(nn), "", nn), nn, jb.caughtValue(nn))
 			}
 		}
 		jb.stmt(n.ChildByFieldName("body"))
@@ -465,7 +470,7 @@ func (jb *jvBuilder) stmt(n *sitter.Node) ir.VarID {
 		}
 		return ir.NoVar
 	case "synchronized_statement", "finally_clause", "resource_specification",
-		"throw_statement", "yield_statement", "parenthesized_expression", "condition":
+		"yield_statement", "parenthesized_expression", "condition":
 		last := ir.NoVar
 		for _, c := range named(n) {
 			last = jb.stmt(c)

@@ -71,6 +71,11 @@ type Summary struct {
 	ParamOut map[int][]RealFact `json:"po,omitempty"`
 	// ReturnFacts: PII produced inside the function is returned.
 	ReturnFacts []RealFact `json:"rf,omitempty"`
+	// ParamThrow[i]: parameter i reaches an exception the function throws.
+	ParamThrow map[int][]Transfer `json:"pt,omitempty"`
+	// ThrowFacts: PII produced inside the function is in an exception it
+	// throws.
+	ThrowFacts []RealFact `json:"tf,omitempty"`
 }
 
 const maxPerSlot = 24
@@ -153,9 +158,19 @@ func (s *Summary) addParamOut(i int, f RealFact) {
 
 func (s *Summary) addReturnFact(f RealFact) { s.ReturnFacts = mergeReal(s.ReturnFacts, f) }
 
+func (s *Summary) addParamThrow(i int, t Transfer) {
+	if s.ParamThrow == nil {
+		s.ParamThrow = map[int][]Transfer{}
+	}
+	s.ParamThrow[i] = mergeTransfer(s.ParamThrow[i], t)
+}
+
+func (s *Summary) addThrowFact(f RealFact) { s.ThrowFacts = mergeReal(s.ThrowFacts, f) }
+
 // Empty reports whether the summary carries no information.
 func (s *Summary) Empty() bool {
-	return s == nil || (len(s.ParamReturn) == 0 && len(s.ParamSink) == 0 && len(s.ParamParam) == 0 && len(s.ParamOut) == 0 && len(s.ReturnFacts) == 0)
+	return s == nil || (len(s.ParamReturn) == 0 && len(s.ParamSink) == 0 && len(s.ParamParam) == 0 && len(s.ParamOut) == 0 && len(s.ReturnFacts) == 0 &&
+		len(s.ParamThrow) == 0 && len(s.ThrowFacts) == 0)
 }
 
 func (s *Summary) normalize() {
@@ -178,6 +193,12 @@ func (s *Summary) normalize() {
 	for _, l := range s.ParamReturn {
 		byKey(l)
 	}
+	for _, l := range s.ParamThrow {
+		byKey(l)
+	}
+	sort.Slice(s.ThrowFacts, func(a, b int) bool {
+		return s.ThrowFacts[a].DataType+xfKey(s.ThrowFacts[a].Xf) < s.ThrowFacts[b].DataType+xfKey(s.ThrowFacts[b].Xf)
+	})
 	for _, m := range s.ParamParam {
 		for _, l := range m {
 			byKey(l)

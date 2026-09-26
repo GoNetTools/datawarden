@@ -507,6 +507,9 @@ func (sb *swBuilder) stmt(n *sitter.Node) ir.VarID {
 		} else if k := named(n); len(k) > 0 {
 			v = sb.expr(k[len(k)-1])
 		}
+		if firstOf(n, "throw_keyword") != nil {
+			sb.throwValue(v, n)
+		}
 		if hasChildToken(n, sb.f.src, "return") {
 			sb.ret(n, v)
 		}
@@ -565,7 +568,7 @@ func (sb *swBuilder) stmt(n *sitter.Node) ir.VarID {
 				body = c
 			case "catch_block":
 				handlers = append(handlers, func() {
-					errVar := sb.temp(c)
+					errVar := sb.caughtValue(c)
 					if p := c.ChildByFieldName("error"); p != nil {
 						sb.bindPattern(p, errVar, "")
 					} else {

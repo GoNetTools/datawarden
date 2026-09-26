@@ -691,7 +691,7 @@ func (tb *tsBuilder) stmt(n *sitter.Node) ir.VarID {
 		return ir.NoVar
 	case "catch_clause":
 		if p := n.ChildByFieldName("parameter"); p != nil {
-			tb.destructure(p, tb.temp(p), "")
+			tb.destructure(p, tb.caughtValue(p), "")
 		}
 		tb.stmt(n.ChildByFieldName("body"))
 		return ir.NoVar
@@ -701,7 +701,12 @@ func (tb *tsBuilder) stmt(n *sitter.Node) ir.VarID {
 		dst := tb.declare(name, "", n)
 		tb.assign(dst, n, fv)
 		return ir.NoVar
-	case "throw_statement", "parenthesized_expression", "with_statement":
+	case "throw_statement":
+		if k := named(n); len(k) > 0 {
+			tb.throwValue(tb.expr(k[0]), n)
+		}
+		return ir.NoVar
+	case "parenthesized_expression", "with_statement":
 		last := ir.NoVar
 		for _, c := range named(n) {
 			last = tb.stmt(c)
