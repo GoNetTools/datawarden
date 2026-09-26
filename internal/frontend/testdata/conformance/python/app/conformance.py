@@ -311,3 +311,12 @@ def closure_assign(email: str, items: list):
         remember(item)
     # ruleid: log.py.print
     print(found)
+
+
+# scenario: callback-before-mutation
+def callback_before_mutation(email: str, items: list):
+    xs = []
+    # map runs the lambda (here, as list consumes it) before the append below.
+    # ok: log.py.print
+    list(map(lambda item: print(xs), items))
+    xs.append(email)

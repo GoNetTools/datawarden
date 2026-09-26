@@ -376,6 +376,9 @@ type builder struct {
 	outer    *builder
 	captured map[ir.VarID]ir.VarID
 	binds    []ir.VarID
+	// declared lists the names a Python nested function declares
+	// nonlocal or global: assigning them writes the enclosing variable.
+	declared map[string]bool
 
 	// Control flow. terminated is set once the current path has returned;
 	// what follows it is unreachable.

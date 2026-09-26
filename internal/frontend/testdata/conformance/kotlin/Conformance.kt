@@ -295,3 +295,14 @@ fun closureAssign(email: String, items: List<String>) {
     // ruleid: log.jvm.stdout
     println(found)
 }
+
+// scenario: callback-before-mutation
+fun callbackBeforeMutation(email: String, items: List<String>) {
+    val xs = mutableListOf<String>()
+    items.forEach {
+        // forEach runs the lambda before the add below.
+        // ok: log.jvm.stdout
+        println(xs)
+    }
+    xs.add(email)
+}

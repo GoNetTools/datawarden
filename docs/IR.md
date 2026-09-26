@@ -136,8 +136,9 @@ dominates `P`. Dominance is computed over normal and exceptional edges
   is reported with that check as a guard (`analysis/guard.go`).
 - **Closures**: `closure` values flow through assigns and phis; an
   indirect call runs the closures its function value may hold, and a
-  closure passed as an argument may be called back later with the call's
-  other arguments.
+  closure passed as an argument is called back with the call's other
+  arguments: at the call when the callee runs callbacks before returning
+  (`forEach`, `map`, …), at any later time otherwise.
 - **Exceptions**: a `catch` receives the value of each `throw`, and what
   each call throws, in the blocks whose exceptional edges lead to it.
 - **Dispatch**: the class table (`Module.Classes`).
