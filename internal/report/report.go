@@ -41,6 +41,9 @@ type Report struct {
 	Rules RuleLookup `json:"-"`
 	// ShowAll includes non-violating flows in human-readable output.
 	ShowAll bool `json:"-"`
+	// ShowCalls prints each flow's call graph (Flow.Calls) in the text
+	// and Markdown reports.
+	ShowCalls bool `json:"-"`
 	// Catalog labels data types; nil falls back to the type id.
 	Catalog Catalog `json:"-"`
 	// Links builds a URL for a source position (CI code browsing); nil

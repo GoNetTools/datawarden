@@ -92,6 +92,15 @@ func Markdown(w io.Writer, r *Report) error {
 				}
 				fmt.Fprintf(&b, "%d. %s%s\n", i+1, mdLoc(link, p), note)
 			}
+			if r.ShowCalls && len(f.Calls) > 0 {
+				b.WriteString("\nCall graph:\n\n")
+				for _, c := range f.Calls {
+					fmt.Fprintf(&b, "%s- `%s` %s\n", strings.Repeat("  ", c.Depth), c.Function, mdLoc(link, c.Pos))
+				}
+			}
+			if r.ShowCalls && len(f.CalledBy) > 0 {
+				fmt.Fprintf(&b, "\nCalled by: `%s`\n", strings.Join(f.CalledBy, "`, `"))
+			}
 			b.WriteString("\n")
 		}
 		b.WriteString("</details>\n\n")

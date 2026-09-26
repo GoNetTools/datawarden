@@ -89,6 +89,7 @@ datawarden map --format dpia > docs/data-map.md
 |---|---|
 | `datawarden scan [paths...]` | Full scan, or only the given files/directories. |
 | `datawarden scan --diff <ref>` | PR mode: files changed since the merge base with `<ref>` plus their callers, found through the cached call graph. |
+| `datawarden scan --call-graph` | Also prints, for each flow, the functions the data goes through as a call tree (source, calls, returns, sink) and who calls the function where it enters. |
 | `datawarden scan --literals-only` | Only the committed-value detector (personal data and secrets). `--staged` reads the git index (pre-commit). |
 | `datawarden baseline` | Full scan; writes the current violations to the baseline. |
 | `datawarden map --format dpia\|json\|csv\|mermaid` | Personal-data inventory. |
@@ -98,7 +99,18 @@ datawarden map --format dpia > docs/data-map.md
 | `datawarden comment datawarden.md` | Creates or updates the PR (GitHub) / MR (GitLab) comment. |
 | `datawarden init` | Writes starter config files. |
 
-Useful `scan` flags: `--format text|json|sarif|markdown|gitlab`, `--sarif FILE`, `--markdown FILE`, `--json FILE`, `--gitlab FILE` (write several reports in one run), `--baseline FILE`, `--no-baseline`, `--caller-depth N`, `--min-confidence F`, `--all`, `--no-cache`, `--no-fail`, `--verbose`, `--cpuprofile FILE`, `--memprofile FILE` (pprof profiles of the analysis; also on `baseline` and `map`). Flags can come before or after paths.
+Useful `scan` flags: `--format text|json|sarif|markdown|gitlab`, `--sarif FILE`, `--markdown FILE`, `--json FILE`, `--gitlab FILE` (write several reports in one run), `--baseline FILE`, `--no-baseline`, `--caller-depth N`, `--min-confidence F`, `--all`, `--call-graph` (the call tree of each flow, in text and Markdown; JSON always has it as `calls` and `called_by`), `--no-cache`, `--no-fail`, `--verbose`, `--cpuprofile FILE`, `--memprofile FILE` (pprof profiles of the analysis; also on `baseline` and `map`). Flags can come before or after paths.
+
+With `--call-graph`, each flow shows the functions its data goes through, indented by call depth, and the functions that call the one where it enters:
+
+```
+NEW      medium person_name → logcat (log)  [log.android.logcat]
+         source  app/ui/SignupViewModel.kt:9:16  identifier "fullName"
+         sink    app/data/CustomerRepo.kt:17:9  android.util.Log.d  in com.example.app.data.CustomerRepo.save
+         calls   com.example.app.ui.SignupViewModel.submit  app/ui/SignupViewModel.kt:9:16  (source)
+                 └─ com.example.app.data.CustomerRepo.save  app/data/CustomerRepo.kt:17:9  (sink)
+         called by  com.example.app.ui.SignupActivity.onSignup
+```
 
 **Exit codes:** `0` no new violations · `1` at least one new policy violation · `2` error. CI only needs the exit code.
 

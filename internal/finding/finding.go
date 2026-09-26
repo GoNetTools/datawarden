@@ -17,14 +17,21 @@ type Destination struct {
 
 // Flow is a path from a PII source to a sink.
 type Flow struct {
-	DataType   string      `json:"data_type"`       // "email", "national_id"
-	Class      string      `json:"class,omitempty"` // "pii", "phi", "pci", "credential"; set by the policy
-	Source     ir.Pos      `json:"source"`
-	Sink       ir.Pos      `json:"sink"`
-	SinkRule   string      `json:"sink_rule"` // "sdk.sentry.set_user"
-	Dest       Destination `json:"dest"`
-	Path       []ir.Pos    `json:"path"`
-	Transforms []string    `json:"transforms,omitempty"` // "masked", "sha256"
+	DataType string      `json:"data_type"`       // "email", "national_id"
+	Class    string      `json:"class,omitempty"` // "pii", "phi", "pci", "credential"; set by the policy
+	Source   ir.Pos      `json:"source"`
+	Sink     ir.Pos      `json:"sink"`
+	SinkRule string      `json:"sink_rule"` // "sdk.sentry.set_user"
+	Dest     Destination `json:"dest"`
+	Path     []ir.Pos    `json:"path"`
+	// Calls is the chain of functions the data goes through from the
+	// source to the sink, with the depth of each in the call graph:
+	// deeper for a call, shallower for a return.
+	Calls []CallStep `json:"calls,omitempty"`
+	// CalledBy lists the analysed functions that call the function where
+	// the data enters the chain (at most five).
+	CalledBy   []string `json:"called_by,omitempty"`
+	Transforms []string `json:"transforms,omitempty"` // "masked", "sha256"
 	// Guards are the consent checks that must pass for the sink to run
 	// ("consent check hasConsent() at app/Track.kt:12").
 	Guards     []string `json:"guards,omitempty"`
@@ -41,6 +48,14 @@ type Flow struct {
 	Severity    string `json:"severity"` // high | medium | low
 	Baselined   bool   `json:"baselined"`
 	Allowed     string `json:"allowed,omitempty"` // reason when policy allows it
+}
+
+// CallStep is one function a flow passes through: where the data is in
+// it, and its depth relative to the shallowest function of the chain.
+type CallStep struct {
+	Function string `json:"function"`
+	Pos      ir.Pos `json:"pos"`
+	Depth    int    `json:"depth"`
 }
 
 // Literal is PII committed verbatim to the repository.

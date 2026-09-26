@@ -85,6 +85,7 @@ func (a *App) runScan(ctx context.Context, args []string) (int, error) {
 	staged := fs.Bool("staged", false, "with --literals-only: scan the staged (git index) content of staged files")
 	callerDepth := fs.Int("caller-depth", 2, "with --diff: how many levels of callers to include")
 	all := fs.Bool("all", false, "text output: also show flows accepted by policy")
+	callGraph := fs.Bool("call-graph", false, "text and Markdown output: show the functions each flow goes through, as a call tree")
 	minConf := fs.Float64("min-confidence", 0, "override policy.min_confidence")
 	noFail := fs.Bool("no-fail", false, "exit 0 even when there are new violations")
 	fs.Usage = func() {
@@ -124,6 +125,7 @@ func (a *App) runScan(ctx context.Context, args []string) (int, error) {
 	}
 	rep := a.newReport(res, flows, lits, s.rules, *diff)
 	rep.ShowAll = *all
+	rep.ShowCalls = *callGraph
 	rep.BaselineSize = size
 	if res.Mode == scan.ModeFull {
 		rep.BaselineFixed = len(unseen)
