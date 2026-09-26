@@ -67,9 +67,9 @@ class Constructs {
     void builder(String email) {
         StringBuilder sb = new StringBuilder();
         sb.append("user=").append(email);
-        // Known gap: in a call chain the second append's receiver is the
-        // first call's result, so the data does not reach sb.
-        // todoruleid: log.jvm.stdout
+        // The second append's receiver is the first call's result, which
+        // is sb itself.
+        // ruleid: log.jvm.stdout
         System.out.println(sb.toString());
     }
 
@@ -160,5 +160,53 @@ class Constructs {
         }
         // ruleid: log.jvm.stdout
         System.out.println(x);
+    }
+
+    static class Courier {
+        void send(String to) {
+            // ruleid: log.jvm.stdout
+            System.out.println("courier " + to);
+        }
+    }
+
+    static class Card {
+        String email;
+        String nickname;
+    }
+
+    void reflectiveInvoke(String email) throws Exception {
+        java.lang.reflect.Method m = Courier.class.getMethod("send", String.class);
+        m.invoke(new Courier(), email);
+    }
+
+    void reflectiveField(Card card, String email) throws Exception {
+        Card.class.getDeclaredField("nickname").set(card, email);
+        // ruleid: log.jvm.stdout
+        System.out.println(card.nickname);
+    }
+
+    void reflectiveFieldNotPii(Card card) throws Exception {
+        java.lang.reflect.Field f = Card.class.getDeclaredField("nickname");
+        // ok: log.jvm.stdout
+        System.out.println(f.get(card));
+    }
+
+    void validate(String email) {
+        if (email.isEmpty()) {
+            throw new IllegalArgumentException("bad address " + email);
+        }
+    }
+
+    void thrownFromCallee(String email) {
+        try {
+            validate(email);
+        } catch (IllegalArgumentException e) {
+            // ruleid: log.jvm.stdout
+            System.out.println(e.getMessage());
+        }
+    }
+
+    void methodReference(List<String> emails) {
+        emails.forEach(new Courier()::send);
     }
 }

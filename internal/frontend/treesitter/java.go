@@ -432,10 +432,15 @@ func (jb *jvBuilder) stmt(n *sitter.Node) ir.VarID {
 		}
 		jb.switchCases(n, fallsThrough, exhaustive, cases)
 		return result
+	case "throw_statement":
+		if k := named(n); len(k) > 0 {
+			jb.throwValue(jb.expr(k[0]), n)
+		}
+		return ir.NoVar
 	case "catch_clause":
 		if p := firstOf(n, "catch_formal_parameter"); p != nil {
 			if nn := p.ChildByFieldName("name"); nn != nil {
-				jb.declare(jb.text(nn), "", nn)
+				jb.assign(jb.declare(jb.text(nn), "", nn), nn, jb.caughtValue(nn))
 			}
 		}
 		jb.stmt(n.ChildByFieldName("body"))
@@ -465,7 +470,7 @@ func (jb *jvBuilder) stmt(n *sitter.Node) ir.VarID {
 		}
 		return ir.NoVar
 	case "synchronized_statement", "finally_clause", "resource_specification",
-		"throw_statement", "yield_statement", "parenthesized_expression", "condition":
+		"yield_statement", "parenthesized_expression", "condition":
 		last := ir.NoVar
 		for _, c := range named(n) {
 			last = jb.stmt(c)
@@ -583,7 +588,7 @@ func (jb *jvBuilder) expr(n *sitter.Node) ir.VarID {
 	case "lambda_expression":
 		return jb.lambdaExpr(n)
 	case "method_reference":
-		return jb.temp(n)
+		return jb.methodRef(n)
 	case "switch_expression":
 		return jb.stmt(n)
 	default:
@@ -790,10 +795,36 @@ func (jb *jvBuilder) typeOf(n *sitter.Node) string {
 }
 
 func (jb *jvBuilder) call(n *sitter.Node) ir.VarID {
-	m := jb.text(n.ChildByFieldName("name"))
-	obj := n.ChildByFieldName("object")
+	return jb.invoke(n, n.ChildByFieldName("object"), jb.text(n.ChildByFieldName("name")),
+		func() []ir.VarID { return jb.args(n.ChildByFieldName("arguments")) })
+}
+
+// methodRef lowers X::m as a lambda whose argument goes to m: a static or
+// instance method of X (System.out::println, this::handle, repo::save).
+// String::trim-style references to an instance method of the argument's
+// own type pass the argument as a plain argument, which carries the same
+// data. Constructor references (User::new) construct the class.
+func (jb *jvBuilder) methodRef(n *sitter.Node) ir.VarID {
+	k := named(n)
+	if len(k) < 2 {
+		return jb.temp(n)
+	}
+	obj, name := k[0], jb.text(k[len(k)-1])
+	return jb.lambda(n, nil, nil, true, func() ir.VarID {
+		it := jb.scope["it"]
+		if strings.HasSuffix(jb.text(n), "::new") {
+			typ := jb.jp.resolveType(jb.f, jb.text(obj))
+			return jb.emitCall(n, &ir.Call{Callee: typ, Name: shortName(typ), Construct: true}, []ir.VarID{it}, typ)
+		}
+		return jb.invoke(n, obj, name, func() []ir.VarID { return []ir.VarID{it} })
+	})
+}
+
+// invoke lowers a call of method m on obj (nil for an unqualified call)
+// with the arguments argsOf lowers.
+func (jb *jvBuilder) invoke(n, obj *sitter.Node, m string, argsOf func() []ir.VarID) ir.VarID {
 	if obj == nil {
-		args := jb.args(n.ChildByFieldName("arguments"))
+		args := argsOf()
 		if jb.cls != nil {
 			if id := jb.jp.methodID(jb.cls.name, m, 0); id != "" {
 				c := &ir.Call{Callee: id, Name: m, Target: id, RecvType: jb.cls.name}
@@ -822,7 +853,7 @@ func (jb *jvBuilder) call(n *sitter.Node) ir.VarID {
 		return jb.emitCall(n, c, args, "")
 	}
 	if p := jb.staticPath(obj); p != "" {
-		args := jb.args(n.ChildByFieldName("arguments"))
+		args := argsOf()
 		c := &ir.Call{Name: m, RecvType: p, RecvText: trimText(jb.text(obj))}
 		if strings.Contains(p, ".") {
 			c.Callee = p + "." + m
@@ -836,7 +867,7 @@ func (jb *jvBuilder) call(n *sitter.Node) ir.VarID {
 	}
 	typ := jb.typeOf(obj)
 	recv := jb.expr(obj)
-	args := jb.args(n.ChildByFieldName("arguments"))
+	args := argsOf()
 	c := &ir.Call{Name: m, HasRecv: true, RecvType: typ, RecvText: trimText(jb.text(obj))}
 	if strings.Contains(typ, ".") {
 		c.Callee = typ + "." + m

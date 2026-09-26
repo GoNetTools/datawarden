@@ -232,4 +232,47 @@ class Conformance {
             System.out.println(email);
         }
     }
+
+    // scenario: field-across-methods
+    static class Mailbox {
+        private final String addr;
+        Mailbox(String email) { this.addr = email; }
+        void announce() {
+            // ruleid: log.jvm.stdout
+            System.out.println("sending to " + addr);
+        }
+    }
+
+    void fieldAcrossMethods(String email) { new Mailbox(email).announce(); }
+
+    // scenario: dynamic-dispatch
+    interface Channel { void deliver(String to); }
+
+    static class SmsChannel implements Channel {
+        public void deliver(String to) {
+            // ruleid: log.jvm.stdout
+            System.out.println("sms " + to);
+        }
+    }
+
+    void dynamicDispatch(Channel c, String email) { c.deliver(email); }
+
+    // scenario: exception
+    void exception(String email) {
+        try {
+            throw new IllegalArgumentException("unknown user " + email);
+        } catch (IllegalArgumentException e) {
+            // ruleid: log.jvm.stdout
+            System.out.println(e.getMessage());
+        }
+    }
+
+    // scenario: lambda-variable
+    void lambdaVariable(String email) {
+        java.util.function.Consumer<String> show = v -> {
+            // ruleid: log.jvm.stdout
+            System.out.println(v);
+        };
+        show.accept(email);
+    }
 }

@@ -301,3 +301,41 @@ def constant_elif(email: str, kind: int):
         x = "other"
     # ok: log.py.print
     print(x)
+
+
+class Account:
+    def __init__(self, email: str):
+        self._email = email
+
+    @property
+    def contact(self):
+        return self._email
+
+
+def property_getter(email: str):
+    # ruleid: log.py.print
+    print(Account(email).contact)
+
+
+def addresses(email: str):
+    yield email
+
+
+def generator(email: str):
+    for a in addresses(email):
+        # ruleid: log.py.print
+        print(a)
+
+
+def keyword_arguments(email: str):
+    t = Ticket(owner="system", note=email)
+    # ruleid: log.py.print
+    print(t.note)
+    # ok: log.py.print
+    print(t.owner)
+
+
+class Ticket:
+    def __init__(self, note: str, owner: str):
+        self.note = note
+        self.owner = owner

@@ -237,6 +237,7 @@ func (kp *ktProgram) collectClass(f *srcFile, n *sitter.Node, scope string, isOb
 	mods := firstOf(n, "modifiers")
 	_, annNames := ktAnnotations(f, mods)
 	td := &ir.TypeDecl{Name: qual, Kind: "class", Lang: lang.Kotlin, Annotations: annNames, Pos: posOf(f, n)}
+	kp.funcs[qual+".<init>"] = true // every class gets an initializer function
 	if isEntityAnnotation(annNames) {
 		td.Kind = "entity"
 	}
@@ -265,14 +266,23 @@ func (kp *ktProgram) collectClass(f *srcFile, n *sitter.Node, scope string, isOb
 	body := firstOf(n, "class_body", "enum_class_body")
 	var walkBody func(body *sitter.Node, static bool)
 	walkBody = func(body *sitter.Node, static bool) {
+		prop := "" // the property a following getter belongs to
 		for _, m := range named(body) {
 			switch m.Type() {
+			case "getter":
+				if prop != "" {
+					kp.noteGetter(ci, prop)
+				}
 			case "property_declaration":
 				vd := firstOf(m, "variable_declaration")
 				if vd == nil {
 					continue
 				}
 				id := firstOf(vd, "simple_identifier")
+				prop = f.text(id)
+				if firstOf(m, "getter") != nil {
+					kp.noteGetter(ci, prop)
+				}
 				typ := ktTypeText(f, ktTypeChild(vd))
 				if typ == "" {
 					typ = ktCtorType(f, m)
@@ -397,10 +407,21 @@ func (kp *ktProgram) lowerClass(f *srcFile, n *sitter.Node, outer *classInfo) {
 	body := firstOf(n, "class_body", "enum_class_body")
 	var walk func(body *sitter.Node, static bool)
 	walk = func(body *sitter.Node, static bool) {
+		prop := ""
 		for _, m := range named(body) {
 			switch m.Type() {
+			case "getter":
+				if prop != "" {
+					kp.lowerGetter(f, ci, prop, m)
+				}
 			case "property_declaration":
 				vd := firstOf(m, "variable_declaration")
+				if vd != nil {
+					prop = f.text(firstOf(vd, "simple_identifier"))
+					if g := firstOf(m, "getter"); g != nil {
+						kp.lowerGetter(f, ci, prop, g)
+					}
+				}
 				val := ktPropValue(m)
 				if vd == nil || val == nil {
 					continue
@@ -431,6 +452,84 @@ func (kp *ktProgram) lowerClass(f *srcFile, n *sitter.Node, outer *classInfo) {
 	if len(init.fn.Instrs) > 0 || len(init.fn.Params) > 1 {
 		init.finish()
 	}
+}
+
+// callableRef lowers a Kotlin callable reference: User::class is the class
+// (for reflection), User::email a property handle whose get(obj) reads the
+// field, and Sender::send or sender::send a function value that calls the
+// method with its arguments.
+func (kb *ktBuilder) callableRef(n *sitter.Node) ir.VarID {
+	kids := named(n)
+	text := kb.text(n)
+	if len(kids) == 1 && strings.HasSuffix(text, "::class") {
+		return kb.constVar(kb.kp.resolveType(kb.f, kb.text(kids[0]))+".class", n)
+	}
+	if len(kids) < 2 {
+		return kb.temp(n)
+	}
+	owner, member := kids[0], kb.text(kids[len(kids)-1])
+	cls := kb.kp.resolveType(kb.f, kb.text(owner))
+	if c := kb.kp.class(cls); c != nil {
+		if _, isField := c.fields[member]; isField {
+			v := kb.temp(n)
+			kb.markRefl(v, reflHandle{kind: 'f', class: c.name, member: member})
+			return v
+		}
+	}
+	return kb.lambda(n, nil, nil, true, func() ir.VarID {
+		it := kb.scope["it"]
+		if c := kb.kp.class(cls); c != nil {
+			// Unbound: the first argument is the receiver.
+			call := &ir.Call{Callee: c.name + "." + member, Name: member, HasRecv: true, RecvType: c.name}
+			if id := kb.kp.methodID(c.name, member, 0); id != "" {
+				call.Callee, call.Target = id, id
+			}
+			return kb.emitCall(n, call, []ir.VarID{it, it}, "")
+		}
+		if _, local := kb.scope[kb.text(owner)]; local || kb.this != ir.NoVar {
+			// Bound: obj::send, this::send. The grammar parses the
+			// receiver as a type name, so it is looked up by name.
+			recv := kb.ident(kb.text(owner), owner)
+			if kb.text(owner) == "this" {
+				recv = kb.this
+			}
+			typ := kb.fn.Vars[recv].Type
+			call := &ir.Call{Callee: typ + "." + member, Name: member, HasRecv: true, RecvType: typ, RecvText: trimText(kb.text(owner))}
+			if id := kb.kp.methodID(typ, member, 0); id != "" {
+				call.Callee, call.Target = id, id
+			}
+			return kb.emitCall(n, call, []ir.VarID{recv, it}, "")
+		}
+		// A top-level function: ::send.
+		return kb.emitCall(n, &ir.Call{Callee: member, Name: member}, []ir.VarID{it}, "")
+	})
+}
+
+// noteGetter records that property prop of ci has a custom getter, lowered
+// as the JVM accessor getProp.
+func (kp *ktProgram) noteGetter(ci *classInfo, prop string) {
+	id := ci.name + ".get" + strings.ToUpper(prop[:1]) + prop[1:]
+	kp.funcs[id] = true
+	kp.getters[ci.name+"."+prop] = id
+}
+
+// lowerGetter lowers a custom property getter (get() = expr, or a block).
+func (kp *ktProgram) lowerGetter(f *srcFile, ci *classInfo, prop string, g *sitter.Node) {
+	id := kp.getters[ci.name+"."+prop]
+	if id == "" {
+		return
+	}
+	b := kp.newBuilder(f, ci, id, shortName(id), g)
+	b.addThis(ci.name, g)
+	kb := &ktBuilder{builder: b, kp: kp}
+	if body := firstOf(g, "function_body"); body != nil {
+		if st := firstOf(body, "statements"); st != nil {
+			kb.block(st)
+		} else if k := named(body); len(k) > 0 {
+			kb.ret(k[0], kb.expr(k[0]))
+		}
+	}
+	b.finish()
 }
 
 func ktPropValue(prop *sitter.Node) *sitter.Node {
@@ -558,6 +657,10 @@ func (kb *ktBuilder) stmt(n *sitter.Node) ir.VarID {
 				v = kb.expr(kids[len(kids)-1])
 			}
 			kb.ret(n, v)
+		case strings.HasPrefix(t, "throw"):
+			if len(kids) > 0 {
+				kb.throwValue(kb.expr(kids[len(kids)-1]), n)
+			}
 		case strings.HasPrefix(t, "break") || strings.HasPrefix(t, "continue"):
 			label := ""
 			if l := firstOf(n, "label"); l != nil {
@@ -757,7 +860,27 @@ func (kb *ktBuilder) expr(n *sitter.Node) ir.VarID {
 		}
 		owner := kb.typeOf(kids[0])
 		obj := kb.expr(kids[0])
-		return kb.load(obj, kb.text(fieldNode), owner, n)
+		field := kb.text(fieldNode)
+		switch field {
+		case "java", "kotlin", "javaObjectType":
+			if _, ok := kb.handle(obj); ok {
+				return obj // User::class.java is still the class
+			}
+		case "javaClass":
+			if owner != "" {
+				v := kb.temp(n)
+				kb.markRefl(v, reflHandle{kind: 'c', class: owner})
+				return v
+			}
+		}
+		if strings.Contains(owner, ".") && kb.kp.class(owner) == nil && field != "" {
+			// A property of a Java class (telephony.line1Number) is its
+			// getter, getLine1Number(), which is what rules name.
+			getter := "get" + strings.ToUpper(field[:1]) + field[1:]
+			c := &ir.Call{Callee: owner + "." + getter, Name: getter, HasRecv: true, RecvType: owner, RecvText: trimText(kb.text(kids[0]))}
+			return kb.emitCall(n, c, []ir.VarID{obj}, "")
+		}
+		return kb.load(obj, field, owner, n)
 	case "call_expression":
 		return kb.call(n)
 	case "indexing_expression":
@@ -847,7 +970,9 @@ func (kb *ktBuilder) expr(n *sitter.Node) ir.VarID {
 	case "jump_expression", "assignment", "property_declaration":
 		kb.stmt(n)
 		return kb.temp(n)
-	case "callable_reference", "type_test", "line_comment", "multiline_comment":
+	case "callable_reference":
+		return kb.callableRef(n)
+	case "type_test", "line_comment", "multiline_comment":
 		return kb.temp(n)
 	default:
 		if ktBool[t] {
@@ -947,7 +1072,7 @@ func (kb *ktBuilder) conditional(n *sitter.Node) ir.VarID {
 			case "catch_block":
 				handlers = append(handlers, func() {
 					if id := firstOf(c, "simple_identifier"); id != nil {
-						kb.declare(kb.text(id), "", id)
+						kb.assign(kb.declare(kb.text(id), "", id), id, kb.caughtValue(id))
 					}
 					if b := firstOf(c, "statements"); b != nil {
 						kb.assign(result, b, kb.block(b))
@@ -1142,14 +1267,14 @@ func (kb *ktBuilder) args(suffix *sitter.Node) []ir.VarID {
 			for _, va := range allOf(c, "value_argument") {
 				kids := named(va)
 				if len(kids) == 0 {
+					// A keyword literal (null) has no named node; it
+					// still takes its position.
+					out = append(out, kb.constVar(kb.text(va), va))
 					continue
 				}
 				if len(kids) >= 2 && kids[0].Type() == "simple_identifier" && hasChildToken(va, kb.f.src, "=") {
 					// Named argument: User(email = x) — keep the name.
-					v := kb.expr(kids[len(kids)-1])
-					nv := kb.fn.Named(kb.text(kids[0]), "", kb.pos(kids[0]))
-					kb.assign(nv, va, v)
-					out = append(out, nv)
+					out = append(out, kb.kwarg(kb.text(kids[0]), kb.expr(kids[len(kids)-1]), va))
 					continue
 				}
 				out = append(out, kb.expr(kids[len(kids)-1]))

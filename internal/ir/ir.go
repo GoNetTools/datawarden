@@ -83,7 +83,8 @@ const (
 	OpStore
 	// OpCall: Dst = Call(Args...). When Call.HasRecv, Args[0] is the receiver.
 	OpCall
-	// OpReturn: return Args...
+	// OpReturn: return Args... With Throw set, the function instead throws
+	// Args[0] out to its caller.
 	OpReturn
 )
 
@@ -117,6 +118,9 @@ type Instr struct {
 	// Block is the index of the basic block (Func.Blocks) holding the
 	// instruction.
 	Block int32 `json:"block,omitempty"`
+	// Throw marks an OpReturn that throws its argument (an exception that
+	// leaves the function) instead of returning it.
+	Throw bool `json:"throw,omitempty"`
 	// Snapshot marks an assign that computes a new value from the current
 	// state of its arguments (string building, arithmetic) rather than
 	// copying or merging references to them: later mutations of an
@@ -154,6 +158,21 @@ type Call struct {
 	Target string `json:"target,omitempty"`
 	// Construct marks object construction (new Foo(...), Foo(...), &T{...}).
 	Construct bool `json:"construct,omitempty"`
+	// Ctor is the ID of the constructor a Construct call runs, when it is
+	// code under analysis. Its first parameter is the new object (Dst).
+	Ctor string `json:"ctor,omitempty"`
+	// ArgNames gives, per argument, the parameter name of a keyword or
+	// named argument (Python f(to=x), Kotlin f(to = x)); "" for a
+	// positional one. Nil when every argument is positional.
+	ArgNames []string `json:"arg_names,omitempty"`
+	// Targets are further functions a dynamically dispatched call may run:
+	// the overrides and implementations of Target in the program (class
+	// hierarchy analysis). Target may be empty for an interface method.
+	Targets []string `json:"targets,omitempty"`
+	// Catch are the variables that receive what the callee throws: the
+	// enclosing handler's caught exception, or the function's own escaping
+	// exception when the call is not inside a try.
+	Catch []VarID `json:"catch,omitempty"`
 	// Callbacks are the input variables of lambda arguments: values the
 	// callee hands to a callback (collection elements, a location fix, an
 	// HTTP response) flow into these.

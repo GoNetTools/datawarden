@@ -17,6 +17,7 @@ import (
 	"io/fs"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -180,7 +181,30 @@ func (f *Frontend) lowerModule(ctx context.Context, modRel string, rels []string
 		seenTypes: map[string]*types.Named{}, emittedTypes: map[string]bool{},
 	}
 	var fns []*ssa.Function
-	for fn := range ssautil.AllFunctions(prog) {
+	// AllFunctions has the methods of types the program uses at run time
+	// only; add every method of every declared type, so an interface's
+	// implementations are lowered even when this module never builds them.
+	all := ssautil.AllFunctions(prog)
+	for _, sp := range ssaPkgs {
+		if sp == nil {
+			continue
+		}
+		for _, m := range sp.Members {
+			t, ok := m.(*ssa.Type)
+			if !ok {
+				continue
+			}
+			for _, recv := range []types.Type{t.Type(), types.NewPointer(t.Type())} {
+				ms := prog.MethodSets.MethodSet(recv)
+				for i := 0; i < ms.Len(); i++ {
+					if fn := prog.MethodValue(ms.At(i)); fn != nil {
+						all[fn] = true
+					}
+				}
+			}
+		}
+	}
+	for fn := range all {
 		if fn.Pkg == nil || !initial[fn.Pkg.Pkg] || fn.Synthetic != "" || len(fn.Blocks) == 0 {
 			continue
 		}
@@ -237,6 +261,8 @@ type lowerer struct {
 	lastPos      ir.Pos
 	seenTypes    map[string]*types.Named
 	emittedTypes map[string]bool
+	concrete     []types.Type        // named non-interface types of the module
+	impls        map[string][]string // interface method -> implementing function IDs
 }
 
 func (l *lowerer) pos(p token.Pos) ir.Pos {
@@ -323,6 +349,56 @@ func typeStr(t types.Type) string {
 		return n.Obj().Name()
 	}
 	return types.TypeString(t, nil)
+}
+
+// implementations lists the methods of the module's concrete types (T or
+// *T) that an interface method call may run (class hierarchy analysis).
+func (l *lowerer) implementations(c *ssa.CallCommon) []string {
+	iface, ok := c.Value.Type().Underlying().(*types.Interface)
+	if !ok || c.Method == nil {
+		return nil
+	}
+	key := typeStr(c.Value.Type()) + "." + c.Method.Name()
+	if ids, ok := l.impls[key]; ok {
+		return ids
+	}
+	if l.impls == nil {
+		l.impls = map[string][]string{}
+		for _, pkg := range l.prog.AllPackages() {
+			if pkg.Pkg == nil || (pkg.Pkg.Path() != l.modPath && !strings.HasPrefix(pkg.Pkg.Path(), l.modPath+"/")) {
+				continue
+			}
+			for _, m := range pkg.Members {
+				if t, ok := m.(*ssa.Type); ok {
+					if _, isIface := t.Type().Underlying().(*types.Interface); !isIface {
+						l.concrete = append(l.concrete, t.Type())
+					}
+				}
+			}
+		}
+	}
+	var ids []string
+	for _, t := range l.concrete {
+		for _, recv := range []types.Type{t, types.NewPointer(t)} {
+			if !types.Implements(recv, iface) {
+				continue
+			}
+			sel := l.prog.MethodSets.MethodSet(recv).Lookup(c.Method.Pkg(), c.Method.Name())
+			if sel == nil {
+				continue
+			}
+			if fn := l.prog.MethodValue(sel); fn != nil && l.internal(fn) && !slices.Contains(ids, funcID(fn)) {
+				ids = append(ids, funcID(fn))
+			}
+			break
+		}
+		if len(ids) >= 16 {
+			break
+		}
+	}
+	sort.Strings(ids)
+	l.impls[key] = ids
+	return ids
 }
 
 func (l *lowerer) internal(fn *ssa.Function) bool {
@@ -698,6 +774,7 @@ func (l *lowerer) call(c *ssa.CallCommon, dst ir.VarID, pos ir.Pos) {
 		call.Name = c.Method.Name()
 		call.HasRecv = true
 		call.RecvType = typeStr(c.Value.Type())
+		call.Targets = l.implementations(c)
 		args = append(args, l.v(c.Value))
 	default:
 		if b, ok := c.Value.(*ssa.Builtin); ok {

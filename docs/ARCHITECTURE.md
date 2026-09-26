@@ -290,7 +290,7 @@ A data type that is not in the taxonomy (a custom type named by a repository's s
 
 1. **Seeding.** A variable becomes a source when its name classifies as personal data (`phoneNumber`, not `phoneFormatter`) and it is not a new version of a same-named value (`email = sha256(email)` carries whatever its definition carries, the hash included), when its type has personal-data fields (a `User` value), when it is loaded from a field the schema marks, when it is stored under a key that names it (`{"email": v}`), when it comes from a getter (`getEmail()`), or when a source rule matches the call that produced it.
 2. **Propagation.** Facts flow through assignments, field stores and loads, calls and returns. Values are ordered by their SSA variables; mutations of objects by the control-flow graph: a fact put on an object by a field store, a mutating call (`add`, `append`, `put`, ...) or a callee that writes into an argument records the instruction, and only instructions that instruction can run before see it (`analysis/order.go`). Copies keep the mark, so `view = items; items.add(email); log(view)` is still reported. Unknown library calls pass their arguments' facts to the result, with a small confidence decay; transform rules and names like `maskEmail` record a transform instead. Network sinks are the exception: their result is the remote's response, not the request, so a login call's reply does not carry the password.
-3. **Summaries.** Each function gets a summary: which parameter reaches which sink, the return value, or another parameter. Callers apply the summaries of their callees; strongly connected components (recursion) iterate to a fixed point. This is how a value is followed through helpers several calls deep.
+3. **Summaries.** Each function gets a summary: which parameter reaches which sink, the return value, an exception it throws, or another parameter. Entries can name a field (`Field`: `this.addr` reaches the log; `DstField`: a constructor stores the value in `this.addr`, a factory returns it in `result.addr`), so objects keep their structure across calls. Callers apply the summaries of their callees, arranging keyword arguments by name (`Call.ArgNames`), running constructors on the new object (`Call.Ctor`), every override or implementation of a dynamically dispatched call (`Call.Targets`, from class hierarchy analysis), and sending what a callee throws to the handler that catches it (`Call.Catch`). Strongly connected components (recursion) iterate to a fixed point. This is how a value is followed through helpers several calls deep.
 4. **Flows.** When a fact reaches a sink argument, a flow is emitted with confidence = source × propagation × rule match.
 
 Everything downstream is policy, not analysis: `policy` turns flows into violations (destination kinds that fail the build, minimum confidence, safe transforms, allow-list entries, each overridable per class).
@@ -311,7 +311,7 @@ The cache stores function summaries, the call graph and schema declarations keye
 | To add | Do this | Guarded by |
 |---|---|---|
 | **A rule** for an SDK | YAML entry in `internal/rules/builtin/` (or `.datawarden/rules/` in your repository), plus an annotated example | `TestBuiltinRuleConventions`, `TestRuleExamples`, `datawarden rules test` |
-| **A language** | entry in `internal/lang`, a frontend, registration in `app.NewComponents`, the 25 conformance programs, rules with examples | `TestEveryLanguageIsWired`, `TestFrontendConformance`, `TestRuleExamples` |
+| **A language** | entry in `internal/lang`, a frontend, registration in `app.NewComponents`, the 29 conformance programs, rules with examples | `TestEveryLanguageIsWired`, `TestFrontendConformance`, `TestRuleExamples` |
 | **A data type, a class or a secret pattern** | an entry in `internal/detect/builtin/datatypes.yaml`, cases in `detect_test.go` or `secrets_test.go`, a labelled leak in a fixture | `TestBuiltinTaxonomy`, `TestTaxonomyValidation`, `TestBuiltinRuleConventions` (source rules must use known types), `datawarden-bench -check` |
 | **A negative-context or transform word** | `internal/detect/names.go` | `detect_test.go` |
 | **An output format** | a case in `report.Write` (or a new `Reporter` implementation wired in `app`) | report tests |
@@ -324,14 +324,14 @@ The full checklists for rules and languages are in [CONTRIBUTING](../CONTRIBUTIN
 
 ```mermaid
 flowchart LR
-    U["Unit tests<br/>fakes, fstest.MapFS,<br/>httptest"] --> C["Contract tests<br/>rule examples (all 123 rules)<br/>frontend conformance (25 × 6)"]
+    U["Unit tests<br/>fakes, fstest.MapFS,<br/>httptest"] --> C["Contract tests<br/>rule examples (all 123 rules)<br/>frontend conformance (29 × 6)"]
     C --> E["End-to-end<br/>fixtures through the real app"]
     E --> A["Accuracy<br/>labelled corpus:<br/>precision / recall / F1"]
     S["Structure tests<br/>architecture, wiring,<br/>rule conventions, language table"] -.-> U
 ```
 
 - **Unit tests** exercise each component with fakes of its interfaces: the CLI with an in-memory workspace and a fake scanner, the scanner with fake frontends and analyzer, the engine with a fake rule matcher.
-- **Contract tests** run real code through the full scan. Every built-in rule has an annotated example (`internal/rules/testdata/examples/`). Every frontend implements the same 25 conformance scenarios (`internal/frontend/testdata/conformance/`). Known gaps are marked `todoruleid:`, and the test fails once one is fixed, so the list stays accurate.
+- **Contract tests** run real code through the full scan. Every built-in rule has an annotated example (`internal/rules/testdata/examples/`). Every frontend implements the same 29 conformance scenarios (`internal/frontend/testdata/conformance/`). Known gaps are marked `todoruleid:`, and the test fails once one is fixed, so the list stays accurate.
 - **End-to-end tests** scan the fixtures in `testdata/` with the production wiring.
 - **Accuracy** is measured on the labelled corpus (`testdata/eval.yaml`, including the vulnerable-by-design `testdata/vulnshop`). CI fails when a case drops below its minimum precision or recall.
 - **Structure tests** keep the architecture from eroding: interface-only communication, every language wired, rule conventions, a consistent language table.

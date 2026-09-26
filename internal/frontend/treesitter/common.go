@@ -67,12 +67,18 @@ type program struct {
 	// consts holds boolean constants declared in the source, keyed by
 	// "Class.NAME" for class members and "file|NAME" for top-level ones.
 	consts map[string]bool
+	// subs indexes direct subclasses and implementers by class name; nil
+	// until first needed and whenever a class is added.
+	subs map[string][]*classInfo
+	// getters maps "Class.prop" to the function that computes the
+	// property (Python @property, Kotlin get(), Swift computed properties).
+	getters map[string]string
 }
 
 func newProgram(lang string, o frontend.Options) *program {
 	return &program{lang: lang, opts: o, classes: map[string]*classInfo{}, byShort: map[string][]*classInfo{},
 		funcs: map[string]bool{}, top: map[string]string{}, ext: map[string][]string{}, modules: map[string]bool{}, mod: &ir.Module{Lang: lang},
-		consts: map[string]bool{}}
+		consts: map[string]bool{}, getters: map[string]string{}}
 }
 
 func (p *program) warnf(format string, args ...any) {
@@ -101,6 +107,9 @@ func (p *program) parse(ctx context.Context, rels []string, lang *sitter.Languag
 			continue
 		}
 		f := &srcFile{rel: rel, src: src, tree: tree, root: tree.RootNode(), imports: map[string]string{}}
+		if n, line := syntaxErrors(f.root); n > 0 {
+			p.warnf("%s:%d: %d syntax error(s) the parser could not read; the code around them is analysed as far as it could be recovered", rel, line, n)
+		}
 		p.files = append(p.files, f)
 		p.collectConsts(f, f.root)
 	}
@@ -195,6 +204,44 @@ func (p *program) addClass(c *classInfo) {
 	}
 	p.classes[c.name] = c
 	p.byShort[c.short] = append(p.byShort[c.short], c)
+	p.subs = nil
+}
+
+// overrides lists the methods named m that a call on a receiver of type
+// cls may run besides static: the overrides and implementations in cls's
+// subclasses and implementers (class hierarchy analysis).
+func (p *program) overrides(cls, m, static string) []string {
+	root := p.class(cls)
+	if root == nil || m == "" {
+		return nil
+	}
+	if p.subs == nil {
+		p.subs = map[string][]*classInfo{}
+		for _, name := range slices.Sorted(maps.Keys(p.classes)) {
+			c := p.classes[name]
+			for _, s := range c.supers {
+				if sc := p.class(s); sc != nil && sc != c {
+					p.subs[sc.name] = append(p.subs[sc.name], c)
+				}
+			}
+		}
+	}
+	var out []string
+	seen := map[*classInfo]bool{root: true}
+	work := append([]*classInfo(nil), p.subs[root.name]...)
+	for len(work) > 0 && len(out) < 16 {
+		c := work[0]
+		work = work[1:]
+		if seen[c] {
+			continue
+		}
+		seen[c] = true
+		if id, ok := c.methods[m]; ok && id != static && !slices.Contains(out, id) {
+			out = append(out, id)
+		}
+		work = append(work, p.subs[c.name]...)
+	}
+	return out
 }
 
 // resolveType maps a type name as written in f to a qualified name.
@@ -267,6 +314,50 @@ func (p *program) methodID(cls, name string, depth int) string {
 	return ""
 }
 
+// ctorID is the constructor function of class cls when it is lowered: its
+// own or an inherited one (Java/Kotlin <init>, Python __init__, TypeScript
+// constructor, Swift init).
+func (p *program) ctorID(cls string) string {
+	if p.class(cls) == nil {
+		return ""
+	}
+	for _, name := range []string{"<init>", "__init__", "constructor", "init"} {
+		if id := p.methodID(cls, name, 0); id != "" {
+			return id
+		}
+	}
+	for c, depth := p.class(cls), 0; c != nil && depth < 5; depth++ {
+		if id := c.name + ".<init>"; p.funcs[id] {
+			return id
+		}
+		if c.file != nil {
+			if id := c.file.pkg + ":" + c.short + ".constructor"; p.funcs[id] {
+				return id // TypeScript
+			}
+		}
+		if len(c.supers) == 0 {
+			break
+		}
+		c = p.class(c.supers[0])
+	}
+	return ""
+}
+
+// getter is the function that computes property field of cls or a
+// superclass, or "".
+func (p *program) getter(cls, field string) string {
+	for c, depth := p.class(cls), 0; c != nil && depth < 5; depth++ {
+		if id, ok := p.getters[c.name+"."+field]; ok {
+			return id
+		}
+		if len(c.supers) == 0 {
+			break
+		}
+		c = p.class(c.supers[0])
+	}
+	return ""
+}
+
 func (p *program) fieldType(cls, field string) string {
 	c := p.class(cls)
 	for depth := 0; c != nil && depth < 5; depth++ {
@@ -308,7 +399,8 @@ type builder struct {
 	this    ir.VarID
 	names   map[string]ir.VarID // unresolved identifiers read as values
 	lambdas map[ir.VarID]ir.VarID
-	assigns [][]ir.VarID // stack of variables assigned inside lambdas
+	assigns [][]ir.VarID        // stack of variables assigned inside lambdas
+	kwargs  map[ir.VarID]string // keyword-argument variables -> parameter name
 
 	// Control flow. floating counts the enclosing lambdas: their blocks
 	// have no fixed place in the function's order. terminated is set once
@@ -317,6 +409,25 @@ type builder struct {
 	terminated bool
 	targets    []*jumpTarget // enclosing loops and switches, innermost last
 	label      string        // label of the statement being lowered
+
+	// Exceptions. catchers holds, per enclosing try body, the variable its
+	// handlers catch; caught is the one the handler being lowered binds;
+	// escaped collects what leaves the function (NoVar until needed).
+	catchers []ir.VarID
+	caught   ir.VarID
+	escaped  ir.VarID
+
+	// JVM reflection: variables holding a Class, Field or Method handle,
+	// and proxies with their invocation handler's callback input.
+	refl    map[ir.VarID]reflHandle
+	proxies map[ir.VarID]ir.VarID
+}
+
+// reflHandle is a reflective handle whose target is known from constant
+// names: kind 'c' a class, 'f' a field of it, 'm' a method of it.
+type reflHandle struct {
+	kind          byte
+	class, member string
 }
 
 // exit is where a path leaves a construct: its scope and block.
@@ -379,7 +490,8 @@ func (b *builder) jump(isContinue bool, label string) {
 }
 
 func (p *program) newBuilder(f *srcFile, cls *classInfo, id, name string, n *sitter.Node) *builder {
-	b := &builder{p: p, f: f, cls: cls, scope: map[string]ir.VarID{}, this: ir.NoVar, names: map[string]ir.VarID{}, lambdas: map[ir.VarID]ir.VarID{}}
+	b := &builder{p: p, f: f, cls: cls, scope: map[string]ir.VarID{}, this: ir.NoVar, names: map[string]ir.VarID{}, lambdas: map[ir.VarID]ir.VarID{},
+		caught: ir.NoVar, escaped: ir.NoVar}
 	b.fn = &ir.Func{ID: id, Name: name, Lang: p.lang, File: f.rel, Pos: b.pos(n)}
 	b.fn.NewBlock(false) // entry
 	return b
@@ -788,7 +900,10 @@ func (b *builder) tryCatch(n *sitter.Node, body func(), handlers []func(), final
 	entry, from, dead := b.snapshot(), b.fn.CurBlock(), b.terminated
 	start := b.newBlock(from)
 	b.terminated = false
+	thrown := b.fn.Temp(b.pos(n))
+	b.catchers = append(b.catchers, thrown)
 	body()
+	b.catchers = b.catchers[:len(b.catchers)-1]
 	done, doneBlock := b.snapshot(), b.fn.CurBlock()
 	var scopes []map[string]ir.VarID
 	var ends []int32
@@ -799,7 +914,10 @@ func (b *builder) tryCatch(n *sitter.Node, body func(), handlers []func(), final
 		b.newBlock(from, start, doneBlock)
 		b.terminated = false
 		b.join(n, entry, done)
+		saved := b.caught
+		b.caught = thrown
 		h()
+		b.caught = saved
 		if !b.terminated {
 			scopes, ends = append(scopes, b.scope), append(ends, b.fn.CurBlock())
 		}
@@ -820,6 +938,18 @@ func (b *builder) noteAssign(v ir.VarID) {
 	if len(b.assigns) > 0 {
 		b.assigns[len(b.assigns)-1] = append(b.assigns[len(b.assigns)-1], v)
 	}
+}
+
+// kwarg makes a variable for a keyword or named argument (f(to=x)): the
+// call records its name, so the value reaches the parameter of that name.
+func (b *builder) kwarg(name string, v ir.VarID, n *sitter.Node) ir.VarID {
+	nv := b.fn.Named(name, "", b.pos(n))
+	b.assign(nv, n, v)
+	if b.kwargs == nil {
+		b.kwargs = map[ir.VarID]string{}
+	}
+	b.kwargs[nv] = name
+	return nv
 }
 
 // ident reads an identifier used as a value: a local, a field of this, or
@@ -845,6 +975,26 @@ func (b *builder) ident(name string, n *sitter.Node) ir.VarID {
 
 func (b *builder) assign(dst ir.VarID, n *sitter.Node, args ...ir.VarID) {
 	b.fn.Assign(dst, b.pos(n), args...)
+	// Reflective handles and proxies stay what they are through copies
+	// and casts.
+	for _, a := range args {
+		if r, ok := b.refl[a]; ok && dst >= 0 {
+			b.markRefl(dst, r)
+		}
+		if cb, ok := b.proxies[a]; ok && dst >= 0 {
+			b.proxies[dst] = cb
+		}
+	}
+	// A variable holding a lambda (show = { log(it) }) is one: calling it
+	// feeds the lambda's parameters.
+	if _, has := b.lambdas[dst]; !has {
+		for _, a := range args {
+			if cb, ok := b.lambdas[a]; ok && dst >= 0 {
+				b.lambdas[dst] = cb
+				break
+			}
+		}
+	}
 }
 
 // compute is assign for a new value built from the arguments' current
@@ -854,6 +1004,11 @@ func (b *builder) compute(dst ir.VarID, n *sitter.Node, args ...ir.VarID) {
 }
 
 func (b *builder) load(obj ir.VarID, field, owner string, n *sitter.Node) ir.VarID {
+	if id := b.p.getter(owner, field); id != "" && obj != ir.NoVar {
+		// A computed property: reading it runs its getter.
+		c := &ir.Call{Callee: id, Name: field, Target: id, HasRecv: true, RecvType: owner}
+		return b.emitCall(n, c, []ir.VarID{obj}, b.p.fieldType(owner, field))
+	}
 	dst := b.fn.Named("", "", b.pos(n))
 	if t := b.p.fieldType(owner, field); t != "" {
 		b.fn.Vars[dst].Type = t
@@ -883,6 +1038,14 @@ func (b *builder) ret(n *sitter.Node, vals ...ir.VarID) {
 	b.newBlock()
 }
 
+// yieldValue lowers a generator's yield: the value is produced to the
+// caller, like a return, but the function goes on.
+func (b *builder) yieldValue(v ir.VarID, n *sitter.Node) {
+	if v != ir.NoVar {
+		b.fn.Emit(ir.Instr{Op: ir.OpReturn, Dst: ir.NoVar, Args: []ir.VarID{v}, Pos: b.pos(n)})
+	}
+}
+
 // newBlock starts a new basic block with edges from preds.
 func (b *builder) newBlock(preds ...int32) int32 {
 	return b.fn.NewBlock(b.floating > 0, preds...)
@@ -892,19 +1055,85 @@ func (b *builder) newBlock(preds ...int32) int32 {
 // a lambda or local function body, which may run when it is created, later
 // or never. Its blocks are unordered, and a return inside it ends only it.
 func (b *builder) floatingRegion(body func()) {
-	from, terminated, targets := b.fn.CurBlock(), b.terminated, b.targets
+	from, terminated, targets, catchers := b.fn.CurBlock(), b.terminated, b.targets, b.catchers
 	b.floating++
-	b.targets = nil
+	b.targets, b.catchers = nil, nil
 	b.newBlock()
 	body()
 	b.floating--
 	b.fn.SetBlock(from)
-	b.terminated, b.targets = terminated, targets
+	b.terminated, b.targets, b.catchers = terminated, targets, catchers
+}
+
+// thrown is the variable a throw at this point reaches: the innermost
+// enclosing handler's, or the function's escaping exception.
+func (b *builder) thrown() ir.VarID {
+	if n := len(b.catchers); n > 0 {
+		return b.catchers[n-1]
+	}
+	if b.escaped == ir.NoVar {
+		b.escaped = b.fn.Temp(b.fn.Pos)
+	}
+	return b.escaped
+}
+
+// throwValue lowers throw/raise v.
+func (b *builder) throwValue(v ir.VarID, n *sitter.Node) {
+	b.assign(b.thrown(), n, v)
+}
+
+// caughtValue is the value a catch clause binds: what the try body threw.
+func (b *builder) caughtValue(n *sitter.Node) ir.VarID {
+	if b.caught != ir.NoVar {
+		return b.caught
+	}
+	return b.temp(n)
 }
 
 // emitCall emits a call and returns its result variable.
 func (b *builder) emitCall(n *sitter.Node, c *ir.Call, args []ir.VarID, resultType string) ir.VarID {
+	if v, ok := b.reflectCall(n, c, args); ok {
+		return v
+	}
 	dst := b.fn.Named("", resultType, b.pos(n))
+	defer b.noteReflect(c, args, dst)
+	// A call on a proxy runs its invocation handler with the arguments.
+	if c.HasRecv && len(args) > 0 {
+		if cb, ok := b.proxies[args[0]]; ok {
+			c.Callbacks = append(c.Callbacks, cb)
+			c.Target, c.Targets = "", nil
+		}
+	}
+	if c.Construct && c.Ctor == "" {
+		c.Ctor = b.p.ctorID(c.Callee)
+	}
+	c.Catch = []ir.VarID{b.thrown()}
+	// Calling a lambda held in a variable: show(email), show.invoke(email),
+	// show.accept(email), show.call(email). Its arguments reach the
+	// lambda's parameters.
+	if c.Target == "" && !c.Construct {
+		if v, ok := b.scope[c.Name]; ok && !c.HasRecv {
+			if cb, ok := b.lambdas[v]; ok {
+				c.Callbacks = append(c.Callbacks, cb)
+			}
+		}
+		if c.HasRecv && len(args) > 0 {
+			if cb, ok := b.lambdas[args[0]]; ok {
+				c.Callbacks = append(c.Callbacks, cb)
+			}
+		}
+	}
+	if !c.Construct && c.RecvType != "" && c.Targets == nil {
+		c.Targets = b.p.overrides(c.RecvType, c.Name, c.Target)
+	}
+	for i, a := range args {
+		if name, ok := b.kwargs[a]; ok {
+			if c.ArgNames == nil {
+				c.ArgNames = make([]string, len(args))
+			}
+			c.ArgNames[i] = name
+		}
+	}
 	for _, a := range args {
 		if cb, ok := b.lambdas[a]; ok {
 			c.Callbacks = append(c.Callbacks, cb)
@@ -955,13 +1184,137 @@ func (b *builder) lambda(n *sitter.Node, params []*sitter.Node, paramNames []str
 	return val
 }
 
+func (b *builder) markRefl(v ir.VarID, r reflHandle) {
+	if b.refl == nil {
+		b.refl = map[ir.VarID]reflHandle{}
+	}
+	b.refl[v] = r
+}
+
+// handle returns the reflective handle v holds: one recorded for it, or a
+// class literal (User.class, User::class) lowered as the constant
+// "<class>.class".
+func (b *builder) handle(v ir.VarID) (reflHandle, bool) {
+	if r, ok := b.refl[v]; ok {
+		return r, true
+	}
+	if v >= 0 && int(v) < len(b.fn.Vars) {
+		if c := b.fn.Vars[v].Const; c != nil && strings.HasSuffix(*c, ".class") {
+			return reflHandle{kind: 'c', class: b.p.resolveType(b.f, strings.TrimSuffix(*c, ".class"))}, true
+		}
+	}
+	return reflHandle{}, false
+}
+
+func (b *builder) constString(v ir.VarID) (string, bool) {
+	if v < 0 || int(v) >= len(b.fn.Vars) || b.fn.Vars[v].Const == nil {
+		return "", false
+	}
+	return *b.fn.Vars[v].Const, true
+}
+
+// reflectCall lowers a use of a reflective handle as what it does:
+// field.get(obj) reads the field, field.set(obj, v) writes it,
+// method.invoke(obj, args...) calls the method, cls.newInstance() and
+// ctor.newInstance(args...) construct the class.
+func (b *builder) reflectCall(n *sitter.Node, c *ir.Call, args []ir.VarID) (ir.VarID, bool) {
+	if !c.HasRecv || len(args) == 0 {
+		return ir.NoVar, false
+	}
+	h, ok := b.handle(args[0])
+	if !ok {
+		return ir.NoVar, false
+	}
+	switch {
+	case h.kind == 'f' && strings.HasPrefix(c.Name, "get") && len(args) >= 2:
+		return b.load(args[1], h.member, h.class, n), true
+	case h.kind == 'f' && c.Name == "call" && len(args) >= 2: // Kotlin KProperty.call(obj)
+		return b.load(args[1], h.member, h.class, n), true
+	case h.kind == 'f' && strings.HasPrefix(c.Name, "set") && len(args) >= 3:
+		b.store(args[1], h.member, h.class, args[2], n)
+		return b.temp(n), true
+	case h.kind == 'm' && (c.Name == "invoke" || c.Name == "call") && len(args) >= 2:
+		id := b.p.methodID(h.class, h.member, 0)
+		call := &ir.Call{Callee: h.class + "." + h.member, Name: h.member, HasRecv: true, RecvType: h.class}
+		if id != "" {
+			call.Callee, call.Target = id, id
+		}
+		return b.emitCall(n, call, args[1:], ""), true
+	case h.kind == 'c' && c.Name == "newInstance":
+		return b.emitCall(n, &ir.Call{Callee: h.class, Name: shortName(h.class), Construct: true}, args[1:], h.class), true
+	}
+	return ir.NoVar, false
+}
+
+// noteReflect records the handle a reflective call returns: Class.forName
+// and getClass give a class; getDeclaredField, getMethod and their
+// variants on a class give a field or method of it; a constructor handle
+// stays the class. Proxy.newProxyInstance gives a proxy that runs the
+// handler lambda.
+func (b *builder) noteReflect(c *ir.Call, args []ir.VarID, dst ir.VarID) {
+	switch c.Name {
+	case "forName":
+		if len(args) > 0 && strings.Contains(c.Callee+c.RecvType+c.RecvText, "Class") {
+			if name, ok := b.constString(args[len(args)-1]); ok {
+				b.markRefl(dst, reflHandle{kind: 'c', class: name})
+			}
+		}
+		return
+	case "getClass":
+		if c.HasRecv && c.RecvType != "" {
+			b.markRefl(dst, reflHandle{kind: 'c', class: c.RecvType})
+		}
+		return
+	case "newProxyInstance":
+		if len(args) > 0 {
+			if cb, ok := b.lambdas[args[len(args)-1]]; ok {
+				if b.proxies == nil {
+					b.proxies = map[ir.VarID]ir.VarID{}
+				}
+				b.proxies[dst] = cb
+			}
+		}
+		return
+	}
+	if !c.HasRecv || len(args) == 0 {
+		return
+	}
+	h, ok := b.handle(args[0])
+	if !ok || h.kind != 'c' {
+		return
+	}
+	switch c.Name {
+	case "getDeclaredField", "getField", "getDeclaredMethod", "getMethod":
+		if len(args) < 2 {
+			return
+		}
+		if name, ok := b.constString(args[1]); ok {
+			kind := byte('m')
+			if strings.HasSuffix(c.Name, "Field") {
+				kind = 'f'
+			}
+			b.markRefl(dst, reflHandle{kind: kind, class: h.class, member: name})
+		}
+	case "getDeclaredConstructor", "getConstructor":
+		b.markRefl(dst, h)
+	}
+}
+
 func (b *builder) finish() *ir.Func {
+	if b.escaped != ir.NoVar {
+		// What the function throws, from wherever it is thrown.
+		b.fn.NewBlock(true)
+		b.fn.Emit(ir.Instr{Op: ir.OpReturn, Dst: ir.NoVar, Args: []ir.VarID{b.escaped}, Throw: true, Pos: b.fn.Pos})
+	}
 	b.p.mod.Funcs = append(b.p.mod.Funcs, b.fn)
 	return b.fn
 }
 
 // ---- tree helpers ----
 
+// named returns the named children of n. An ERROR node (syntax the
+// grammar could not parse) is transparent: its children take its place, so
+// declarations and statements inside it are still lowered.
 func named(n *sitter.Node) []*sitter.Node {
 	if n == nil {
 		return nil
@@ -969,9 +1322,38 @@ func named(n *sitter.Node) []*sitter.Node {
 	cnt := int(n.NamedChildCount())
 	out := make([]*sitter.Node, 0, cnt)
 	for i := 0; i < cnt; i++ {
-		out = append(out, n.NamedChild(i))
+		c := n.NamedChild(i)
+		if c.Type() == "ERROR" {
+			out = append(out, named(c)...)
+			continue
+		}
+		out = append(out, c)
 	}
 	return out
+}
+
+// syntaxErrors counts the ERROR and missing nodes under n and returns the
+// first one's line.
+func syntaxErrors(n *sitter.Node) (count, line int) {
+	var walk func(*sitter.Node)
+	walk = func(c *sitter.Node) {
+		if c.IsError() || c.IsMissing() {
+			if count == 0 {
+				line = int(c.StartPoint().Row) + 1
+			}
+			count++
+			if c.IsMissing() {
+				return
+			}
+		}
+		for i := 0; i < int(c.ChildCount()); i++ {
+			walk(c.Child(i))
+		}
+	}
+	if n != nil && n.HasError() {
+		walk(n)
+	}
+	return count, line
 }
 
 // fieldChildren returns the children of n stored under a field name, for

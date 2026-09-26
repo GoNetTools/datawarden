@@ -226,3 +226,54 @@ export function constantCondition(email: string) {
     console.log(email);
   }
 }
+
+// scenario: field-across-methods
+class Mailbox {
+  private addr: string;
+  constructor(email: string) {
+    this.addr = email;
+  }
+  announce() {
+    // ruleid: log.ts.console
+    console.log("sending to", this.addr);
+  }
+}
+
+export function fieldAcrossMethods(email: string) {
+  new Mailbox(email).announce();
+}
+
+// scenario: dynamic-dispatch
+interface Channel {
+  deliver(to: string): void;
+}
+
+class SmsChannel implements Channel {
+  deliver(to: string) {
+    // ruleid: log.ts.console
+    console.log("sms", to);
+  }
+}
+
+export function dynamicDispatch(c: Channel, email: string) {
+  c.deliver(email);
+}
+
+// scenario: exception
+export function exception(email: string) {
+  try {
+    throw new Error(`unknown user ${email}`);
+  } catch (e) {
+    // ruleid: log.ts.console
+    console.log(e);
+  }
+}
+
+// scenario: lambda-variable
+export function lambdaVariable(email: string) {
+  const show = (v: string) => {
+    // ruleid: log.ts.console
+    console.log(v);
+  };
+  show(email);
+}

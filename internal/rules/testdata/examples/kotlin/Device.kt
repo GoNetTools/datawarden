@@ -45,9 +45,9 @@ class DeviceData(private val context: Context, private val prefs: SharedPreferen
     }
 
     fun ownNumber(telephony: TelephonyManager) {
-        // todoruleid: src.android.phone_number
+        // ruleid: src.android.phone_number
         val line = telephony.line1Number
-        // todoruleid: log.android.logcat
+        // ruleid: log.android.logcat
         Log.i(TAG, "prefill $line")
     }
 

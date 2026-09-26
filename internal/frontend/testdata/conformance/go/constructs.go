@@ -16,9 +16,9 @@ type notifier interface{ notify(to string) }
 type smsNotifier struct{}
 
 func (smsNotifier) notify(to string) {
-	// Known gap: calls through a Go interface are not followed into their
-	// implementations (see README, Accuracy and limits).
-	// todoruleid: log.go.stdlib
+	// Reached through the notifier interface: interface calls run the
+	// module's implementations (class hierarchy analysis).
+	// ruleid: log.go.stdlib
 	log.Println("sms to", to)
 }
 

@@ -55,7 +55,7 @@ cases:
       - {data_type: national_id, sink_rule: sdk.firebase.crashlytics.custom_key, function: CustomerRepo.save}
       - {data_type: phone, sink_rule: storage.android.shared_prefs, function: CustomerRepo.save}
       - {data_type: person_name, sink_rule: log.android.logcat, function: CustomerRepo.save,
-         note: "known miss: SignupViewModel.submit passes fullName as the nickname constructor argument, which save() logs"}
+         note: "SignupViewModel.submit passes fullName as the nickname constructor argument, which save() logs"}
       - {data_type: person_name, sink_rule: log.android.logcat, function: ProfileActivity.show}
       - {data_type: email, sink_rule: sdk.sentry.set_extra, function: ProfileActivity.show, note: "getMail() returns the email column"}
       - {data_type: email, sink_rule: log.android.logcat, function: ProfileActivity.send, note: "passed in from show()"}
@@ -119,7 +119,7 @@ cases:
       - {data_type: phone, sink_rule: log.android.timber, function: CheckoutActivity.onOtpRequested}
       - {data_type: credit_card, sink_rule: ipc.android.clipboard, function: CheckoutActivity.copyCard}
       - {data_type: phone, sink_rule: log.android.logcat, function: CheckoutActivity.prefillPhone,
-         note: "known miss: Kotlin property telephony.line1Number is not matched by the getLine1Number() source rule"}
+         note: "the Kotlin property telephony.line1Number is the getLine1Number() getter"}
       - {data_type: location, sink_rule: sdk.amplitude, function: CheckoutActivity.trackDelivery}
       - {data_type: email, sink_rule: ipc.android.broadcast, function: ProfileSync.publish}
       - {data_type: dob, sink_rule: log.android.logcat, function: ProfileSync.publish}

@@ -290,8 +290,11 @@ func (pp *pyProgram) collectClass(f *srcFile, d *sitter.Node) {
 			pp.funcs[id] = true
 			ci.methods[mn] = id
 			for _, dn := range pyDecorators(f, st) {
-				if dn == "staticmethod" || dn == "classmethod" {
+				switch dn {
+				case "staticmethod", "classmethod":
 					pp.static[id] = true
+				case "property", "cached_property":
+					pp.getters[ci.name+"."+mn] = id
 				}
 			}
 			if mn == "__init__" {
@@ -609,7 +612,7 @@ func (pb *pyBuilder) stmt(n *sitter.Node) ir.VarID {
 			switch c.Type() {
 			case "as_pattern":
 				if t := c.ChildByFieldName("alias"); t != nil {
-					pb.bind(firstOf(t, "identifier"), pb.temp(c))
+					pb.bind(firstOf(t, "identifier"), pb.caughtValue(c))
 				}
 			case "block":
 				pb.stmt(c)
@@ -638,7 +641,14 @@ func (pb *pyBuilder) stmt(n *sitter.Node) ir.VarID {
 		dst := pb.declare(pb.text(n.ChildByFieldName("name")), "", n)
 		pb.assign(dst, n, fv)
 		return ir.NoVar
-	case "raise_statement", "assert_statement":
+	case "raise_statement":
+		for i, c := range named(n) {
+			if v := pb.expr(c); i == 0 {
+				pb.throwValue(v, n) // raise X from cause: X is thrown
+			}
+		}
+		return ir.NoVar
+	case "assert_statement":
 		for _, c := range named(n) {
 			pb.expr(c)
 		}
@@ -780,6 +790,13 @@ func (pb *pyBuilder) expr(n *sitter.Node) ir.VarID {
 			return pb.temp(n)
 		}
 		return pb.expr(k[len(k)-1])
+	case "yield":
+		v := ir.NoVar
+		for _, c := range named(n) {
+			v = pb.expr(c)
+		}
+		pb.yieldValue(v, n)
+		return pb.temp(n)
 	case "comparison_operator", "not_operator":
 		for _, c := range named(n) {
 			pb.expr(c)
@@ -878,9 +895,7 @@ func (pb *pyBuilder) args(n *sitter.Node) []ir.VarID {
 		case "comment":
 		case "keyword_argument":
 			v := pb.expr(a.ChildByFieldName("value"))
-			nv := pb.fn.Named(pb.text(a.ChildByFieldName("name")), "", pb.pos(a))
-			pb.assign(nv, a, v)
-			kw = append(kw, nv)
+			kw = append(kw, pb.kwarg(pb.text(a.ChildByFieldName("name")), v, a))
 		default:
 			out = append(out, pb.expr(a))
 		}

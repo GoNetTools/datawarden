@@ -224,3 +224,49 @@ def constant_condition(email: str):
     if VERBOSE_LOGGING:
         # ok: log.py.print
         print(email)
+
+
+# scenario: field-across-methods
+class Mailbox:
+    def __init__(self, email: str):
+        self.addr = email
+
+    def announce(self):
+        # ruleid: log.py.print
+        print("sending to", self.addr)
+
+
+def field_across_methods(email: str):
+    Mailbox(email).announce()
+
+
+# scenario: dynamic-dispatch
+class Channel:
+    def deliver(self, to: str):
+        pass
+
+
+class SmsChannel(Channel):
+    def deliver(self, to: str):
+        # ruleid: log.py.print
+        print("sms", to)
+
+
+def dynamic_dispatch(c: Channel, email: str):
+    c.deliver(email)
+
+
+# scenario: exception
+def exception(email: str):
+    try:
+        raise ValueError(f"unknown user {email}")
+    except ValueError as e:
+        # ruleid: log.py.print
+        print(e)
+
+
+# scenario: lambda-variable
+def lambda_variable(email: str):
+    # ruleid: log.py.print
+    show = lambda v: print(v)
+    show(email)

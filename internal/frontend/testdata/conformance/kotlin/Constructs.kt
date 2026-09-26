@@ -98,9 +98,8 @@ fun destructuring(profile: Profile) {
 
 fun lambdaValue(email: String) {
     val printer: (String) -> Unit = {
-        // Known gap: calling a lambda through a variable does not connect
-        // the argument to the lambda's parameter.
-        // todoruleid: log.jvm.stdout
+        // Called through the printer variable below.
+        // ruleid: log.jvm.stdout
         println(it)
     }
     printer(email)
@@ -169,4 +168,41 @@ fun whileTrue(email: String) {
     }
     // ok: log.jvm.stdout
     println(x)
+}
+
+class Profile(private val mail: String) {
+    val contact: String
+        get() = mail
+}
+
+fun customGetter(email: String) {
+    // ruleid: log.jvm.stdout
+    println(Profile(email).contact)
+}
+
+data class Ticket(val id: Long, val note: String, val owner: String)
+
+fun namedArguments(email: String) {
+    val t = Ticket(owner = "system", note = email, id = 1)
+    // ruleid: log.jvm.stdout
+    println(t.note)
+    // ok: log.jvm.stdout
+    println(t.owner)
+}
+
+class Dispatcher {
+    fun send(to: String) {
+        // ruleid: log.jvm.stdout
+        println("dispatch $to")
+    }
+}
+
+fun callableReference(email: String) {
+    Dispatcher::send.call(Dispatcher(), email)
+}
+
+fun reflectiveProperty(t: Ticket) {
+    val prop = Ticket::owner
+    // ok: log.jvm.stdout
+    println(prop.get(t))
 }
