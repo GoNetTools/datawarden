@@ -67,6 +67,9 @@ type program struct {
 	// consts holds boolean constants declared in the source, keyed by
 	// "Class.NAME" for class members and "file|NAME" for top-level ones.
 	consts map[string]bool
+	// subs indexes direct subclasses and implementers by class name; nil
+	// until first needed and whenever a class is added.
+	subs map[string][]*classInfo
 }
 
 func newProgram(lang string, o frontend.Options) *program {
@@ -198,6 +201,44 @@ func (p *program) addClass(c *classInfo) {
 	}
 	p.classes[c.name] = c
 	p.byShort[c.short] = append(p.byShort[c.short], c)
+	p.subs = nil
+}
+
+// overrides lists the methods named m that a call on a receiver of type
+// cls may run besides static: the overrides and implementations in cls's
+// subclasses and implementers (class hierarchy analysis).
+func (p *program) overrides(cls, m, static string) []string {
+	root := p.class(cls)
+	if root == nil || m == "" {
+		return nil
+	}
+	if p.subs == nil {
+		p.subs = map[string][]*classInfo{}
+		for _, name := range slices.Sorted(maps.Keys(p.classes)) {
+			c := p.classes[name]
+			for _, s := range c.supers {
+				if sc := p.class(s); sc != nil && sc != c {
+					p.subs[sc.name] = append(p.subs[sc.name], c)
+				}
+			}
+		}
+	}
+	var out []string
+	seen := map[*classInfo]bool{root: true}
+	work := append([]*classInfo(nil), p.subs[root.name]...)
+	for len(work) > 0 && len(out) < 16 {
+		c := work[0]
+		work = work[1:]
+		if seen[c] {
+			continue
+		}
+		seen[c] = true
+		if id, ok := c.methods[m]; ok && id != static && !slices.Contains(out, id) {
+			out = append(out, id)
+		}
+		work = append(work, p.subs[c.name]...)
+	}
+	return out
 }
 
 // resolveType maps a type name as written in f to a qualified name.
@@ -952,6 +993,9 @@ func (b *builder) emitCall(n *sitter.Node, c *ir.Call, args []ir.VarID, resultTy
 	dst := b.fn.Named("", resultType, b.pos(n))
 	if c.Construct && c.Ctor == "" {
 		c.Ctor = b.p.ctorID(c.Callee)
+	}
+	if !c.Construct && c.RecvType != "" && c.Targets == nil {
+		c.Targets = b.p.overrides(c.RecvType, c.Name, c.Target)
 	}
 	for i, a := range args {
 		if name, ok := b.kwargs[a]; ok {

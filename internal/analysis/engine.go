@@ -293,9 +293,16 @@ func Analyze(ctx context.Context, funcs []*ir.Func, opts Options) (*Result, erro
 	for _, f := range funcs {
 		seen := map[string]bool{}
 		for _, in := range f.Instrs {
-			if in.Op == ir.OpCall && in.Call != nil && in.Call.Target != "" && !seen[in.Call.Target] {
-				seen[in.Call.Target] = true
-				cg[f.ID] = append(cg[f.ID], in.Call.Target)
+			if in.Op != ir.OpCall || in.Call == nil {
+				continue
+			}
+			// Every function the call may run: its static target, the
+			// overrides and implementations, and a constructor.
+			for _, t := range append([]string{in.Call.Target, in.Call.Ctor}, in.Call.Targets...) {
+				if t != "" && !seen[t] {
+					seen[t] = true
+					cg[f.ID] = append(cg[f.ID], t)
+				}
 			}
 		}
 		sort.Strings(cg[f.ID])
@@ -990,11 +997,16 @@ func (a *analyzer) arrange(callee string, args []ir.VarID, names []string) ([]ir
 		if name == "" {
 			continue
 		}
+		placed := false
 		for j, p := range f.Params {
 			if f.Vars[p].Name == name && idx[j] < 0 {
-				idx[j] = i
+				idx[j], placed = i, true
 				break
 			}
+		}
+		// No parameter of that name: Python's **kwargs, the last one.
+		if last := len(f.Params) - 1; !placed && last >= 0 && idx[last] < 0 {
+			idx[last] = i
 		}
 	}
 	out := make([]ir.VarID, n)

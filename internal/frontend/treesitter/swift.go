@@ -159,7 +159,11 @@ func (sp *swProgram) collect(f *srcFile, n *sitter.Node, outer string) {
 		case "class_declaration":
 			sp.collectClass(f, d, outer)
 		case "protocol_declaration":
-			// Protocols have no bodies to analyse.
+			// Protocols have no bodies to analyse, but calls on one may
+			// run any conforming type's method.
+			if name := strings.TrimSpace(f.text(d.ChildByFieldName("name"))); name != "" {
+				sp.classFor(name, f)
+			}
 		}
 	}
 }

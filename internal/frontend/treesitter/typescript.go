@@ -287,6 +287,11 @@ func (tp *tsProgram) collect(f *srcFile) {
 			tp.collectClass(f, d)
 		case "interface_declaration", "type_alias_declaration":
 			name := f.text(d.ChildByFieldName("name"))
+			if d.Type() == "interface_declaration" && tp.class(name) == nil {
+				// An interface is a root of the class hierarchy: calls on
+				// it may run any implementing class's method.
+				tp.addClass(&classInfo{name: name, short: name, file: f, fields: map[string]string{}, methods: map[string]string{}})
+			}
 			body := d.ChildByFieldName("body")
 			if body == nil {
 				body = d.ChildByFieldName("value")
