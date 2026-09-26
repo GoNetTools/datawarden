@@ -185,3 +185,21 @@ export function forEver(email: string) {
   // ok: log.ts.console
   console.log(x);
 }
+
+function* addresses(email: string) {
+  yield email;
+}
+
+export function generator(email: string) {
+  for (const a of addresses(email)) {
+    // ruleid: log.ts.console
+    console.log(a);
+  }
+}
+
+export function inlineObjectType(u: { email: string }) {
+  for (const [key, value] of Object.entries(u)) {
+    // ruleid: log.ts.console
+    console.log(key, value);
+  }
+}

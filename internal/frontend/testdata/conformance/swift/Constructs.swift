@@ -244,3 +244,24 @@ func labeledBreak(email: String, rows: [[String]]) {
     // ruleid: log.swift.print
     print(x)
 }
+
+final class Account {
+    private let mail: String
+    init(_ mail: String) { self.mail = mail }
+    var contact: String { mail }
+}
+
+func computedProperty(email: String) {
+    // ruleid: log.swift.print
+    print(Account(email).contact)
+}
+
+func caseBinding(email: String?) {
+    switch email {
+    case .some(let address):
+        // ruleid: log.swift.print
+        print(address)
+    default:
+        break
+    }
+}

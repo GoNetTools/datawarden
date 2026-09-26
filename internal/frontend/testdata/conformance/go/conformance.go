@@ -231,3 +231,43 @@ func constantCondition(email string) {
 		log.Println(email)
 	}
 }
+
+// scenario: field-across-methods
+type mailbox struct{ addr string }
+
+func newMailbox(email string) *mailbox { return &mailbox{addr: email} }
+
+func (m *mailbox) announce() {
+	// ruleid: log.go.stdlib
+	log.Println("sending to", m.addr)
+}
+
+func fieldAcrossMethods(email string) { newMailbox(email).announce() }
+
+// scenario: dynamic-dispatch
+type channel interface{ deliver(to string) }
+
+type smsChannel struct{}
+
+func (smsChannel) deliver(to string) {
+	// ruleid: log.go.stdlib
+	log.Println("sms", to)
+}
+
+func deliverThrough(c channel, email string) { c.deliver(email) }
+
+// scenario: exception
+func exception(email string) {
+	err := fmt.Errorf("unknown user %s", email)
+	// ruleid: log.go.stdlib
+	log.Println(err)
+}
+
+// scenario: lambda-variable
+func lambdaVariable(email string) {
+	show := func(v string) {
+		// ruleid: log.go.stdlib
+		log.Println(v)
+	}
+	show(email)
+}

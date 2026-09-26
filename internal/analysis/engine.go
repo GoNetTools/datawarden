@@ -522,6 +522,24 @@ func (a *analyzer) analyzeFunc(fn *ir.Func) *Summary {
 		}
 		st.cur = i
 		for _, arg := range in.Args {
+			// What the returned object holds in its fields (a factory
+			// returning &mailbox{addr: email}): callers get it in the
+			// same fields of the result.
+			if !in.Throw {
+				fm := st.stores[arg]
+				for _, field := range slices.Sorted(maps.Keys(fm)) {
+					for _, f := range fm[field] {
+						if !st.visible(f) {
+							continue
+						}
+						if f.dt == "" {
+							sum.addParamReturn(f.param, Transfer{Xf: f.xf, Conf: f.conf, Path: appendPath(f.path, in.Pos), Field: f.field, DstField: field})
+						} else if !f.seed {
+							sum.addReturnFact(RealFact{DataType: f.dt, Desc: f.desc, Src: f.src, Path: appendPath(f.path, in.Pos), Xf: f.xf, Conf: f.conf, DstField: field})
+						}
+					}
+				}
+			}
 			for _, f := range st.of(arg) {
 				t := Transfer{Xf: f.xf, Conf: f.conf, Path: appendPath(f.path, in.Pos), Field: f.field}
 				rf := RealFact{DataType: f.dt, Desc: f.desc, Src: f.src, Path: appendPath(f.path, in.Pos), Xf: f.xf, Conf: f.conf}
@@ -952,6 +970,9 @@ func (a *analyzer) apply(st *state, fn *ir.Func, in *ir.Instr, s *Summary, args 
 			for _, f := range of(i, t.Field) {
 				d := derive(f, in.Pos, t.Conf, append(append([]string{}, t.Xf...), nameXf)...)
 				d.path = appendPath(d.path, t.Path...)
+				if t.DstField != "" && dst >= 0 {
+					changed = st.addStore(dst, t.DstField, d) || changed
+				}
 				changed = st.add(dst, d) || changed
 			}
 		}
@@ -996,6 +1017,9 @@ func (a *analyzer) apply(st *state, fn *ir.Func, in *ir.Instr, s *Summary, args 
 	for _, rf := range s.ReturnFacts {
 		f := realToFact(rf, in.Pos)
 		f.xf = mergeXf(f.xf, nameXf)
+		if rf.DstField != "" && dst >= 0 {
+			changed = st.addStore(dst, rf.DstField, f) || changed
+		}
 		changed = st.add(dst, f) || changed
 	}
 	// What the callee throws reaches the handler (or escapes further).

@@ -220,3 +220,46 @@ fun constantCondition(email: String) {
         println(email)
     }
 }
+
+// scenario: field-across-methods
+class Mailbox(private val addr: String) {
+    fun announce() {
+        // ruleid: log.jvm.stdout
+        println("sending to $addr")
+    }
+}
+
+fun fieldAcrossMethods(email: String) = Mailbox(email).announce()
+
+// scenario: dynamic-dispatch
+interface Channel {
+    fun deliver(to: String)
+}
+
+class SmsChannel : Channel {
+    override fun deliver(to: String) {
+        // ruleid: log.jvm.stdout
+        println("sms $to")
+    }
+}
+
+fun dynamicDispatch(c: Channel, email: String) = c.deliver(email)
+
+// scenario: exception
+fun exception(email: String) {
+    try {
+        throw IllegalArgumentException("unknown user $email")
+    } catch (e: IllegalArgumentException) {
+        // ruleid: log.jvm.stdout
+        println(e.message)
+    }
+}
+
+// scenario: lambda-variable
+fun lambdaVariable(email: String) {
+    val show = { v: String ->
+        // ruleid: log.jvm.stdout
+        println(v)
+    }
+    show(email)
+}

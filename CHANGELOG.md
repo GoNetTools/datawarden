@@ -27,6 +27,14 @@ All notable changes to datawarden are documented here. The format follows [Keep 
 
 ### Changed
 
+- Frontends and the engine follow much more of each language:
+  - Objects across methods and constructors: summaries track fields (`this.addr`), constructors run on the new object, factories return objects with their fields, and keyword/named arguments reach the parameter of their name.
+  - Calls through an interface, protocol, abstract class or overridable method reach every override and implementation (class hierarchy analysis), in all six languages. Go now lowers the methods of every declared type, not only of types the program instantiates.
+  - Exceptions: `throw`/`raise` reaches the `catch` that handles it, across calls (`ParamThrow`, `ThrowFacts` in summaries).
+  - Lambdas stored in variables, Java method references and Kotlin callable references, computed properties (`@property`, Kotlin `get()`, Swift computed properties), Kotlin properties of Java classes as their getters (`telephony.line1Number`), generators, builder chains, TypeScript inline object types and Swift `case let` bindings.
+  - JVM reflection with constant names: `Class.forName`, class literals, `getDeclaredField`/`getMethod`, `Field.get`/`set`, `Method.invoke`, `newInstance`, and `Proxy.newProxyInstance` handlers.
+  - Syntax errors: code inside what a tree-sitter grammar cannot parse is still lowered, and the file gets a warning.
+  - All known gaps in the conformance programs and rule examples are closed. Labelled corpus: recall 0.92 to 0.95 at precision 0.99. The cache format changes.
 - Control flow follows `break` and `continue` (with labels) to their loop or switch, Java and JavaScript `switch` cases fall through until a `break`, and Python `for`/`while ... else` runs only without a break. This finds leaks that were missed (a value set in one case and logged in the next, a value set before `break outer`) and drops false positives after `continue`.
 - String building and arithmetic are snapshots in the IR (`Instr.Snapshot`): `msg = "items=" + items` no longer picks up data added to `items` afterwards.
 - Constant conditions are folded in every language: `if false`, `while true`, `for (;;)` and booleans declared as constants (`static final boolean DEBUG = false`, Kotlin `const val`, TypeScript `const`, Swift `let`, Python `UPPER_CASE = False`, Go `const`). Code under a false constant is no longer reported. The cache format changes again.

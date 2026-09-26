@@ -236,3 +236,50 @@ func constantCondition(email: String) {
         print(email)
     }
 }
+
+// scenario: field-across-methods
+final class Mailbox {
+    private let addr: String
+    init(email: String) { addr = email }
+    func announce() {
+        // ruleid: log.swift.print
+        print("sending to \(addr)")
+    }
+}
+
+func fieldAcrossMethods(email: String) { Mailbox(email: email).announce() }
+
+// scenario: dynamic-dispatch
+protocol Channel {
+    func deliver(_ to: String)
+}
+
+struct SmsChannel: Channel {
+    func deliver(_ to: String) {
+        // ruleid: log.swift.print
+        print("sms \(to)")
+    }
+}
+
+func dynamicDispatch(c: Channel, email: String) { c.deliver(email) }
+
+// scenario: exception
+struct UnknownUser: Error { let detail: String }
+
+func exception(email: String) {
+    do {
+        throw UnknownUser(detail: email)
+    } catch {
+        // ruleid: log.swift.print
+        print(error)
+    }
+}
+
+// scenario: lambda-variable
+func lambdaVariable(email: String) {
+    let show: (String) -> Void = { v in
+        // ruleid: log.swift.print
+        print(v)
+    }
+    show(email)
+}
