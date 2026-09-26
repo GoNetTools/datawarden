@@ -366,4 +366,73 @@ class Conformance {
         java.util.function.Consumer<String> printer = makePrinter();
         printer.accept(email);
     }
+
+    // scenario: consent-helper
+    boolean mayContact(Consents consents) {
+        return consents.hasConsent();
+    }
+
+    void consentHelper(String email, Consents consents) {
+        if (mayContact(consents)) {
+            // ruleid: log.jvm.stdout
+            System.out.println(email);
+        }
+    }
+
+    // scenario: consent-caller
+    void consentedSend(String email) {
+        // Only ever called after a consent check: reported with it.
+        // ruleid: log.jvm.stdout
+        System.out.println(email);
+    }
+
+    void consentCaller(String email, Consents consents) {
+        if (consents.hasConsent()) {
+            consentedSend(email);
+        }
+    }
+
+    // scenario: validation-check
+    static boolean isValidEmail(String s) {
+        return s.contains("@");
+    }
+
+    void validationCheck(String input) {
+        if (isValidEmail(input)) {
+            // ruleid: log.jvm.stdout
+            System.out.println(input);
+        }
+    }
+
+    // scenario: sanitizer-check
+    static boolean isMasked(String s) {
+        return s.startsWith("***");
+    }
+
+    void sanitizerCheck(String email) {
+        if (isMasked(email)) {
+            // ok: log.jvm.stdout
+            System.out.println(email);
+        }
+    }
+
+    // scenario: alias
+    static class Card { String holder = ""; }
+
+    void aliasStore(String email) {
+        Card a = new Card();
+        Card b = a;
+        b.holder = email;
+        // ruleid: log.jvm.stdout
+        System.out.println(a.holder);
+    }
+
+    // scenario: overwritten-field
+    void overwrittenField(String email) {
+        Card c = new Card();
+        c.holder = email;
+        c.holder = "anonymous";
+        // ok: log.jvm.stdout
+        System.out.println(c.holder);
+    }
 }

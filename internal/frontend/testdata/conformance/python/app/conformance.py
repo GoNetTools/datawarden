@@ -369,3 +369,71 @@ def make_printer():
 def closure_return(email: str):
     printer = make_printer()
     printer(email)
+
+
+# scenario: consent-helper
+def may_contact(consents):
+    return consents.has_consent()
+
+
+def consent_helper(email: str, consents):
+    if email and may_contact(consents):
+        # ruleid: log.py.print
+        print(email)
+
+
+# scenario: consent-caller
+def consented_send(email: str):
+    # Only ever called after a consent check: reported with it.
+    # ruleid: log.py.print
+    print(email)
+
+
+def consent_caller(email: str, consents):
+    if consents.has_consent():
+        consented_send(email)
+
+
+# scenario: validation-check
+def is_valid_email(s: str) -> bool:
+    return "@" in s
+
+
+def validation_check(user_input: str):
+    if is_valid_email(user_input):
+        # ruleid: log.py.print
+        print(user_input)
+
+
+# scenario: sanitizer-check
+def is_masked(s: str) -> bool:
+    return s.startswith("***")
+
+
+def sanitizer_check(email: str):
+    if is_masked(email):
+        # ok: log.py.print
+        print(email)
+
+
+# scenario: alias
+class Card:
+    def __init__(self):
+        self.holder = ""
+
+
+def alias_store(email: str):
+    a = Card()
+    b = a
+    b.holder = email
+    # ruleid: log.py.print
+    print(a.holder)
+
+
+# scenario: overwritten-field
+def overwritten_field(email: str):
+    c = Card()
+    c.holder = email
+    c.holder = "anonymous"
+    # ok: log.py.print
+    print(c.holder)

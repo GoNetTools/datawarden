@@ -115,3 +115,32 @@ func TestEmailConfidence(t *testing.T) {
 		}
 	}
 }
+
+func TestCardGrouping(t *testing.T) {
+	for raw, want := range map[string]bool{
+		"4111111111111111":    true,
+		"4111 1111 1111 1111": true,
+		"4111-1111-1111-1111": true,
+		"3782 822463 10005":   true,
+		"4111 1111 1111 1":    true,
+		"4097 1 829805 0 0":   false,
+		"4111-1111 1111-1111": false,
+		"41111 1111111 1111":  false,
+	} {
+		if got := cardGrouping(raw); got != want {
+			t.Errorf("cardGrouping(%q) = %v", raw, got)
+		}
+	}
+}
+
+func TestDecimalPartsAreNotCards(t *testing.T) {
+	s := &LiteralScanner{Classifier: NewClassifier(DefaultTaxonomy())}
+	for _, line := range []string{`<point key="canvasLocation" x="7605.6" y="1424.4377811094455"/>`, `ratio = 4377811094455.25`} {
+		if hits := s.Scan([]byte(line)); len(hits) != 0 {
+			t.Errorf("%s: %+v", line, hits)
+		}
+	}
+	if hits := s.Scan([]byte("contact test123@gmail.com or dummy@acme.io")); len(hits) != 0 {
+		t.Errorf("test accounts: %+v", hits)
+	}
+}

@@ -368,3 +368,66 @@ func closureReturn(email string) {
 	printer := makePrinter()
 	printer(email)
 }
+
+// scenario: consent-helper
+func mayContact(consents consentStore) bool { return consents.HasConsent() }
+
+func consentHelper(email string, consents consentStore) {
+	if mayContact(consents) {
+		// ruleid: log.go.stdlib
+		log.Println("tracking", email)
+	}
+}
+
+// scenario: consent-caller
+func consentedSend(email string) {
+	// Only ever called after a consent check: reported with it.
+	// ruleid: log.go.stdlib
+	log.Println("tracking", email)
+}
+
+func consentCaller(email string, consents consentStore) {
+	if consents.HasConsent() {
+		consentedSend(email)
+	}
+}
+
+// scenario: validation-check
+func isValidEmail(s string) bool { return strings.Contains(s, "@") }
+
+func validationCheck(input string) {
+	if isValidEmail(input) {
+		// ruleid: log.go.stdlib
+		log.Println(input)
+	}
+}
+
+// scenario: sanitizer-check
+func isMasked(s string) bool { return strings.HasPrefix(s, "***") }
+
+func sanitizerCheck(email string) {
+	if isMasked(email) {
+		// ok: log.go.stdlib
+		log.Println(email)
+	}
+}
+
+// scenario: alias
+type card struct{ holder string }
+
+func aliasStore(email string) {
+	a := &card{}
+	b := a
+	b.holder = email
+	// ruleid: log.go.stdlib
+	log.Println(a.holder)
+}
+
+// scenario: overwritten-field
+func overwrittenField(email string) {
+	c := &card{}
+	c.holder = email
+	c.holder = "anonymous"
+	// ok: log.go.stdlib
+	log.Println(c.holder)
+}

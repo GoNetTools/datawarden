@@ -8,8 +8,10 @@
 // variable) order values, and the control-flow graph orders mutations of
 // objects. A fact an instruction puts on an object (a field store,
 // list.add, a callee writing into an argument) carries that instruction,
-// and only instructions it can run before (order.go) see it; copies keep
-// the mark, so an alias sees the object's later mutations. A variable
+// and only the instructions it reaches without a strong update of the
+// same field in between see it (order.go, reaching definitions); every
+// variable that may refer to the object gets it (pointsto.go), and copies
+// keep the mark, so an alias sees the object's later mutations. A variable
 // named after personal data is a source unless it is a new version of a
 // same-named value (email = sha256(email)). Parameters
 // carry symbolic labels so that the same pass produces both concrete flows
@@ -50,6 +52,9 @@ type Options struct {
 	// Classes is the class table that dynamically dispatched calls are
 	// resolved against.
 	Classes []*ir.Class
+	// Callers returns the callers of a function known from earlier runs,
+	// when only part of the program is analysed (PR mode), or is nil.
+	Callers func(id string) []string
 }
 
 // RuleMatcher finds sink, source and transform rules for a call
@@ -81,6 +86,7 @@ type Input struct {
 	Lookup            func(id string) *Summary
 	FirstPartyDomains []string
 	Classes           []*ir.Class
+	Callers           func(id string) []string
 }
 
 // Engine is the analysis service. Its name classifier and threshold are
@@ -92,7 +98,7 @@ type Engine struct {
 
 // Analyze runs the analysis for one scan.
 func (e Engine) Analyze(ctx context.Context, funcs []*ir.Func, in Input) (*Result, error) {
-	return Analyze(ctx, funcs, Options{Rules: in.Rules, Schema: in.Schema, Names: e.Names, Lookup: in.Lookup, FirstPartyDomains: in.FirstPartyDomains, MinConf: e.MinConf, Classes: in.Classes})
+	return Analyze(ctx, funcs, Options{Rules: in.Rules, Schema: in.Schema, Names: e.Names, Lookup: in.Lookup, FirstPartyDomains: in.FirstPartyDomains, MinConf: e.MinConf, Classes: in.Classes, Callers: in.Callers})
 }
 
 // Result is the output of Analyze.
@@ -115,6 +121,10 @@ type fact struct {
 	xf    []string
 	conf  float64
 	seed  bool // seeded on this very variable (by its own name/type)
+	// stored is the field a store put this fact into, when the fact is
+	// on the object itself because one of its fields holds it: reading
+	// another field of an object of unknown type does not give it.
+	stored string
 	// at is 1 + the index of the instruction that put this fact on an
 	// object by mutating it (a field store, list.add, a callee writing
 	// into an argument), or 0 for a fact the value has from its
@@ -130,6 +140,9 @@ func (f *fact) key() string {
 	}
 	if f.at > 0 {
 		k += fmt.Sprintf("@%d", f.at)
+	}
+	if f.stored != "" {
+		k += "^" + f.stored
 	}
 	return k
 }
@@ -155,6 +168,18 @@ type state struct {
 	loads map[ir.VarID]loadRef
 	// guards lists, per block, the consent checks guarding it.
 	guards [][]string
+	// checks are the values a branch on a check refined (checks.go).
+	checks map[ir.VarID]check
+	// defs maps each variable to its defining instruction (definitions).
+	defs []int
+	// pt is the points-to result: which variables may refer to the same
+	// object (pointsto.go).
+	pt *pointsTo
+	// kills lists, per field store, the strong updates that overwrite
+	// what it stored: later stores into the same field of the same
+	// single object. reached caches reachesAvoiding.
+	kills   map[int][]int
+	reached map[[2]int]bool
 	// last is the index of each block's last instruction, or -1.
 	last []int
 }
@@ -218,9 +243,103 @@ func (s *state) guardsAt(fn *ir.Func) []string {
 	return s.guards[b]
 }
 
-// visible reports whether f can be seen by the current instruction.
+// visible reports whether f can be seen by the current instruction: the
+// mutation that put it there can run before it, on a path where no strong
+// update overwrites what it stored (a reaching-definitions question over
+// the control-flow graph).
 func (s *state) visible(f *fact) bool {
-	return f.at == 0 || s.order.before(f.at-1, s.cur)
+	if f.at == 0 {
+		return true
+	}
+	q := f.at - 1
+	ks := s.kills[q]
+	if len(ks) == 0 {
+		return s.order.before(q, s.cur)
+	}
+	k := [2]int{q, s.cur}
+	if r, ok := s.reached[k]; ok {
+		return r
+	}
+	r := s.order.reachesAvoiding(q, s.cur, func(i int) bool { return slices.Contains(ks, i) })
+	if s.reached == nil {
+		s.reached = map[[2]int]bool{}
+	}
+	s.reached[k] = r
+	return r
+}
+
+// atExit keeps the facts that are still there when the function returns:
+// those no strong update overwrites on some path to an exit.
+func (s *state) atExit(fn *ir.Func, fs []*fact) []*fact {
+	var out []*fact
+	for _, f := range fs {
+		ks := s.kills[f.at-1]
+		if f.at == 0 || len(ks) == 0 {
+			out = append(out, f)
+			continue
+		}
+		for b := range fn.Blocks {
+			if len(fn.Blocks[b].Succs) == 0 && s.order.reachesEnd(f.at-1, int32(b), func(i int) bool { return slices.Contains(ks, i) }) {
+				out = append(out, f)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// strongUpdates finds, for each field store, the later stores that
+// overwrite it: stores into the same field of the same object, through
+// variables that refer to that single object only.
+func strongUpdates(fn *ir.Func, pt *pointsTo) map[int][]int {
+	type key struct {
+		o     objectID
+		field string
+	}
+	byKey := map[key][]int{}
+	for i := range fn.Instrs {
+		in := &fn.Instrs[i]
+		if in.Op != ir.OpStore || len(in.Args) != 2 || in.Field == "" {
+			continue
+		}
+		if o, ok := pt.only(in.Args[0]); ok {
+			byKey[key{o, in.Field}] = append(byKey[key{o, in.Field}], i)
+		}
+	}
+	var out map[int][]int
+	for _, stores := range byKey {
+		if len(stores) < 2 {
+			continue
+		}
+		if out == nil {
+			out = map[int][]int{}
+		}
+		for _, i := range stores {
+			for _, j := range stores {
+				if j != i {
+					out[i] = append(out[i], j)
+				}
+			}
+		}
+	}
+	return out
+}
+
+// mutate puts f on the object v refers to, in field when it is set, as a
+// mutation of the object: every variable that may refer to it gets it.
+func (s *state) mutate(v ir.VarID, field string, f *fact) bool {
+	changed := false
+	for _, w := range s.pt.mutated(v) {
+		if field != "" {
+			changed = s.addStore(w, field, f) || changed
+			g := *f
+			g.stored = field
+			changed = s.add(w, &g) || changed
+			continue
+		}
+		changed = s.add(w, f) || changed
+	}
+	return changed
 }
 
 // mutation marks a fact as put on an object by the current instruction.
@@ -349,8 +468,13 @@ func derive(f *fact, pos ir.Pos, decay float64, xf ...string) *fact {
 }
 
 type analyzer struct {
-	cha       *hierarchy
-	flow      *closureFlow
+	cha  *hierarchy
+	flow *closureFlow
+	// guards are, per function, the consent checks guarding each block:
+	// its own branches and those every caller passed (guard.go).
+	guards map[string][][]string
+	// checks are, per function, the checked values (refineChecks).
+	checks    map[string]map[ir.VarID]check
 	opts      Options
 	summaries map[string]*Summary
 	digests   map[string]string
@@ -366,7 +490,17 @@ func Analyze(ctx context.Context, funcs []*ir.Func, opts Options) (*Result, erro
 	if opts.Rules == nil || opts.Schema == nil || opts.Names == nil {
 		return nil, errors.New("analysis: Rules, Schema and Names are required")
 	}
-	a := &analyzer{cha: newHierarchy(opts.Classes), opts: opts, summaries: map[string]*Summary{}, digests: map[string]string{}, funcs: map[string]*ir.Func{}, flows: map[string]*finding.Flow{}}
+	a := &analyzer{cha: newHierarchy(opts.Classes), opts: opts, summaries: map[string]*Summary{}, digests: map[string]string{}, funcs: map[string]*ir.Func{}, flows: map[string]*finding.Flow{},
+		checks: map[string]map[ir.VarID]check{}}
+	// Branches on checks (isMasked(v), isValidEmail(v)) give the checked
+	// value a new version where they pass; the caller's functions are not
+	// changed.
+	funcs = slices.Clone(funcs)
+	for i, f := range funcs {
+		if rf, cks := a.refineChecks(f); cks != nil {
+			funcs[i], a.checks[f.ID] = rf, cks
+		}
+	}
 	for _, f := range funcs {
 		a.funcs[f.ID] = f
 	}
@@ -386,7 +520,7 @@ func Analyze(ctx context.Context, funcs []*ir.Func, opts Options) (*Result, erro
 			case in.Op == ir.OpNew && in.Call != nil:
 				ts = []string{in.Call.Target}
 			case in.Op == ir.OpCall && in.Call != nil:
-				ts = a.cha.targets(in.Call)
+				ts = a.cha.targets(in.Call, f.Lang)
 				// The closures it may call (held in a field, returned
 				// by a function).
 				cls, _ := a.flow.invoked(f, in, func(v ir.VarID) []closure { return a.flow.of(f.ID, v) })
@@ -405,6 +539,7 @@ func Analyze(ctx context.Context, funcs []*ir.Func, opts Options) (*Result, erro
 		}
 		sort.Strings(cg[f.ID])
 	}
+	a.guards = a.consentGuards(funcs)
 	for _, scc := range tarjan(funcs, cg, a.funcs) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -445,6 +580,64 @@ func Analyze(ctx context.Context, funcs []*ir.Func, opts Options) (*Result, erro
 	return res, nil
 }
 
+// consentGuards computes the consent checks guarding each block of each
+// function: branches on a consent check (or on a helper returning one) in
+// the function, and the checks guarding every call of it.
+func (a *analyzer) consentGuards(funcs []*ir.Func) map[string][][]string {
+	helpers := consentHelpers(funcs)
+	blocks := map[string][][]string{}
+	sites := map[string][]callSite{}
+	for _, f := range funcs {
+		blocks[f.ID] = guards(f, helpers)
+		for i := range f.Instrs {
+			in := &f.Instrs[i]
+			var ts []string
+			switch {
+			case in.Op == ir.OpClosure:
+				ts = []string{in.Func}
+			case in.Op == ir.OpNew && in.Call != nil:
+				ts = []string{in.Call.Target}
+			case in.Op == ir.OpCall && in.Call != nil:
+				ts = a.cha.targets(in.Call, f.Lang)
+			}
+			for _, t := range ts {
+				if _, ok := a.funcs[t]; ok && t != f.ID {
+					sites[t] = append(sites[t], callSite{fn: f.ID, block: in.Block})
+				}
+			}
+		}
+	}
+	if a.opts.Callers != nil {
+		// A function with a caller outside this run may be called
+		// without the check.
+		for t := range sites {
+			for _, c := range a.opts.Callers(t) {
+				if _, ok := a.funcs[c]; !ok {
+					sites[t] = append(sites[t], callSite{fn: c, block: -1})
+					break
+				}
+			}
+		}
+	}
+	inherited := inheritedGuards(sites, blocks)
+	out := map[string][][]string{}
+	for _, f := range funcs {
+		bg := blocks[f.ID]
+		if inh := inherited[f.ID]; len(inh) > 0 {
+			merged := make([][]string, len(f.Blocks))
+			for b := range merged {
+				if b < len(bg) {
+					merged[b] = append(merged[b], bg[b]...)
+				}
+				merged[b] = mergeXf(merged[b], inh...)
+			}
+			bg = merged
+		}
+		out[f.ID] = bg
+	}
+	return out
+}
+
 // reportFunc is the function a flow is reported in: for a closure, the
 // named function it is written in, so that findings and their baseline
 // fingerprints name the code a reader looks for.
@@ -482,6 +675,32 @@ func isBoolOrFunc(t string) bool {
 
 func (a *analyzer) seed(st *state, fn *ir.Func) {
 	redef := redefinitions(fn)
+	// A variable defined by a transform (hashed = sha256(x), token =
+	// encrypt(pw)) holds the transformed value whatever its name says.
+	defs := definitions(fn)
+	definedBy := func(v ir.VarID) []string {
+		var in *ir.Instr
+		for depth := 0; depth < 4; depth++ {
+			if v < 0 || int(v) >= len(defs) || defs[v] < 0 {
+				return nil
+			}
+			in = &fn.Instrs[defs[v]]
+			if in.Op != ir.OpAssign || len(in.Args) != 1 {
+				break
+			}
+			v = in.Args[0] // a copy: what it copies
+		}
+		if in.Op != ir.OpCall || in.Call == nil {
+			return nil
+		}
+		if x := a.opts.Names.FuncTransform(in.Call.Name); x != "" {
+			return []string{x}
+		}
+		if hits := a.opts.Rules.Match(fn.Lang, rules.KindTransform, in.Call); len(hits) > 0 {
+			return []string{hits[0].Rule.Transform}
+		}
+		return nil
+	}
 	for i, pid := range fn.Params {
 		v := fn.Vars[pid]
 		st.add(pid, &fact{dt: "", param: i, src: v.Pos, desc: "parameter " + v.Name, path: []ir.Pos{v.Pos}, conf: 1})
@@ -495,9 +714,7 @@ func (a *analyzer) seed(st *state, fn *ir.Func) {
 		if v.Name != "" && !isBoolOrFunc(v.Type) && !redef[vid] {
 			if m, ok := a.opts.Names.Ident(v.Name); ok {
 				f := &fact{dt: m.DataType, param: -1, src: v.Pos, desc: fmt.Sprintf("identifier %q", v.Name), path: []ir.Pos{v.Pos}, conf: m.Conf, seed: true}
-				if m.Transform != "" {
-					f.xf = []string{m.Transform}
-				}
+				f.xf = mergeXf(nil, append(definedBy(vid), m.Transform)...)
 				st.add(vid, f)
 			}
 		}
@@ -635,8 +852,11 @@ func shortType(t string) string {
 
 func (a *analyzer) analyzeFunc(fn *ir.Func) *Summary {
 	st := &state{facts: make([]map[string]*fact, len(fn.Vars)), stores: map[ir.VarID]map[string]map[string]*fact{}, minC: a.opts.MinConf,
-		order: newOrder(fn), multi: multiDefined(fn), fluent: fluentResults(fn), loads: loadsOf(fn), guards: guards(fn), last: lastInstrs(fn),
-		closures: a.flow.local(fn.ID)}
+		order: newOrder(fn), multi: multiDefined(fn), fluent: fluentResults(fn), loads: loadsOf(fn), guards: a.guards[fn.ID], last: lastInstrs(fn),
+		closures: a.flow.local(fn.ID), checks: a.checks[fn.ID]}
+	st.pt = newPointsTo(fn, st.fluent, st.checks, st.order)
+	st.defs = definitions(fn)
+	st.kills = strongUpdates(fn, st.pt)
 	a.seed(st, fn)
 	sum := &Summary{}
 	for iter := 0; iter < 40; iter++ {
@@ -709,7 +929,7 @@ func (a *analyzer) analyzeFunc(fn *ir.Func) *Summary {
 		}
 	}
 	for i, pid := range fn.Params {
-		for _, f := range st.all(pid) {
+		for _, f := range st.atExit(fn, st.all(pid)) {
 			switch {
 			case f.dt == "" && (f.param != i || f.at > 0):
 				if f.param == i && f.field == "" {
@@ -724,7 +944,7 @@ func (a *analyzer) analyzeFunc(fn *ir.Func) *Summary {
 		// (this.addr = email): callers put it in the same field.
 		fm := st.stores[pid]
 		for _, field := range slices.Sorted(maps.Keys(fm)) {
-			for _, f := range fm[field] {
+			for _, f := range st.atExit(fn, slices.Collect(maps.Values(fm[field]))) {
 				switch {
 				case f.dt == "":
 					if f.param == i && f.field == field {
@@ -806,6 +1026,9 @@ func (a *analyzer) fieldFacts(st *state, fn *ir.Func, obj ir.VarID, owner, field
 	known := a.opts.Schema.KnownType(owner)
 	for _, f := range st.of(obj) {
 		switch {
+		case f.stored != "" && !wholeValueFields[name]:
+			// Held by one of the object's fields: read from st.stores
+			// above when it is this one.
 		case !known:
 			out = append(out, derive(f, pos, 0.8))
 		case f.dt == "" && f.at == 0:
@@ -835,7 +1058,19 @@ func (a *analyzer) step(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 				changed = st.add(in.Dst, derive(f, in.Pos, 1)) || changed
 			}
 		}
+		// "credit card: " + cc: the text names the value after it.
+		for _, fs := range a.textLabels(fn, st.defs, in.Args, in.Pos) {
+			for _, f := range fs {
+				changed = st.add(in.Dst, f) || changed
+			}
+		}
 	case ir.OpAssign, ir.OpPhi:
+		if ck, ok := st.checks[in.Dst]; ok {
+			return a.checkedValue(st, in, ck)
+		}
+		if in.Dst >= 0 && dataFreeName(fn.Vars[in.Dst].Name) && !fn.Vars[in.Dst].Cell {
+			return false // a status or count computed from the data
+		}
 		for _, arg := range in.Args {
 			if in.Dst >= 0 && int(in.Dst) < len(st.multi) && st.multi[in.Dst] {
 				// One of several definitions of a cell (arr[i] = v, a
@@ -880,8 +1115,7 @@ func (a *analyzer) step(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 		obj, val := in.Args[0], in.Args[1]
 		for _, f := range st.of(val) {
 			d := st.mutation(derive(f, in.Pos, 1))
-			changed = st.addStore(obj, in.Field, d) || changed
-			changed = st.add(obj, d) || changed
+			changed = st.mutate(obj, in.Field, d) || changed
 			// A store into an object read from another one's field is a
 			// store into a longer access path of that one: t = user.addr;
 			// t.city = email stores user.addr.city.
@@ -892,8 +1126,7 @@ func (a *analyzer) step(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 					break
 				}
 				path, base = ref.field+"."+path, ref.obj
-				changed = st.addStore(base, path, d) || changed
-				changed = st.add(base, d) || changed
+				changed = st.mutate(base, path, d) || changed
 			}
 		}
 		// A store without a declared owner type is a map or object literal
@@ -902,7 +1135,10 @@ func (a *analyzer) step(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 		untyped := in.Owner == ""
 		if _, fs := a.opts.Schema.Field(in.Owner, in.Field); untyped || (fs == detect.FieldUnknown && !a.opts.Schema.KnownType(in.Owner)) {
 			if m, ok := a.opts.Names.Key(in.Field); ok {
-				changed = st.add(obj, st.mutation(&fact{dt: m.DataType, param: -1, src: in.Pos, desc: fmt.Sprintf("key %q", in.Field), path: []ir.Pos{in.Pos}, conf: m.Conf})) || changed
+				f := st.mutation(&fact{dt: m.DataType, param: -1, src: in.Pos, desc: fmt.Sprintf("key %q", in.Field), path: []ir.Pos{in.Pos}, conf: m.Conf, stored: in.Field})
+				for _, w := range st.pt.mutated(obj) {
+					changed = st.add(w, f) || changed
+				}
 			}
 		}
 	case ir.OpCall, ir.OpNew:
@@ -943,7 +1179,7 @@ func (a *analyzer) alias(st *state, in *ir.Instr, dst, src ir.VarID) bool {
 	changed := false
 	for _, f := range st.all(src) {
 		d := derive(f, in.Pos, 1)
-		d.at = f.at
+		d.at, d.stored = f.at, f.stored
 		changed = st.add(dst, d) || changed
 	}
 	for field, m := range st.stores[src] {
@@ -995,25 +1231,48 @@ func fieldLabel(owner, field string) string {
 // keyLabels applies the "key names its value" heuristic: in
 // put("email", x), setCustomKey("phone", x), zap.String("phone", x) or
 // mapOf("ssn" to x) the literal key says what the next argument is.
-func (a *analyzer) keyLabels(fn *ir.Func, in *ir.Instr, recvOff int) map[int][]*fact {
+func (a *analyzer) keyLabels(fn *ir.Func, defs []int, in *ir.Instr, recvOff int) map[int][]*fact {
 	var out map[int][]*fact
 	for i := recvOff; i+1 < len(in.Args); i++ {
-		v := in.Args[i]
-		if v < 0 || !fn.Vars[v].IsConst() {
+		key, ok := constOf(fn, defs, in.Args[i])
+		if !ok {
 			continue
 		}
-		if m, ok := a.opts.Names.Key(*fn.Vars[v].Const); ok {
+		if m, ok := a.opts.Names.Key(key); ok {
 			if out == nil {
 				out = map[int][]*fact{}
 			}
-			f := &fact{dt: m.DataType, param: -1, src: in.Pos, desc: fmt.Sprintf("key %q", *fn.Vars[v].Const), path: []ir.Pos{in.Pos}, conf: m.Conf}
+			f := &fact{dt: m.DataType, param: -1, src: in.Pos, desc: fmt.Sprintf("key %q", key), path: []ir.Pos{in.Pos}, conf: m.Conf}
 			out[i+1] = append(out[i+1], f)
 		}
 	}
 	return out
 }
 
-var getterVerbs = []string{"get", "opt", "form", "postform", "query", "param", "header", "lookup", "read", "cookie", "extra"}
+var getterVerbs = []string{"get", "opt", "form", "postform", "query", "param", "header", "lookup", "read", "cookie", "extra", "value", "object", "string"}
+
+// wholeValueFields are properties that render the whole object
+// (user.description in Swift): they hold what any of its fields holds.
+var wholeValueFields = map[string]bool{"description": true, "debugDescription": true, "dictionaryRepresentation": true, "allValues": true}
+
+// dataFreeSuffixes end the names of variables that hold a status, a count
+// or a flag computed from data, not the data: derivationStatus, rowCount.
+var dataFreeSuffixes = []string{"status", "count", "length", "size", "success", "succeeded", "exists", "ok"}
+
+func dataFreeName(name string) bool {
+	n := strings.ToLower(name)
+	for _, s := range dataFreeSuffixes {
+		if n == s || strings.HasSuffix(n, s) && len(n) > len(s) && (n[len(n)-len(s)-1] == '_' || name[len(name)-len(s)] >= 'A' && name[len(name)-len(s)] <= 'Z') {
+			return true
+		}
+	}
+	return false
+}
+
+// publicParts are accessors that return the public part of what they are
+// called on: a key entry's certificate or public key is not its private
+// key.
+var publicParts = map[string]bool{"getcertificate": true, "getcertificatechain": true, "getpublickey": true, "getpublic": true, "publickey": true, "certificate": true}
 
 func isGetterName(name string) bool {
 	n := strings.ToLower(name)
@@ -1048,11 +1307,23 @@ func (a *analyzer) call(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 	if (c.HasRecv || c.Indirect) && len(in.Args) > 0 {
 		recvOff = 1
 	}
-	keyed := a.keyLabels(fn, in, recvOff)
+	keyed := a.keyLabels(fn, st.defs, in, recvOff)
+	for i, fs := range a.textLabels(fn, st.defs, in.Args, in.Pos) {
+		if i >= recvOff {
+			if keyed == nil {
+				keyed = map[int][]*fact{}
+			}
+			keyed[i] = append(keyed[i], fs...)
+		}
+	}
 	factsOf := func(i int) []*fact {
 		fs := st.of(in.Args[i])
-		if k := keyed[i]; len(k) > 0 {
-			fs = append(fs, k...)
+		// A key or label names a value that does not already say what
+		// it is: putString("password", encrypt(pw)) stays encrypted.
+		for _, k := range keyed[i] {
+			if !slices.ContainsFunc(fs, func(f *fact) bool { return f.dt == k.dt }) {
+				fs = append(fs, k)
+			}
 		}
 		return fs
 	}
@@ -1072,8 +1343,8 @@ func (a *analyzer) call(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 		r := hit.Rule
 		remote = remote || r.Category == "network"
 		dest := a.dest(r, fn, in, recvOff)
-		for i := recvOff; i < len(in.Args); i++ {
-			if !r.Arg.Selects(i - recvOff) {
+		for i := 0; i < len(in.Args); i++ {
+			if i < recvOff && !(c.HasRecv && r.Arg.Selects(-1)) || !r.Arg.Selects(i-recvOff) {
 				continue
 			}
 			for _, f := range factsOf(i) {
@@ -1199,7 +1470,7 @@ func (a *analyzer) call(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 	}
 	applied := false
 	if !isNew && !c.Indirect {
-		for _, t := range a.cha.targets(c) {
+		for _, t := range a.cha.targets(c, fn.Lang) {
 			if s := a.summaryFor(t); s != nil {
 				args, idx := a.arrange(t, in.Args, c.ArgNames)
 				factsAt := func(i int) []*fact {
@@ -1221,7 +1492,7 @@ func (a *analyzer) call(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 	// type the schema knows (profile.getBio()) is answered from the schema
 	// instead of smearing every field of the object onto the result.
 	nonRecv := len(in.Args) - recvOff
-	skipRecv := false
+	skipRecv := c.HasRecv && recvOff == 1 && nonRecv == 0 && publicParts[strings.ToLower(c.Name)]
 	if c.HasRecv && recvOff == 1 && nonRecv == 0 && in.Args[0] >= 0 {
 		if owner := fn.Vars[in.Args[0]].Type; owner != "" && a.opts.Schema.KnownType(owner) {
 			if field, ok := getterField(c.Name); ok {
@@ -1250,7 +1521,7 @@ func (a *analyzer) call(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 				// builder call's result (sb.append(a).append(email)).
 				r := in.Args[0]
 				for depth := 0; r >= 0 && depth < 8; depth++ {
-					changed = st.add(r, st.mutation(derive(f, in.Pos, 0.9))) || changed
+					changed = st.mutate(r, "", st.mutation(derive(f, in.Pos, 0.9))) || changed
 					next, ok := st.fluent[r]
 					if !ok {
 						break
@@ -1276,9 +1547,9 @@ func (a *analyzer) call(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 		}
 	}
 	if nonRecv >= 1 && in.Dst >= 0 && isGetterName(c.Name) {
-		if v := in.Args[recvOff]; v >= 0 && fn.Vars[v].IsConst() {
-			if m, ok := a.opts.Names.Key(*fn.Vars[v].Const); ok {
-				changed = st.add(in.Dst, &fact{dt: m.DataType, param: -1, src: in.Pos, desc: fmt.Sprintf("%s(%q)", c.Name, *fn.Vars[v].Const), path: []ir.Pos{in.Pos}, conf: m.Conf}) || changed
+		if key, ok := constOf(fn, st.defs, in.Args[recvOff]); ok {
+			if m, ok := a.opts.Names.Key(key); ok {
+				changed = st.add(in.Dst, &fact{dt: m.DataType, param: -1, src: in.Pos, desc: fmt.Sprintf("%s(%q)", c.Name, key), path: []ir.Pos{in.Pos}, conf: m.Conf}) || changed
 			}
 		}
 	}
@@ -1341,11 +1612,7 @@ func (a *analyzer) apply(st *state, fn *ir.Func, in *ir.Instr, s *Summary, args 
 		if target < 0 {
 			return
 		}
-		f = st.mutation(f)
-		if field != "" {
-			changed = st.addStore(target, field, f) || changed
-		}
-		changed = st.add(target, f) || changed
+		changed = st.mutate(target, field, st.mutation(f)) || changed
 	}
 	for i := range args {
 		for _, t := range s.ParamReturn[i] {

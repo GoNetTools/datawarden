@@ -48,6 +48,8 @@ func TestAbsAndLoader(t *testing.T) {
 		"unknown language": "languages: [cobol]\n",
 		"bad kind":         "policy:\n  fail_on: [nowhere]\n",
 		"bad class kind":   "policy:\n  classes:\n    phi:\n      fail_on: [nowhere]\n",
+		"bad guarded kind": "policy:\n  consent_guarded: [nowhere]\n",
+		"bad class guard":  "policy:\n  classes:\n    phi:\n      consent_guarded: [nowhere]\n",
 		"not yaml":         "policy: [\n",
 	} {
 		if _, err := l.Parse([]byte(doc), name); err == nil {

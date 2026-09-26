@@ -12,6 +12,7 @@ package cache
 
 import (
 	"encoding/json"
+	"slices"
 	"sort"
 	"sync"
 
@@ -21,7 +22,7 @@ import (
 
 // FormatVersion changes whenever the on-disk format or the analysis
 // semantics change incompatibly, including every new ir.Version.
-const FormatVersion = 9
+const FormatVersion = 10
 
 // FileName is the cache file inside the cache directory.
 const FileName = "datawarden-cache.json"
@@ -113,6 +114,19 @@ func (s *Store) Lookup(id string) *analysis.Summary {
 		return nil
 	}
 	return f.Summary
+}
+
+// CallersOf returns the functions that called id when the cache was
+// written.
+func (s *Store) CallersOf(id string) []string {
+	var out []string
+	for caller, f := range s.doc.Funcs {
+		if slices.Contains(f.Callees, id) {
+			out = append(out, caller)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // Callers returns the files containing (transitive, up to depth) callers of

@@ -101,6 +101,29 @@ func TestClassPolicies(t *testing.T) {
 	}
 }
 
+// consent_guarded accepts flows to those destinations that run only
+// after a consent check; a class can opt out.
+func TestConsentGuardedFlows(t *testing.T) {
+	c := config.Default()
+	c.Policy.ConsentGuarded = []string{"third_party"}
+	c.Policy.Classes["phi"] = config.ClassPolicy{ConsentGuarded: []string{}}
+	mk := func(dt, kind string, guards ...string) *finding.Flow {
+		return &finding.Flow{DataType: dt, SinkRule: "r", Dest: finding.Destination{Kind: kind}, Confidence: 0.9, Guards: guards}
+	}
+	got, _ := Evaluator{Config: c, Catalog: classCatalog{}}.Apply([]*finding.Flow{
+		mk("pii.email", "third_party", "consent check hasConsent() at a.kt:3"),
+		mk("pii.email", "third_party"),
+		mk("pii.email", "log", "consent check hasConsent() at a.kt:3"),
+		mk("phi.diagnosis", "third_party", "consent check hasConsent() at a.kt:3"),
+	}, nil)
+	want := []string{"consent: consent check hasConsent() at a.kt:3", "", "", ""}
+	for i, f := range got {
+		if f.Allowed != want[i] || f.Violation != (want[i] == "") {
+			t.Errorf("flow %d (%s to %s): allowed %q violation %v", i, f.DataType, f.Dest.Kind, f.Allowed, f.Violation)
+		}
+	}
+}
+
 func TestSeverityComesFromCatalog(t *testing.T) {
 	f := &finding.Flow{DataType: "loyalty_card", SinkRule: "r", Dest: finding.Destination{Kind: "log"}, Confidence: 0.9}
 	got, _ := Evaluator{Config: config.Default(), Catalog: fakeCatalog{"loyalty_card": true}}.Apply([]*finding.Flow{f}, nil)

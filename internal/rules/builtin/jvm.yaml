@@ -189,6 +189,24 @@
   dest: { kind: storage, host: local-file }
   category: storage
 
+- id: storage.android.sqlite
+  lang: [kotlin, java]
+  call: ["android.database.sqlite.SQLiteDatabase.execSQL", "android.database.sqlite.SQLiteDatabase.insert", "android.database.sqlite.SQLiteDatabase.insertOrThrow", "android.database.sqlite.SQLiteDatabase.insertWithOnConflict", "android.database.sqlite.SQLiteDatabase.replace", "android.database.sqlite.SQLiteDatabase.update"]
+  receiver: "(?i)(db|database)"
+  arg: "*"
+  dest: { kind: storage, host: sqlite }
+  category: storage
+  description: SQLite databases are stored unencrypted in the app sandbox and included in backups by default.
+
+- id: sdk.android.sms
+  lang: [kotlin, java]
+  call: ["android.telephony.SmsManager.sendTextMessage", "android.telephony.SmsManager.sendMultipartTextMessage"]
+  receiver: "(?i)sms"
+  arg: 2
+  dest: { kind: third_party, host: sms }
+  category: messaging
+  description: SMS text leaves the device through the carrier, unencrypted.
+
 - id: ipc.android.clipboard
   lang: [kotlin, java]
   call: ["android.content.ClipboardManager.setPrimaryClip"]

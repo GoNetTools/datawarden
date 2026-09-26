@@ -14,6 +14,12 @@ func files(email: String) {
     FileManager.default.createFile(atPath: "/tmp/export.txt", contents: Data(email.utf8))
 }
 
+func plist(email: String, path: String) {
+    let content = NSDictionary(dictionary: ["email": email])
+    // ruleid: storage.swift.write_file
+    content.write(toFile: path, atomically: true)
+}
+
 func network(email: String) async throws {
     var request = URLRequest(url: URL(string: "https://crm.partner.example/leads")!)
     request.httpMethod = "POST"

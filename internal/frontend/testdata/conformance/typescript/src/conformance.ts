@@ -376,3 +376,72 @@ export function closureReturn(email: string) {
   const printer = makePrinter();
   printer(email);
 }
+
+// scenario: consent-helper
+function mayContact(consents: Consents): boolean {
+  return consents.hasConsent();
+}
+
+export function consentHelper(email: string, consents: Consents) {
+  if (mayContact(consents)) {
+    // ruleid: log.ts.console
+    console.log(email);
+  }
+}
+
+// scenario: consent-caller
+function consentedSend(email: string) {
+  // Only ever called after a consent check: reported with it.
+  // ruleid: log.ts.console
+  console.log(email);
+}
+
+export function consentCaller(email: string, consents: Consents) {
+  if (consents.hasConsent()) consentedSend(email);
+}
+
+// scenario: validation-check
+function isValidEmail(s: string): boolean {
+  return s.includes("@");
+}
+
+export function validationCheck(input: string) {
+  if (isValidEmail(input)) {
+    // ruleid: log.ts.console
+    console.log(input);
+  }
+}
+
+// scenario: sanitizer-check
+function isMasked(s: string): boolean {
+  return s.startsWith("***");
+}
+
+export function sanitizerCheck(email: string) {
+  if (isMasked(email)) {
+    // ok: log.ts.console
+    console.log(email);
+  }
+}
+
+// scenario: alias
+class Card {
+  holder = "";
+}
+
+export function aliasStore(email: string) {
+  const a = new Card();
+  const b = a;
+  b.holder = email;
+  // ruleid: log.ts.console
+  console.log(a.holder);
+}
+
+// scenario: overwritten-field
+export function overwrittenField(email: string) {
+  const c = new Card();
+  c.holder = email;
+  c.holder = "anonymous";
+  // ok: log.ts.console
+  console.log(c.holder);
+}

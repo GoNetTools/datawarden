@@ -61,6 +61,12 @@ var conformanceScenarios = map[string]string{
 	"closure-field":            "a closure passed to a constructor, kept in a field and called by another method with the data",
 	"closure-collection":       "closures added to a collection in a field and called in a loop with the data",
 	"closure-return":           "a closure returned by a function and called by the caller with the data",
+	"consent-helper":           "after a call of a helper that returns a consent check, the flow is reported with it as its guard",
+	"consent-caller":           "a function only ever called after a consent check reports its flows with that check",
+	"validation-check":         "a value that passed a validation check (isValidEmail) is that kind of data where it passed",
+	"alias":                    "stored into a field through one variable, read through another that refers to the same object",
+	"overwritten-field":        "a field overwritten with a non-personal value no longer holds the data (ok)",
+	"sanitizer-check":          "a value checked to be masked (isMasked) is treated as masked where the check passed (ok)",
 }
 
 var scenarioRe = regexp.MustCompile(`(?m)^\s*(?://+|#+)\s*scenario:\s*([a-z-]+)\s*$`)
@@ -143,7 +149,7 @@ func TestConsentGuards(t *testing.T) {
 			for _, f := range r.Flows {
 				name := strings.ToLower(strings.ReplaceAll(f.Function, "_", ""))
 				switch {
-				case strings.HasSuffix(name, "consentguard"):
+				case strings.Contains(name, "consent"):
 					guarded++
 					if len(f.Guards) == 0 || !strings.Contains(strings.ToLower(f.Guards[0]), "consent") {
 						t.Errorf("%s: flow at %s has no consent guard: %v", f.Function, f.Sink, f.Guards)

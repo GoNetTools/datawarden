@@ -292,3 +292,75 @@ func TestSyntaxErrorsAreRecoveredAndReported(t *testing.T) {
 		t.Errorf("warnings = %q", m.Warnings)
 	}
 }
+
+// Loops branch on their condition; switch and when cases on their tests.
+func TestConditionsOfLoopsAndCases(t *testing.T) {
+	// branchesOn returns, per function, the ops or callee names that
+	// define the conditions the function branches on.
+	branchesOn := func(m *ir.Module, fn string) []string {
+		var out []string
+		for _, f := range m.Funcs {
+			if !strings.HasSuffix(f.ID, fn) {
+				continue
+			}
+			for _, b := range f.Blocks {
+				if b.Term != ir.TermIf {
+					continue
+				}
+				for _, in := range f.Instrs {
+					if in.Dst != b.Cond {
+						continue
+					}
+					if in.Call != nil {
+						out = append(out, in.Call.Name)
+					} else {
+						out = append(out, in.Operator)
+					}
+				}
+			}
+		}
+		return out
+	}
+	kt := lower(t, NewKotlin, map[string]string{"L.kt": `package app
+fun loops(n: Int, m: Int) {
+    var i = n
+    while (i > 0) { i = i - 1 }
+    do { i = i + 1 } while (i < m)
+}
+fun cases(c: Consents, s: Int) {
+    when { c.hasConsent() -> println("a") }
+    when (s) { 1, 2 -> println("b") else -> println("c") }
+}
+`})
+	if got := branchesOn(kt, "loops"); len(got) != 2 {
+		t.Errorf("Kotlin loops branch on %v", got)
+	}
+	if got := strings.Join(branchesOn(kt, "cases"), ","); got != "hasConsent,||" {
+		t.Errorf("Kotlin when branches on %s", got)
+	}
+	java := lower(t, NewJava, map[string]string{"L.java": `class L {
+    void f(int s, java.util.Iterator<String> it) {
+        for (int i = 0; i < s; i++) { }
+        do { } while (it.hasNext());
+        switch (s) { case 1: break; case 2, 3: s = 0; default: s = 1; }
+    }
+}`})
+	if got := strings.Join(branchesOn(java, "f"), ","); got != "<,hasNext,==,||" {
+		t.Errorf("Java branches on %s", got)
+	}
+	ts := lower(t, NewTypeScript, map[string]string{"l.ts": `export function f(s: number) {
+  while (s > 0) { s--; }
+  switch (s) { case 1: break; default: s = 2; }
+}`})
+	if got := strings.Join(branchesOn(ts, "f"), ","); got != ">,==" {
+		t.Errorf("TypeScript branches on %s", got)
+	}
+	py := lower(t, NewPython, map[string]string{"l.py": "def f(n, consents):\n    while n > 0:\n        n -= 1\n    if n and consents.has_consent():\n        print(n)\n"})
+	if got := strings.Join(branchesOn(py, "f"), ","); got != "==,and" {
+		t.Errorf("Python branches on %s", got)
+	}
+	sw := lower(t, NewSwift, map[string]string{"l.swift": "func f(n: Int) {\n    var i = n\n    repeat { i -= 1 } while i > 0\n}\n"})
+	if got := branchesOn(sw, "f"); len(got) != 1 {
+		t.Errorf("Swift repeat-while branches on %v", got)
+	}
+}

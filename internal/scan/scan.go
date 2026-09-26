@@ -9,8 +9,10 @@ package scan
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
+	"path"
 	"sort"
 	"strings"
 	"time"
@@ -58,6 +60,8 @@ type Cache interface {
 	Has(id string) bool
 	Lookup(id string) *analysis.Summary
 	Callers(files []string, depth int) []string
+	// CallersOf returns the cached callers of a function.
+	CallersOf(id string) []string
 	SchemaTypes(skip map[string]bool) []*ir.TypeDecl
 	Classes(skip map[string]bool) []*ir.Class
 	ResetSchema()
@@ -205,9 +209,15 @@ func (s *Scanner) Run(ctx context.Context, req Request) (*Result, error) {
 	res.Schema, classes = s.buildSchema(req, all, prog, lowered, res.Mode)
 
 	// Taint analysis.
-	ar, err := s.Analyzer.Analyze(ctx, prog.Funcs, analysis.Input{
+	in := analysis.Input{
 		Rules: req.Rules, Schema: res.Schema, Lookup: req.Cache.Lookup, FirstPartyDomains: cfg.FirstPartyDomains, Classes: classes,
-	})
+	}
+	if res.Mode != ModeFull {
+		// Not every function is analysed: callers outside this run are
+		// known only from the cache.
+		in.Callers = req.Cache.CallersOf
+	}
+	ar, err := s.Analyzer.Analyze(ctx, prog.Funcs, in)
 	if err != nil {
 		return nil, err
 	}
@@ -218,6 +228,28 @@ func (s *Scanner) Run(ctx context.Context, req Request) (*Result, error) {
 	}
 	res.Duration = s.Clock().Sub(start)
 	return res, nil
+}
+
+// Lower runs the frontends over the requested files (req.Paths, or the
+// whole repository) without analysing them, for inspecting the IR. The
+// request needs Repo and Config; Cache and Rules are not used.
+func (s *Scanner) Lower(ctx context.Context, req Request) (*ir.Module, error) {
+	if s.Files == nil || s.Frontends == nil || s.Clock == nil || req.Repo.FS == nil || req.Config == nil {
+		return nil, errors.New("scan: Lower needs Scanner.Files, Frontends and Clock, and Request.Repo.FS and Config")
+	}
+	all, err := s.Files.List(req.Repo.FS)
+	if err != nil {
+		return nil, err
+	}
+	targets := all
+	if len(req.Paths) > 0 {
+		targets = s.Files.Select(req.Repo.FS, all, req.Paths)
+	}
+	res := &Result{FilesAnalyzed: map[string]int{}}
+	prog, _ := s.lower(ctx, req, targets, res)
+	prog.Warnings = append(res.Warnings, prog.Warnings...)
+	dedupeIDs(prog.Funcs)
+	return prog, nil
 }
 
 func (s *Scanner) validate(req Request) error {
@@ -309,6 +341,19 @@ func (s *Scanner) selectTargets(ctx context.Context, req Request, all []ingest.F
 	return targets, literalTargets, nil
 }
 
+// contactDoc reports community files whose email addresses are published
+// contacts (a code of conduct, the maintainers), not personal data that
+// leaked into the repository.
+func contactDoc(rel string) bool {
+	base := strings.ToUpper(path.Base(rel))
+	for _, p := range []string{"CODE_OF_CONDUCT", "CODE-OF-CONDUCT", "CONTRIBUTING", "AUTHORS", "MAINTAINERS", "SECURITY", "CODEOWNERS", "CONTRIBUTORS", "GOVERNANCE", "SUPPORT"} {
+		if strings.HasPrefix(base, p) {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Scanner) scanLiterals(ctx context.Context, req Request, files []ingest.File) ([]*finding.Literal, error) {
 	var out []*finding.Literal
 	minConf := req.Config.Literals.MinConfidence
@@ -329,8 +374,9 @@ func (s *Scanner) scanLiterals(ctx context.Context, req Request, files []ingest.
 		if err != nil {
 			continue
 		}
+		contacts := contactDoc(f.Rel)
 		for _, h := range s.Literals.Scan(b) {
-			if h.Conf < minConf {
+			if h.Conf < minConf || contacts && h.DataType == "email" {
 				continue
 			}
 			out = append(out, &finding.Literal{
@@ -371,7 +417,9 @@ func (s *Scanner) lower(ctx context.Context, req Request, targets []ingest.File,
 		FS:        req.Repo.FS,
 		BuildTags: cfg.GoBuildTags,
 		Logf:      req.Logf,
-		KnownFunc: req.Cache.Has,
+	}
+	if req.Cache != nil {
+		fopts.KnownFunc = req.Cache.Has
 	}
 	prog := &ir.Module{}
 	var lowered []string

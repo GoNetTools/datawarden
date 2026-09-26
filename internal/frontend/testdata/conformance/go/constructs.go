@@ -3,9 +3,12 @@
 package conformance
 
 import (
+	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 )
 
@@ -138,4 +141,29 @@ func storeOrder(email string) {
 	d.Note = email
 	// ruleid: log.go.stdlib
 	log.Println(d)
+}
+
+// The error of a library call does not carry its arguments, and a
+// connection handle does not carry its DSN; an error built from the data
+// does.
+func libraryErrors(password, email string) {
+	db, err := sql.Open("postgres", "postgres://app:"+password+"@db/app")
+	if err != nil {
+		// ok: log.go.stdlib
+		log.Println(err)
+	}
+	// ok: log.go.stdlib
+	log.Println(db)
+	var v map[string]any
+	if err := json.Unmarshal([]byte(email), &v); err != nil {
+		// ok: log.go.stdlib
+		log.Println(err.Error())
+	}
+	// strconv quotes the input in its errors.
+	if _, err := strconv.Atoi(email); err != nil {
+		// ruleid: log.go.stdlib
+		log.Println(err)
+	}
+	// ruleid: log.go.stdlib
+	log.Println(fmt.Errorf("bad address %s", email))
 }

@@ -114,6 +114,14 @@ every mutation as visible everywhere); every frontend emits blocks.
 |---|---|
 | `jump` | Continue at any of `Succs`; with none, the function ends. |
 | `if` | Branch on `Cond`: `Succs[0]` when it is true, `Succs[1]` when false. Exactly two successors, `Cond` a variable whose definition dominates the block. |
+
+Frontends branch on every condition they can read: `if`, a loop's
+condition (tested in a block after the header for `while` and `for`, at
+the end of the body for `do`/`repeat` loops), and each case of a `switch`
+or `when`, which is tested in turn (`subject == value`, `||` over several
+values, `is`/`in` tests, or the condition itself for a `when` without a
+subject) with the default case after the last test. A test the frontend
+cannot read (a pattern) is a block that jumps to both.
 | `return` | The block ends with a `return`; no successors. |
 | `throw` | The block ends with a `throw`; no successors. |
 
@@ -128,12 +136,31 @@ dominates `P`. Dominance is computed over normal and exceptional edges
 - **Data flow**: the def-use edges of SSA variables, with phis and
   assigns as aliases and computes as snapshots.
 - **Order of mutations**: a fact put on an object by a store, a mutating
-  call or a callee is seen only by instructions that the mutating one can
-  run before, over normal and exceptional edges (`analysis/order.go`).
+  call or a callee is seen only by the instructions it reaches over
+  normal and exceptional edges without a strong update in between: a
+  store into the same field of the same single object (a parameter, or
+  an allocation outside any loop) through a variable that refers to it
+  alone (`analysis/order.go`, reaching definitions with kills).
 - **Control dependence**: a sink in a block dominated by the "consent
   given" successor of a branch on a consent check (`hasConsent()`,
   `user.optedIn`, `!consents.hasConsent()` with the successors swapped)
-  is reported with that check as a guard (`analysis/guard.go`).
+  is reported with that check as a guard (`analysis/guard.go`). A call
+  of a function whose every return is a consent check is one, and a
+  function every call of which is guarded inherits the checks.
+- **Aliasing**: a points-to analysis per function (`analysis/pointsto.go`)
+  finds the variables that may refer to the same object: allocations,
+  parameters and call results are objects, `assign` and `phi` merge
+  what their arguments refer to, a `load` refers to the object in that
+  field of its base's objects, and a builder call's result to its
+  receiver. A mutation through one variable is a mutation through all of
+  them.
+- **Checks**: a branch on a predicate about a value refines it where it
+  passes: `isMasked(v)` (and `isRedacted`, `isEncrypted`, … : the
+  transform), `!containsPii(v)` (the `pii-checked` transform), and
+  `isValidEmail(v)` (the value is that data type). The engine gives the
+  value a new version at the start of the successor where the check
+  passed, used in every block that successor dominates
+  (`analysis/checks.go`).
 - **Closures**: `closure` values flow, over the whole program, through
   assigns and phis, into and out of fields (by owner type and field
   name) and collections, into the parameters of the functions they are
@@ -155,7 +182,9 @@ dominates `P`. Dominance is computed over normal and exceptional edges
 
 ## Text form
 
-`ir.Format` prints a function for debugging:
+`ir.Format` prints a function for debugging; `datawarden ir [paths...]
+--func REGEXP [--verify] [--format json] [--classes]` prints the IR of
+files in a repository:
 
 ```
 func app.save(v0:email, v1:consents)

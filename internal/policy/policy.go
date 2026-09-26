@@ -44,12 +44,16 @@ func (e Evaluator) Apply(flows []*finding.Flow, lits []*finding.Literal) ([]*fin
 	ignoreClass := toSet(p.IgnoreClasses)
 	failOn := map[string]map[string]bool{"": toSet(p.FailOn)}
 	safe := map[string]map[string]bool{"": toSet(p.SafeTransforms)}
+	guarded := map[string]map[string]bool{"": toSet(p.ConsentGuarded)}
 	for class, cp := range p.Classes {
 		if cp.FailOn != nil {
 			failOn[class] = toSet(cp.FailOn)
 		}
 		if cp.SafeTransforms != nil {
 			safe[class] = toSet(cp.SafeTransforms)
+		}
+		if cp.ConsentGuarded != nil {
+			guarded[class] = toSet(cp.ConsentGuarded)
 		}
 	}
 	forClass := func(m map[string]map[string]bool, class string) map[string]bool {
@@ -74,6 +78,8 @@ func (e Evaluator) Apply(flows []*finding.Flow, lits []*finding.Literal) ([]*fin
 		case f.Confidence < p.MinConfidence:
 		case anySafe(f.Transforms, forClass(safe, dt.Class)):
 			f.Allowed = "transform: " + strings.Join(f.Transforms, ",")
+		case len(f.Guards) > 0 && forClass(guarded, dt.Class)[f.Dest.Kind]:
+			f.Allowed = "consent: " + strings.Join(f.Guards, "; ")
 		default:
 			if a := matchAllow(p.Allow, f); a != nil {
 				f.Allowed = "allow"

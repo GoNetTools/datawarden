@@ -5,6 +5,8 @@ package analysis
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/GoNetTools/datawarden/internal/ir"
@@ -28,7 +30,8 @@ func consentName(name string) bool {
 // consentCheck reports whether v is the result of a consent check
 // (hasConsent(), user.optedIn, analyticsEnabled) and whether it is true
 // when consent was given (false for !hasConsent()).
-func consentCheck(fn *ir.Func, defs []int, v ir.VarID, depth int) (desc string, positive, ok bool) {
+// A call of a helper that returns a consent check (helpers) is one too.
+func consentCheck(fn *ir.Func, defs []int, v ir.VarID, depth int, helpers map[string]string) (desc string, positive, ok bool) {
 	if v < 0 || int(v) >= len(fn.Vars) || depth > 4 {
 		return "", false, false
 	}
@@ -44,25 +47,28 @@ func consentCheck(fn *ir.Func, defs []int, v ir.VarID, depth int) (desc string, 
 		if in.Call != nil && consentName(in.Call.Name) {
 			return in.Call.Name + "()", true, true
 		}
+		if in.Call != nil && helpers[in.Call.Target] != "" {
+			return fmt.Sprintf("%s() (%s)", in.Call.Name, helpers[in.Call.Target]), true, true
+		}
 	case ir.OpLoad:
 		if consentName(in.Field) {
 			return in.Field, true, true
 		}
 	case ir.OpCompute:
 		if in.Operator == "!" && len(in.Args) == 1 {
-			d, p, ok := consentCheck(fn, defs, in.Args[0], depth+1)
+			d, p, ok := consentCheck(fn, defs, in.Args[0], depth+1, helpers)
 			return d, !p, ok
 		}
 		if in.Operator == "&&" || in.Operator == "and" {
 			for _, a := range in.Args {
-				if d, p, ok := consentCheck(fn, defs, a, depth+1); ok && p {
+				if d, p, ok := consentCheck(fn, defs, a, depth+1, helpers); ok && p {
 					return d, true, true
 				}
 			}
 		}
 	case ir.OpAssign:
 		if len(in.Args) == 1 {
-			return consentCheck(fn, defs, in.Args[0], depth+1)
+			return consentCheck(fn, defs, in.Args[0], depth+1, helpers)
 		}
 	}
 	return "", false, false
@@ -71,19 +77,11 @@ func consentCheck(fn *ir.Func, defs []int, v ir.VarID, depth int) (desc string, 
 // guards returns, per block, the consent checks that must have passed for
 // control to reach it: a branch on a consent check whose "consent given"
 // successor is entered only from the branch and dominates the block.
-func guards(fn *ir.Func) [][]string {
+func guards(fn *ir.Func, helpers map[string]string) [][]string {
 	if len(fn.Blocks) == 0 {
 		return nil
 	}
-	defs := make([]int, len(fn.Vars))
-	for i := range defs {
-		defs[i] = -1
-	}
-	for i := range fn.Instrs {
-		if d := fn.Instrs[i].Dst; d >= 0 && int(d) < len(defs) && !fn.Vars[d].Cell && defs[d] < 0 {
-			defs[d] = i
-		}
-	}
+	defs := definitions(fn)
 	var out [][]string
 	var idom []int32
 	var preds [][]int32
@@ -91,7 +89,7 @@ func guards(fn *ir.Func) [][]string {
 		if blk.Term != ir.TermIf || len(blk.Succs) != 2 {
 			continue
 		}
-		desc, positive, ok := consentCheck(fn, defs, blk.Cond, 0)
+		desc, positive, ok := consentCheck(fn, defs, blk.Cond, 0, helpers)
 		if !ok {
 			continue
 		}
@@ -127,4 +125,115 @@ func condPos(fn *ir.Func, defs []int, v ir.VarID) ir.Pos {
 		return fn.Vars[v].Pos
 	}
 	return ir.Pos{}
+}
+
+// definitions maps each variable to the index of its (first) defining
+// instruction, or -1.
+func definitions(fn *ir.Func) []int {
+	defs := make([]int, len(fn.Vars))
+	for i := range defs {
+		defs[i] = -1
+	}
+	for i := range fn.Instrs {
+		if d := fn.Instrs[i].Dst; d >= 0 && int(d) < len(defs) && !fn.Vars[d].Cell && defs[d] < 0 {
+			defs[d] = i
+		}
+	}
+	return defs
+}
+
+// consentHelpers finds the functions that return a consent check, such as
+// fun canTrack() = consents.hasConsent() && settings.analyticsOn: a
+// branch on a call of one is a consent check. It maps each to the check
+// it returns.
+func consentHelpers(funcs []*ir.Func) map[string]string {
+	out := map[string]string{}
+	for round := 0; round < 4; round++ {
+		grew := false
+		for _, fn := range funcs {
+			if out[fn.ID] != "" {
+				continue
+			}
+			defs := definitions(fn)
+			desc, returns := "", 0
+			for i := range fn.Instrs {
+				in := &fn.Instrs[i]
+				if in.Op != ir.OpReturn {
+					continue
+				}
+				returns++
+				d, positive, ok := "", false, false
+				if len(in.Args) == 1 {
+					d, positive, ok = consentCheck(fn, defs, in.Args[0], 0, out)
+				}
+				if !ok || !positive {
+					returns = -1
+					break
+				}
+				desc = d
+			}
+			if returns > 0 {
+				out[fn.ID] = desc
+				grew = true
+			}
+		}
+		if !grew {
+			break
+		}
+	}
+	return out
+}
+
+// inheritedGuards finds, per function, the consent checks guarding every
+// place it is called from (sites lists them: the calling function and
+// block), so that a sink in a function only ever called after consent was
+// given is reported with that check. A function with no known caller
+// inherits nothing: it may be called from anywhere.
+func inheritedGuards(sites map[string][]callSite, blocks map[string][][]string) map[string][]string {
+	out := map[string][]string{}
+	for round := 0; round < 8; round++ {
+		grew := false
+		for _, callee := range slices.Sorted(maps.Keys(sites)) {
+			var common []string
+			for i, s := range sites[callee] {
+				var here []string
+				if bg := blocks[s.fn]; s.block >= 0 && int(s.block) < len(bg) {
+					here = append(here, bg[s.block]...)
+				}
+				here = mergeXf(here, out[s.fn]...)
+				if i == 0 {
+					common = here
+				} else {
+					common = intersect(common, here)
+				}
+				if len(common) == 0 {
+					break
+				}
+			}
+			common = mergeXf(nil, common...)
+			if !slices.Equal(common, out[callee]) {
+				out[callee] = common
+				grew = true
+			}
+		}
+		if !grew {
+			break
+		}
+	}
+	return out
+}
+
+type callSite struct {
+	fn    string
+	block int32
+}
+
+func intersect(a, b []string) []string {
+	var out []string
+	for _, x := range a {
+		if slices.Contains(b, x) {
+			out = append(out, x)
+		}
+	}
+	return out
 }

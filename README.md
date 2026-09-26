@@ -94,6 +94,7 @@ datawarden map --format dpia > docs/data-map.md
 | `datawarden map --format dpia\|json\|csv\|mermaid` | Personal-data inventory. |
 | `datawarden rules [--kind sink] [--lang kotlin]` | Effective rules (built-in + repository overrides). |
 | `datawarden rules test DIR` | Checks annotated example code in `DIR` against the effective rules (see [Sink rules](#sink-rules)). |
+| `datawarden ir [paths...]` | Prints the IR the analysis reads for the given files ([docs/IR.md](docs/IR.md)): `--func REGEXP` to pick functions, `--format json`, `--classes` for the class table, `--verify` to check it (exit 1 when invalid). For rule and frontend authors. |
 | `datawarden comment datawarden.md` | Creates or updates the PR (GitHub) / MR (GitLab) comment. |
 | `datawarden init` | Writes starter config files. |
 
@@ -207,13 +208,13 @@ datawarden looks for secrets *in data flows* as well as in files: a password log
 
 ## Sink rules
 
-Rules are YAML files embedded in the binary (`internal/rules/builtin/`: 123 rules for Go, Python, Java/Kotlin, Swift and TypeScript). A repository adds, replaces or disables rules in `.datawarden/rules/*.yaml` (or any path listed under `rules:` in `.datawarden.yaml`).
+Rules are YAML files embedded in the binary (`internal/rules/builtin/`: 126 rules for Go, Python, Java/Kotlin, Swift and TypeScript). A repository adds, replaces or disables rules in `.datawarden/rules/*.yaml` (or any path listed under `rules:` in `.datawarden.yaml`).
 
 ```yaml
 - id: sdk.sentry.set_user
   lang: kotlin                       # or a list: [kotlin, java]
   call: io.sentry.Sentry.setUser     # qualified callee; '*' is a wildcard; may be a list
-  arg: 0                             # 0-based, receiver excluded; a list, or "*" for all
+  arg: 0                             # 0-based, receiver excluded; a list, "*" for all, -1 for the receiver
   dest: { host: sentry.io, kind: third_party, vendor: Sentry, region: us }
 
 - id: sdk.acme.telemetry             # a repository-specific SDK
@@ -267,15 +268,16 @@ cache_dir: .datawarden/cache
 literals: { enabled: true, min_confidence: 0.6 }
 policy:
   fail_on: [third_party, log, network, storage, ipc]
-  safe_transforms: [masked, redacted, encrypted, tokenized, anonymized]
+  safe_transforms: [masked, redacted, encrypted, tokenized, anonymized, pii-checked]
   min_confidence: 0.55
   fail_on_literals: true
   ignore_data_types: []
   ignore_classes: []          # pii, phi, pci, credential
-  classes:                    # per-class overrides of fail_on and safe_transforms
+  consent_guarded: []         # destination kinds accepted after a consent check, e.g. [third_party]
+  classes:                    # per-class overrides of fail_on, safe_transforms and consent_guarded
     credential:
       fail_on: [third_party, log, storage, ipc]
-      safe_transforms: [masked, redacted, encrypted, tokenized, hashed, sha256, sha512]
+      safe_transforms: [masked, redacted, encrypted, tokenized, pii-checked, hashed, sha256, sha512]
   allow:
     - sink: sdk.sentry.set_user
       data_types: [email]
@@ -285,6 +287,8 @@ policy:
 ```
 
 Hashes (`sha256`, `hashed`) are not safe transforms for personal data by default: phone and ID numbers are low-entropy, so their hashes can be reversed by enumeration. Add them to `safe_transforms` if you salt or key them. For credentials hashing is the point, so the `credential` class accepts it.
+
+`consent_guarded` lists destination kinds whose flows are acceptable when the sink runs only after a consent check passed: with `consent_guarded: [third_party]`, `if (consents.hasConsent()) analytics.track(email)` is shown as allowed ("consent: …") instead of failing the build. Set it per class to keep health data a violation either way (`classes: { phi: { consent_guarded: [] } }`).
 
 ## Baseline
 
@@ -346,8 +350,8 @@ Without the framework: `cp scripts/pre-commit .git/hooks/pre-commit` (runs `data
 
 datawarden favours explainable, low-noise results over completeness. Every finding has a confidence score and a source description; `policy.min_confidence` and `min_confidence` tune the trade-off.
 
-- The IR is a small code property graph: SSA variables (each assignment to a local is its own version, merged after `if`/`else`, `switch`/`when`/`match`, loops and `try`/`catch`) plus a control-flow graph. A value that is overwritten (`x = "anonymous"`, `email = mask(email)`) no longer reaches later sinks, a path that returns does not reach the code after it, and an object logged before personal data is added to it (`log(items); items.add(email)`, `log(user); user.note = email`) is not reported. `break` and `continue` go to their loop (labels included), `switch` cases in Java and JavaScript fall through until a `break`, and Python's `for`/`while ... else` runs only when the loop did not break. A string built from an object (`"items=" + items`, `f"{items}"`) is a snapshot: data added to the object later does not reach it. Conditions that are constant in the source are folded: `if false`, `while true`, and booleans declared as constants (`static final boolean DEBUG = false`, `const val`, `const`, Swift `let`, Python `UPPER_CASE = False`, Go `const`), so code under a false constant is not analysed. Conditions that depend on data are not evaluated: both arms of such an `if` are assumed possible. Lambdas and closures are analysed as functions of their own where they run: called through a variable, with the call's arguments; passed to other code, with what that call is given. A callee known to run the closure before it returns (`forEach`, `map`, `filter`, `apply`, `let`, `sort.Slice`, … in `internal/analysis/callbacks.go`) runs it at the call, so `items.forEach { log(xs) }; xs.add(email)` is not reported; any other callee may keep the closure and run it later, so it sees its captured variables as they are at any time. Closures are followed where they go: kept in a field and called by another method (`this.onSend(v)`), added to a list and called in a loop (an event bus), or returned by a factory and called by the caller; a closure a function receives as a parameter runs where it is passed, not inside that function, so what different callers pass is not mixed up. A closure that assigns a captured variable (`items.forEach { found = it.email }`) updates it for the code after the call; in Python only when the nested function declares the name `nonlocal` or `global`, since otherwise the assignment binds a local of its own. Inside a `try`, a handler sees the state at each call or `throw` that can raise the exception, and what a callee throws reaches the handler or the caller's caller.
-- A sink that runs only after a consent check (`if (!consents.hasConsent()) return`, `guard user.optedIn else { return }`, `if analytics_enabled:`) is reported with the check as a guard (`guards` in JSON, "guarded by" in text, "only after" in SARIF messages). It is still a finding: the check is shown so a reviewer can confirm it covers the flow.
+- The IR is a small code property graph: SSA variables (each assignment to a local is its own version, merged after `if`/`else`, `switch`/`when`/`match`, loops and `try`/`catch`) plus a control-flow graph. A value that is overwritten (`x = "anonymous"`, `email = mask(email)`) no longer reaches later sinks, a path that returns does not reach the code after it, and an object logged before personal data is added to it (`log(items); items.add(email)`, `log(user); user.note = email`) is not reported. `break` and `continue` go to their loop (labels included), `switch` cases in Java and JavaScript fall through until a `break`, and Python's `for`/`while ... else` runs only when the loop did not break. A field overwritten with other data no longer holds the old value (`user.name = email; user.name = "anonymous"`) when the object is known to be one object (a parameter, or created outside any loop), and an overwrite on one branch only keeps the data on the other path. A field stored through one variable is seen through every variable that may refer to the same object (`b = a; b.name = email; log(a.name)`, or through either arm of an `if`), and a value stored in one field of an object of unknown type does not show up in its other fields. A string built from an object (`"items=" + items`, `f"{items}"`) is a snapshot: data added to the object later does not reach it. Conditions that are constant in the source are folded: `if false`, `while true`, and booleans declared as constants (`static final boolean DEBUG = false`, `const val`, `const`, Swift `let`, Python `UPPER_CASE = False`, Go `const`), so code under a false constant is not analysed. Conditions that depend on data are not evaluated: both arms of such an `if` are assumed possible. Loops branch on their condition and `switch`/`when` cases on their tests, so a `when { consents.hasConsent() -> … }` arm is guarded like an `if`. A branch on a check about a value refines it where the check passed: after `if (isMasked(v))` or `if (isRedacted(v))` the value counts as masked or redacted, after `if (!containsPii(msg))` as `pii-checked` (a safe transform by default), and after `if (isValidEmail(input))` as an email address, a source even when its name says nothing. Lambdas and closures are analysed as functions of their own where they run: called through a variable, with the call's arguments; passed to other code, with what that call is given. A callee known to run the closure before it returns (`forEach`, `map`, `filter`, `apply`, `let`, `sort.Slice`, … in `internal/analysis/callbacks.go`) runs it at the call, so `items.forEach { log(xs) }; xs.add(email)` is not reported; any other callee may keep the closure and run it later, so it sees its captured variables as they are at any time. Closures are followed where they go: kept in a field and called by another method (`this.onSend(v)`), added to a list and called in a loop (an event bus), or returned by a factory and called by the caller; a closure a function receives as a parameter runs where it is passed, not inside that function, so what different callers pass is not mixed up. A closure that assigns a captured variable (`items.forEach { found = it.email }`) updates it for the code after the call; in Python only when the nested function declares the name `nonlocal` or `global`, since otherwise the assignment binds a local of its own. Inside a `try`, a handler sees the state at each call or `throw` that can raise the exception, and what a callee throws reaches the handler or the caller's caller.
+- A sink that runs only after a consent check (`if (!consents.hasConsent()) return`, `guard user.optedIn else { return }`, `if analytics_enabled:`) is reported with the check as a guard (`guards` in JSON, "guarded by" in text, "only after" in SARIF messages). The check can be a helper that returns one (`fun mayContact() = consents.hasConsent()`), part of a condition (`&&`, Python `and`), or in the callers: a function only ever called after a check (every call of it in the analysed code is guarded) reports its flows with that check. In PR mode a function with a caller outside the scanned files inherits nothing. It is still a finding, shown so a reviewer can confirm the check covers the flow, unless `policy.consent_guarded` accepts guarded flows to that destination.
 - Objects keep their structure three fields deep: `user.profile.note = email` followed by `log(user.profile.note)`, or a helper that stores into `u.profile.note`, is followed; deeper paths are merged into their first three fields.
 - Objects are tracked field by field through function summaries, not a heap model: a value a constructor stores in `this.addr` and another method logs is followed, and so is a factory's `&T{addr: email}`. Fields are tracked one level deep; deeper paths (`a.b.c`) collapse to the first field.
 - Calls through an interface, protocol, abstract class or overridable method run every override and implementation in the scanned code (class hierarchy analysis), in all six languages. Implementations in dependencies are not enumerated; rules can still target the interface method (`io.Writer.Write`).
@@ -368,12 +372,15 @@ datawarden favours explainable, low-noise results over completeness. Every findi
 go run ./cmd/datawarden-bench                     # or: make eval
 go run ./cmd/datawarden-bench -runs 5 -json eval.json -markdown eval.md
 go run ./cmd/datawarden-bench -manifest my-corpus.yaml -check
+go run ./cmd/datawarden-bench -external -check      # or: make eval-external
 ```
+
+Besides the fixtures, the corpus has **external cases**: deliberately insecure open-source apps pinned by repository and commit, labelled from their source and fetched with git only when `-external` is given (into `-cache`, the user cache directory by default), so their code is never copied into this repository. They are DIVA and InsecureBankv2 (Android, Java), the OWASP MASTG playground (Android Java and Kotlin, iOS Swift), DVIA-v2 (iOS, Swift), pygoat (Python/Django) and govwa (Go), which has no personal-data leak and checks that none is reported. CI runs them too. Known misses stay labelled with a note.
 
 - **Precision** = TP / (TP + FP) and **recall** = TP / (TP + FN), per case, per data type and per sink category (`log`, `sdk`, `net`, `storage`, `literal`). A label matched by several findings is one true positive; any other reported violation is a false positive. Findings matching an `ambiguous` label (for example data sent to a host that may be first party) count as neither.
 - A **confidence sweep** rescores every case at each threshold in `thresholds`, which shows what raising `policy.min_confidence` would cost in recall.
 - **Timings**: median wall time over `-runs` cold scans, memory allocated by the scan, files and functions. The Go frontend's `go list` runs in a child process, so its time is included but its memory is not.
-- `-check` exits 1 when a case scores below its `min_precision` or `min_recall`. CI runs it on every pull request and publishes the tables in the job summary; timings are reported but not gated.
+- `-check` exits 1 when a case scores below its `min_precision` or `min_recall` (external cases that did not run are skipped). CI runs it on every pull request and publishes the tables in the job summary; timings are reported but not gated.
 
 **See it on a realistic app:** [`testdata/vulnshop`](testdata/vulnshop) is a small shop (Go API, Python recommender, TypeScript checkout, Kotlin/Java Android app, Swift iOS app, CSV seed data, an env file) with 51 planted leaks of personal data, health data and credentials, and a set of traps. Run **Actions → demo → Run workflow** to scan it, or any other directory, and get the findings, the data map and the accuracy tables in the job summary.
 

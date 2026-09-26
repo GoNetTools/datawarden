@@ -446,11 +446,12 @@ var transformFuncWords = map[string]string{
 	"mask": "masked", "masked": "masked", "redact": "redacted", "redacted": "redacted", "scrub": "redacted",
 	"anonymize": "anonymized", "anonymise": "anonymized", "pseudonymize": "pseudonymized", "pseudonymise": "pseudonymized",
 	"hash": "hashed", "hashed": "hashed", "digest": "hashed", "sha256": "sha256", "sha512": "sha512", "sha1": "sha1", "md5": "md5",
-	"hmac": "hmac", "encrypt": "encrypted", "seal": "encrypted", "obfuscate": "masked", "tokenize": "tokenized", "truncate": "masked",
+	"hmac": "hmac", "encrypt": "encrypted", "encrypted": "encrypted", "seal": "encrypted", "sealed": "encrypted",
+	"anonymized": "anonymized", "tokenized": "tokenized", "pseudonymized": "pseudonymized", "obfuscate": "masked", "tokenize": "tokenized", "truncate": "masked",
 	"bcrypt": "hashed", "argon2": "hashed", "scrypt": "hashed",
 }
 
-var notTransformFunc = set("map", "set", "table", "code", "tag", "tags", "bucket", "ring", "key", "keys", "mapof", "setof", "equals", "compare", "verify", "check", "valid", "is", "unmask", "decrypt")
+var notTransformFunc = set("map", "set", "table", "code", "tag", "tags", "bucket", "ring", "key", "keys", "mapof", "setof", "equals", "compare", "verify", "check", "valid", "is", "unmask", "decrypt", "decrypted", "unseal")
 
 // FuncTransform recognises sanitizer-like function names: maskPhone ->
 // masked, hashEmail -> hashed, sha256Hex -> sha256.

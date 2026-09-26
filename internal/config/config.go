@@ -8,7 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -49,6 +51,10 @@ type Policy struct {
 	// is not.
 	Classes map[string]ClassPolicy `yaml:"classes" json:"classes,omitempty"`
 	Allow   []Allow                `yaml:"allow" json:"allow,omitempty"`
+	// ConsentGuarded lists destination kinds whose flows are acceptable
+	// when they run only after a consent check passed (the flow's
+	// guards): analytics sent once the user opted in.
+	ConsentGuarded []string `yaml:"consent_guarded" json:"consent_guarded,omitempty"`
 }
 
 // ClassPolicy overrides the policy for one class of data. Empty fields
@@ -56,6 +62,7 @@ type Policy struct {
 type ClassPolicy struct {
 	FailOn         []string `yaml:"fail_on" json:"fail_on,omitempty"`
 	SafeTransforms []string `yaml:"safe_transforms" json:"safe_transforms,omitempty"`
+	ConsentGuarded []string `yaml:"consent_guarded" json:"consent_guarded,omitempty"`
 }
 
 // Literals configures the committed-value (literal) detector.
@@ -99,7 +106,7 @@ func Default() *Config {
 		Literals:      Literals{Enabled: &t, MinConfidence: 0.6},
 		Policy: Policy{
 			FailOn:         []string{"third_party", "log", "network", "storage", "ipc"},
-			SafeTransforms: []string{"masked", "redacted", "encrypted", "tokenized", "anonymized"},
+			SafeTransforms: []string{"masked", "redacted", "encrypted", "tokenized", "anonymized", "pii-checked"},
 			MinConfidence:  0.55,
 			FailOnLiterals: &t,
 			Classes: map[string]ClassPolicy{
@@ -108,7 +115,7 @@ func Default() *Config {
 				// storage are. Hashing a password is the point of hashing.
 				"credential": {
 					FailOn:         []string{"third_party", "log", "storage", "ipc"},
-					SafeTransforms: []string{"masked", "redacted", "encrypted", "tokenized", "hashed", "sha256", "sha512"},
+					SafeTransforms: []string{"masked", "redacted", "encrypted", "tokenized", "pii-checked", "hashed", "sha256", "sha512"},
 				},
 			},
 		},
@@ -148,16 +155,27 @@ func Parse(data []byte, origin string) (*Config, error) {
 
 func (c *Config) validate() error {
 	kinds := map[string]bool{"third_party": true, "first_party": true, "log": true, "storage": true, "network": true, "ipc": true}
-	for _, k := range c.Policy.FailOn {
-		if !kinds[k] {
-			return fmt.Errorf("%s: policy.fail_on: unknown destination kind %q", c.Path, k)
-		}
-	}
-	for class, cp := range c.Policy.Classes {
-		for _, k := range cp.FailOn {
+	check := func(key string, ks []string) error {
+		for _, k := range ks {
 			if !kinds[k] {
-				return fmt.Errorf("%s: policy.classes.%s.fail_on: unknown destination kind %q", c.Path, class, k)
+				return fmt.Errorf("%s: %s: unknown destination kind %q", c.Path, key, k)
 			}
+		}
+		return nil
+	}
+	if err := check("policy.fail_on", c.Policy.FailOn); err != nil {
+		return err
+	}
+	if err := check("policy.consent_guarded", c.Policy.ConsentGuarded); err != nil {
+		return err
+	}
+	for _, class := range slices.Sorted(maps.Keys(c.Policy.Classes)) {
+		cp := c.Policy.Classes[class]
+		if err := check("policy.classes."+class+".fail_on", cp.FailOn); err != nil {
+			return err
+		}
+		if err := check("policy.classes."+class+".consent_guarded", cp.ConsentGuarded); err != nil {
+			return err
 		}
 	}
 	for _, l := range c.Languages {
@@ -207,7 +225,8 @@ policy:
   # A flow is acceptable if one of these transforms was applied first.
   # Hashes (sha256, hashed) are left out on purpose: phone numbers and
   # national ID numbers are low-entropy and hashes of them are reversible.
-  safe_transforms: [masked, redacted, encrypted, tokenized, anonymized]
+  # pii-checked: a PII detector found none (if (!containsPii(msg)) log(msg)).
+  safe_transforms: [masked, redacted, encrypted, tokenized, anonymized, pii-checked]
   min_confidence: 0.55
   fail_on_literals: true
   ignore_data_types: []
@@ -220,7 +239,12 @@ policy:
   classes:
     credential:
       fail_on: [third_party, log, storage, ipc]
-      safe_transforms: [masked, redacted, encrypted, tokenized, hashed, sha256, sha512]
+      safe_transforms: [masked, redacted, encrypted, tokenized, pii-checked, hashed, sha256, sha512]
+  # Destination kinds whose flows are acceptable when they run only after
+  # a consent check passed (if (consents.hasConsent()) analytics.track(...)).
+  # Findings show the check either way.
+  consent_guarded: []
+  #  - third_party
   allow: []
   #  - sink: sdk.sentry.set_user
   #    data_types: [email]

@@ -77,7 +77,8 @@ func (s *StringList) UnmarshalYAML(n *yaml.Node) error {
 }
 
 // ArgSpec selects call arguments: a single index, a list, or "*" for all.
-// Indexes exclude the receiver.
+// Indexes exclude the receiver; -1 selects the receiver itself (a value
+// that writes itself: dict.write(toFile:)).
 type ArgSpec struct {
 	All     bool  `json:"all,omitempty"`
 	Indexes []int `json:"indexes,omitempty"`
@@ -356,8 +357,8 @@ func (r *Rule) compile() error {
 		}
 	}
 	for _, i := range r.Arg.Indexes {
-		if i < 0 {
-			return fmt.Errorf("arg %d: indexes start at 0", i)
+		if i < -1 {
+			return fmt.Errorf("arg %d: indexes start at 0 (-1 is the receiver)", i)
 		}
 	}
 	if r.HostArg != nil && *r.HostArg < 0 {

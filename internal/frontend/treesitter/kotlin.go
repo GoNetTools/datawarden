@@ -712,15 +712,20 @@ func (kb *ktBuilder) stmt(n *sitter.Node) ir.VarID {
 			kb.expr(cond) // while (false): the body never runs
 			return ir.NoVar
 		}
-		kb.loopWith(n, loopSpec{infinite: known && v, body: func() {
+		test := func() ir.VarID { return kb.expr(cond) }
+		spec := loopSpec{infinite: known && v, body: func() {
 			for _, c := range named(n) {
 				if c.Type() == "control_structure_body" {
 					kb.block(c)
-				} else {
-					kb.expr(c)
 				}
 			}
-		}})
+		}}
+		if n.Type() == "do_while_statement" {
+			spec.post = test
+		} else {
+			spec.cond = test
+		}
+		kb.loopWith(n, spec)
 		return ir.NoVar
 	case "function_declaration":
 		// Local function: a closure bound to its name, so calls of it run it.
@@ -1056,8 +1061,13 @@ func (kb *ktBuilder) conditionalArms(n *sitter.Node) {
 		}
 		kb.ifElse(n, cond, cv, arm(bodies[0]), els)
 	case "when_expression":
+		// Each entry is entered when its test passes: subject == value
+		// (is, in: a type or range test), or with no subject the
+		// condition itself; else when every test failed.
 		var arms []func()
+		var tests []func() ir.VarID
 		exhaustive := false
+		subject := ir.NoVar
 		for _, c := range named(n) {
 			switch c.Type() {
 			case "when_subject":
@@ -1067,28 +1077,55 @@ func (kb *ktBuilder) conditionalArms(n *sitter.Node) {
 						vd = k
 						continue
 					}
-					v := kb.expr(k)
+					subject = kb.expr(k)
 					if vd != nil {
 						id := firstOf(vd, "simple_identifier")
-						kb.assign(kb.declare(kb.text(id), "", id), k, v)
+						kb.assign(kb.declare(kb.text(id), "", id), k, subject)
 					}
 				}
 			case "when_entry":
-				conds := allOf(c, "when_condition")
-				for _, cond := range conds {
-					for _, k := range named(cond) {
-						kb.expr(k)
-					}
+				body := firstOf(c, "control_structure_body")
+				if body == nil {
+					continue
 				}
+				arms = append(arms, arm(body))
+				conds := allOf(c, "when_condition")
 				if len(conds) == 0 {
 					exhaustive = true
+					tests = append(tests, nil)
+					continue
 				}
-				if body := firstOf(c, "control_structure_body"); body != nil {
-					arms = append(arms, arm(body))
-				}
+				tests = append(tests, func() ir.VarID {
+					var vs []ir.VarID
+					for _, cond := range conds {
+						for _, k := range named(cond) {
+							switch k.Type() {
+							case "range_test", "type_test":
+								v := ir.NoVar
+								for _, x := range named(k) {
+									v = kb.expr(x)
+								}
+								t := kb.temp(k)
+								op := "in"
+								if k.Type() == "type_test" {
+									op = "is"
+								}
+								if subject != ir.NoVar && v != ir.NoVar {
+									kb.fn.Compute(t, kb.pos(k), op, subject, v)
+								} else {
+									t = ir.NoVar
+								}
+								vs = append(vs, t)
+							default:
+								vs = append(vs, kb.expr(k))
+							}
+						}
+					}
+					return kb.matches(c, subject, vs...)
+				})
 			}
 		}
-		kb.branches(n, !exhaustive, arms...)
+		kb.switchCases(n, switchSpec{exhaustive: exhaustive, noBreak: true, cases: arms, tests: tests})
 	case "try_expression":
 		var body *sitter.Node
 		var handlers []func()

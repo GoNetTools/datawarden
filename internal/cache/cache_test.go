@@ -39,6 +39,9 @@ func TestRoundTripAndInvalidation(t *testing.T) {
 	if got := s2.Callers([]string{"a.go"}, 2); len(got) != 1 || got[0] != "b.go" {
 		t.Errorf("callers = %v", got)
 	}
+	if got := s2.CallersOf("p.A"); len(got) != 1 || got[0] != "p.B" || len(s2.CallersOf("p.B")) != 0 {
+		t.Errorf("CallersOf = %v", got)
+	}
 	if len(s2.SchemaTypes(nil)) != 1 || len(s2.SchemaTypes(map[string]bool{"a.go": true})) != 0 {
 		t.Error("schema types")
 	}

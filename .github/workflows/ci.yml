@@ -120,9 +120,10 @@ jobs:
           CGO_ENABLED: "0"
         run: go test ./...
 
-  # Accuracy on the labelled corpus (testdata/eval.yaml); fails when a case
-  # drops below its min_precision/min_recall. Timings are reported, not gated:
-  # shared runners are too noisy for that.
+  # Accuracy on the labelled corpus (testdata/eval.yaml), including the
+  # external open-source apps fetched at their pinned commits; fails when a
+  # case drops below its min_precision/min_recall. Timings are reported, not
+  # gated: shared runners are too noisy for that.
   eval:
     runs-on: ubuntu-24.04
     steps:
@@ -137,7 +138,7 @@ jobs:
           CGO_ENABLED: "1"
         run: |
           code=0
-          go run ./cmd/datawarden-bench -runs 3 -check -json eval.json -markdown eval.md || code=$?
+          go run ./cmd/datawarden-bench -runs 3 -check -external -cache "$RUNNER_TEMP/eval-repos" -json eval.json -markdown eval.md || code=$?
           if [ -f eval.md ]; then cat eval.md >> "$GITHUB_STEP_SUMMARY"; fi
           exit "$code"
       - name: Benchmarks run

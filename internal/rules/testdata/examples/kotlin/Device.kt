@@ -8,8 +8,10 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.database.sqlite.SQLiteDatabase
 import android.location.LocationManager
 import android.provider.ContactsContract
+import android.telephony.SmsManager
 import android.telephony.TelephonyManager
 import android.util.Log
 import android.webkit.WebView
@@ -17,6 +19,16 @@ import com.google.android.gms.ads.identifier.AdvertisingIdClient
 import java.io.File
 
 class DeviceData(private val context: Context, private val prefs: SharedPreferences) {
+    fun sqlite(db: SQLiteDatabase, password: String) {
+        // ruleid: storage.android.sqlite
+        db.execSQL("INSERT INTO users VALUES ('admin', '$password')")
+    }
+
+    fun sms(sms: SmsManager, recipient: String, password: String) {
+        // ruleid: sdk.android.sms
+        sms.sendTextMessage(recipient, null, "Your new password is $password", null, null)
+    }
+
     fun sharedPrefs(phoneNumber: String) {
         // ruleid: storage.android.shared_prefs
         prefs.edit().putString("phone", phoneNumber).apply()

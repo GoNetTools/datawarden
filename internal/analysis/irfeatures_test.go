@@ -5,6 +5,7 @@ package analysis
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
@@ -357,6 +358,67 @@ func TestConsentGuardsInEngine(t *testing.T) {
 	}
 }
 
+// A helper returning a consent check guards like the check, and a function
+// only called after a check inherits it, unless a caller outside the run
+// may call it without one.
+func TestHelperAndCallerGuards(t *testing.T) {
+	// fun mayContact(c) = c.hasConsent()
+	helper := newFunc("p.mayContact")
+	hc := helper.AddParam("c", "", pos(1))
+	r := helper.Temp(pos(1))
+	helper.Emit(ir.Instr{Op: ir.OpCall, Dst: r, Args: []ir.VarID{hc}, Call: &ir.Call{Name: "hasConsent", HasRecv: true}, Pos: pos(1)})
+	helper.Return(pos(1), r)
+	// fun send(email) = log(email)
+	send := newFunc("p.send")
+	logTo(send, send.AddParam("email", "String", pos(5)), 6)
+	// fun caller(email, c) { if (mayContact(c)) send(email) }
+	caller := newFunc("p.caller")
+	email := caller.AddParam("email", "String", pos(10))
+	c := caller.AddParam("c", "", pos(10))
+	ok := caller.Temp(pos(11))
+	caller.Emit(ir.Instr{Op: ir.OpCall, Dst: ok, Args: []ir.VarID{c}, Call: &ir.Call{Name: "mayContact", Target: "p.mayContact"}, Pos: pos(11)})
+	then := caller.NewBlock()
+	caller.Emit(ir.Instr{Op: ir.OpCall, Dst: caller.Temp(pos(12)), Args: []ir.VarID{email}, Call: &ir.Call{Name: "send", Target: "p.send"}, Pos: pos(12)})
+	join := caller.NewBlock(then)
+	caller.Branch(0, ok, then, join)
+
+	run := func(callers func(string) []string) *Result {
+		rs, err := rules.Load(nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		names := detect.NewClassifier(detect.DefaultTaxonomy())
+		res, err := Analyze(context.Background(), []*ir.Func{helper, send, caller}, Options{Rules: rs, Schema: detect.BuildSchema(names, nil), Names: names, Callers: callers})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+	res := run(nil)
+	if len(res.Flows) == 0 {
+		t.Fatal("no flows")
+	}
+	for _, fl := range res.Flows {
+		if len(fl.Guards) != 1 || !strings.Contains(fl.Guards[0], "mayContact() (hasConsent())") {
+			t.Errorf("flow from %s at %s: guards %v", fl.Source, fl.Sink, fl.Guards)
+		}
+	}
+	res = run(func(id string) []string {
+		if id == "p.send" {
+			return []string{"p.caller", "p.elsewhere"}
+		}
+		return nil
+	})
+	if fl := flowAt(res, 6); fl == nil {
+		t.Fatal("no flow")
+	}
+	for _, fl := range res.Flows {
+		if fl.Source.Line == 5 && len(fl.Guards) != 0 {
+			t.Errorf("a caller outside the run may call send unguarded: %v", fl.Guards)
+		}
+	}
+}
+
 // Access paths: a.b.c is tracked through loads, stores and summaries.
 func TestAccessPaths(t *testing.T) {
 	// fun fill(u, v) { u.profile.note = v }
@@ -420,5 +482,258 @@ func TestAccessPaths(t *testing.T) {
 		if got := joinField(path.in, path.add); got != path.want {
 			t.Errorf("joinField(%q, %q) = %q", path.in, path.add, got)
 		}
+	}
+}
+
+// Branches on checks refine the checked value where they pass.
+func TestChecks(t *testing.T) {
+	// fun f(email, q, msg) {
+	//   if (isMasked(email)) log(email)       // line 3, masked
+	//   if (!containsPii(msg)) log(msg)       // line 5, pii-checked
+	//   if (isValidEmail(q)) log(q)           // line 7, an email
+	//   log(q)                                // line 8, nothing
+	// }
+	f := newFunc("p.f")
+	email := f.AddParam("email", "String", pos(1))
+	q := f.AddParam("q", "String", pos(1))
+	msg := f.AddParam("msg", "String", pos(1))
+	f.Emit(ir.Instr{Op: ir.OpStore, Dst: ir.NoVar, Args: []ir.VarID{msg, email}, Field: "body", Pos: pos(1)})
+	branch := func(line int, name string, arg ir.VarID, negate bool, then func()) {
+		c := f.Temp(pos(line))
+		f.Emit(ir.Instr{Op: ir.OpCall, Dst: c, Args: []ir.VarID{arg}, Call: &ir.Call{Name: name}, Pos: pos(line)})
+		if negate {
+			n := f.Temp(pos(line))
+			f.Compute(n, pos(line), "!", c)
+			c = n
+		}
+		from := f.CurBlock()
+		body := f.NewBlock(from)
+		then()
+		join := f.NewBlock(body, from)
+		f.Branch(from, c, body, join)
+	}
+	branch(2, "isMasked", email, false, func() { logTo(f, email, 3) })
+	branch(4, "containsPii", msg, true, func() { logTo(f, msg, 5) })
+	branch(6, "isValidEmail", q, false, func() { logTo(f, q, 7) })
+	logTo(f, q, 8)
+
+	a := &analyzer{opts: Options{Names: detect.NewClassifier(detect.DefaultTaxonomy())}}
+	rf, cks := a.refineChecks(f)
+	if len(cks) != 3 || rf == f {
+		t.Fatalf("checks: %v", cks)
+	}
+	if err := ir.Verify(rf); err != nil {
+		t.Fatalf("refined IR does not verify: %v\n%s", err, ir.Format(rf))
+	}
+	if err := ir.Verify(f); err != nil || len(f.Instrs) == len(rf.Instrs) {
+		t.Fatalf("the original function was changed: %v", err)
+	}
+
+	res := analyze(t, nil, f)
+	if fl := flowAt(res, 3); fl == nil || !slices.Contains(fl.Transforms, "masked") {
+		t.Errorf("isMasked: %+v", fl)
+	}
+	if fl := flowAt(res, 5); fl == nil || !slices.Contains(fl.Transforms, "pii-checked") {
+		t.Errorf("!containsPii: %+v", fl)
+	}
+	if fl := flowAt(res, 7); fl == nil || fl.DataType != "email" || !strings.Contains(fl.SourceDesc, "isValidEmail") {
+		t.Errorf("isValidEmail: %+v", fl)
+	}
+	if fl := flowAt(res, 8); fl != nil {
+		t.Errorf("after the if, q is not known to be an email: %+v", fl)
+	}
+
+	for name, want := range map[string]string{"wasAnonymised": "anonymized", "is_redacted": "redacted", "hasPii": "pii-checked", "isEmpty": "", "isValid": "", "validatePhoneNumber": "phone"} {
+		ck, _, ok := a.checkKind(name, pos(1))
+		got := ck.xf + strings.TrimPrefix(ck.dt, "pii.")
+		if ck.dt != "" {
+			got = ck.dt
+		}
+		if (want == "") == ok || (ok && !strings.Contains(got, want)) {
+			t.Errorf("checkKind(%s) = %+v %v, want %q", name, ck, ok, want)
+		}
+	}
+}
+
+// Points-to: a mutation through one variable is seen through every
+// variable that may refer to the same object, and only there; a field
+// store stays in its field.
+func TestPointsTo(t *testing.T) {
+	f := newFunc("p.f")
+	email := f.AddParam("email", "String", pos(1))
+	c := f.AddParam("c", "Boolean", pos(1))
+	alloc := func(line int) ir.VarID {
+		v := f.Temp(pos(line))
+		f.Emit(ir.Instr{Op: ir.OpNew, Dst: v, Call: &ir.Call{Callee: "p.Box", Name: "Box"}, Pos: pos(line)})
+		return v
+	}
+	load := func(obj ir.VarID, field string, line int) ir.VarID {
+		v := f.Temp(pos(line))
+		f.Emit(ir.Instr{Op: ir.OpLoad, Dst: v, Args: []ir.VarID{obj}, Field: field, Pos: pos(line)})
+		return v
+	}
+	a, b, other := alloc(2), alloc(2), alloc(2)
+	x := f.Temp(pos(3))
+	f.Emit(ir.Instr{Op: ir.OpAssign, Dst: x, Args: []ir.VarID{a}, Pos: pos(3)})
+	f.Emit(ir.Instr{Op: ir.OpStore, Dst: ir.NoVar, Args: []ir.VarID{x, email}, Field: "f", Pos: pos(4)})
+	logTo(f, load(a, "f", 5), 5)     // through the alias: reported
+	logTo(f, load(b, "f", 6), 6)     // another object: not reported
+	logTo(f, load(a, "g", 7), 7)     // another field: not reported
+	logTo(f, load(other, "f", 8), 8) // not reported
+	// y = c ? b : other; y.f = email; log(b.f) at 12
+	then := f.NewBlock(0)
+	join := f.NewBlock(0, then)
+	f.Branch(0, c, then, join)
+	y := f.Temp(pos(10))
+	f.Emit(ir.Instr{Op: ir.OpPhi, Dst: y, Args: []ir.VarID{b, other}, From: []int32{0, then}, Pos: pos(10)})
+	f.Emit(ir.Instr{Op: ir.OpStore, Dst: ir.NoVar, Args: []ir.VarID{y, email}, Field: "h", Pos: pos(11)})
+	logTo(f, load(b, "h", 12), 12)
+
+	res := analyze(t, nil, f)
+	if flowAt(res, 5) == nil || flowAt(res, 12) == nil {
+		t.Errorf("alias or phi alias missed: %+v", res.Flows)
+	}
+	for _, line := range []int{6, 7, 8} {
+		if fl := flowAt(res, line); fl != nil {
+			t.Errorf("line %d: %+v", line, fl)
+		}
+	}
+	pt := newPointsTo(f, nil, nil, newOrder(f))
+	if !slices.Contains(pt.mutated(x), a) || slices.Contains(pt.mutated(a), b) || !slices.Contains(pt.mutated(y), other) {
+		t.Errorf("aliases: x %v, a %v, y %v", pt.mutated(x), pt.mutated(a), pt.mutated(y))
+	}
+	if got := (*pointsTo)(nil).mutated(a); len(got) != 1 {
+		t.Errorf("nil points-to: %v", got)
+	}
+}
+
+// A store into the same field of the same single object overwrites what
+// was stored before (a strong update); summaries see only what is left
+// when the function returns.
+func TestStrongUpdates(t *testing.T) {
+	// fun f(u, email) { u.name = email; u.name = "x" }
+	f := newFunc("p.f")
+	u := f.AddParam("u", "", pos(1))
+	email := f.AddParam("email", "String", pos(1))
+	x := f.ConstVar("x", pos(3))
+	f.Emit(ir.Instr{Op: ir.OpStore, Dst: ir.NoVar, Args: []ir.VarID{u, email}, Field: "name", Pos: pos(2)})
+	f.Emit(ir.Instr{Op: ir.OpStore, Dst: ir.NoVar, Args: []ir.VarID{u, x}, Field: "name", Pos: pos(3)})
+	f.Return(pos(3))
+
+	// fun g(email, c) {
+	//   val a = Box(); a.f = email; a.f = "x"; log(a.f)          // 12: overwritten
+	//   val b = Box(); b.f = email; if (c) b.f = "x"; log(b.f)    // 16: not on every path
+	// }
+	g := newFunc("p.g")
+	ge := g.AddParam("email", "String", pos(10))
+	c := g.AddParam("c", "Boolean", pos(10))
+	gx := g.ConstVar("x", pos(10))
+	box := func(line int) ir.VarID {
+		v := g.Temp(pos(line))
+		g.Emit(ir.Instr{Op: ir.OpNew, Dst: v, Call: &ir.Call{Callee: "p.Box", Name: "Box"}, Pos: pos(line)})
+		return v
+	}
+	read := func(obj ir.VarID, line int) {
+		v := g.Temp(pos(line))
+		g.Emit(ir.Instr{Op: ir.OpLoad, Dst: v, Args: []ir.VarID{obj}, Field: "f", Pos: pos(line)})
+		logTo(g, v, line)
+	}
+	store := func(obj, v ir.VarID, line int) {
+		g.Emit(ir.Instr{Op: ir.OpStore, Dst: ir.NoVar, Args: []ir.VarID{obj, v}, Field: "f", Pos: pos(line)})
+	}
+	a := box(11)
+	store(a, ge, 11)
+	store(a, gx, 11)
+	read(a, 12)
+	b := box(13)
+	store(b, ge, 13)
+	then := g.NewBlock(0)
+	store(b, gx, 14)
+	join := g.NewBlock(0, then)
+	g.Branch(0, c, then, join)
+	read(b, 16)
+
+	res := analyze(t, nil, f, g)
+	if s := res.Summaries["p.f"]; s != nil && len(s.ParamParam[0]) > 0 {
+		t.Errorf("an overwritten field is in the summary: %+v", s.ParamParam)
+	}
+	if fl := flowAt(res, 12); fl != nil {
+		t.Errorf("overwritten field reported: %+v", fl)
+	}
+	if fl := flowAt(res, 16); fl == nil {
+		t.Errorf("a field overwritten on one path only is lost: %+v", res.Flows)
+	}
+}
+
+// Text before a value names it; names and definitions refine what a value
+// is.
+func TestLabelsAndNames(t *testing.T) {
+	f := newFunc("p.f")
+	cc := f.AddParam("cctxt", "String", pos(1))
+	n := f.AddParam("n", "Int", pos(1))
+	pw := f.AddParam("pw", "String", pos(1))
+	// "Error with credit card: " + cctxt → a card number (line 2).
+	msg := f.Temp(pos(2))
+	f.Compute(msg, pos(2), "+", f.ConstVar("Error with credit card: ", pos(2)), cc)
+	logTo(f, msg, 2)
+	// "count: " + n → nothing (line 3).
+	cnt := f.Temp(pos(3))
+	f.Compute(cnt, pos(3), "+", f.ConstVar("count: ", pos(3)), n)
+	logTo(f, cnt, 3)
+	// Log.d(TAG, "user email=%s", cctxt): a format string (line 4).
+	f.Emit(ir.Instr{Op: ir.OpCall, Dst: f.Temp(pos(4)), Args: []ir.VarID{f.ConstVar("TAG", pos(4)), f.ConstVar("user email=%s", pos(4)), cc},
+		Call: &ir.Call{Callee: "android.util.Log.d", Name: "d"}, Pos: pos(4)})
+	// val password = encryptString(pw); prefs.putString("password", password)
+	// is encrypted, key or no key (line 5).
+	enc := f.Named("password", "String", pos(5))
+	f.Emit(ir.Instr{Op: ir.OpCall, Dst: enc, Args: []ir.VarID{pw}, Call: &ir.Call{Name: "encryptString"}, Pos: pos(5)})
+	editor := f.Named("editor", "android.content.SharedPreferences.Editor", pos(5))
+	f.Emit(ir.Instr{Op: ir.OpCall, Dst: f.Temp(pos(5)), Args: []ir.VarID{editor, f.ConstVar("password", pos(5)), enc},
+		Call: &ir.Call{Callee: "android.content.SharedPreferences.Editor.putString", Name: "putString", HasRecv: true}, Pos: pos(5)})
+	// val derivationStatus = derive(pw): a status, not the password (line 6).
+	st := f.Temp(pos(6))
+	f.Emit(ir.Instr{Op: ir.OpCall, Dst: st, Args: []ir.VarID{f.Named("password", "String", pos(6))}, Call: &ir.Call{Name: "derive"}, Pos: pos(6)})
+	status := f.Named("derivationStatus", "", pos(6))
+	f.Assign(status, pos(6), st)
+	logTo(f, status, 6)
+
+	res := analyze(t, nil, f)
+	if fl := flowAt(res, 2); fl == nil || fl.DataType != "credit_card" {
+		t.Errorf("labelled concatenation: %+v", fl)
+	}
+	if fl := flowAt(res, 3); fl != nil {
+		t.Errorf("count: %+v", fl)
+	}
+	if fl := flowAt(res, 4); fl == nil || fl.DataType != "email" {
+		t.Errorf("format string: %+v", fl)
+	}
+	for _, fl := range res.Flows {
+		if fl.Sink.Line == 5 && !slices.Contains(fl.Transforms, "encrypted") {
+			t.Errorf("an encrypted value stored under a password key: %+v", fl)
+		}
+	}
+	if fl := flowAt(res, 6); fl != nil {
+		t.Errorf("status: %+v", fl)
+	}
+	for name, want := range map[string]bool{"derivationStatus": true, "rowCount": true, "count": true, "discount": false, "status": true, "is_ok": true, "token": false} {
+		if dataFreeName(name) != want {
+			t.Errorf("dataFreeName(%s) = %v", name, !want)
+		}
+	}
+}
+
+// Dispatch stays within the caller's language.
+func TestDispatchStaysInLanguage(t *testing.T) {
+	h := newHierarchy([]*ir.Class{
+		{Name: "error", Lang: "go"},
+		{Name: "jsError", Lang: "typescript", Supers: []string{"error"}, Methods: map[string]string{"Error": "js.Error"}},
+		{Name: "myErr", Lang: "go", Supers: []string{"error"}, Methods: map[string]string{"Error": "p.myErr.Error"}},
+	})
+	c := &ir.Call{Name: "Error", HasRecv: true, RecvType: "error"}
+	if got := h.targets(c, "go"); len(got) != 1 || got[0] != "p.myErr.Error" {
+		t.Errorf("go targets: %v", got)
+	}
+	if got := h.targets(c, ""); len(got) != 2 {
+		t.Errorf("any language: %v", got)
 	}
 }

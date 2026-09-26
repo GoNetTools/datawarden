@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -106,6 +107,27 @@ func (s *fakeScanner) Run(_ context.Context, req scan.Request) (*scan.Result, er
 		res.Flows = s.flows()
 	}
 	return res, nil
+}
+
+// Lower returns one valid function and, with a "bad" path, one that
+// breaks SSA (two definitions of a variable).
+func (s *fakeScanner) Lower(_ context.Context, req scan.Request) (*ir.Module, error) {
+	s.reqs = append(s.reqs, req)
+	ok := &ir.Func{ID: "com.acme.Repo.save", Lang: "kotlin", File: "Repo.kt", Pos: ir.Pos{File: "Repo.kt", Line: 3}}
+	ok.NewBlock()
+	email := ok.AddParam("email", "String", ir.Pos{File: "Repo.kt", Line: 3})
+	ok.Emit(ir.Instr{Op: ir.OpCall, Dst: ok.Temp(ir.Pos{}), Args: []ir.VarID{email}, Call: &ir.Call{Callee: "Log.d", Name: "d"}})
+	m := &ir.Module{Funcs: []*ir.Func{ok}, Classes: []*ir.Class{{Name: "com.acme.Repo", Methods: map[string]string{"save": "com.acme.Repo.save"}}}, Warnings: []string{"kotlin: one file skipped"}}
+	if slices.Contains(req.Paths, "bad") {
+		bad := &ir.Func{ID: "com.acme.Bad.twice", Lang: "kotlin", File: "Bad.kt"}
+		bad.NewBlock()
+		v := bad.Temp(ir.Pos{})
+		c := bad.ConstVar("x", ir.Pos{})
+		bad.Assign(v, ir.Pos{}, c)
+		bad.Assign(v, ir.Pos{}, c)
+		m.Funcs = append(m.Funcs, bad)
+	}
+	return m, nil
 }
 
 type fakeCommenter struct {
@@ -221,6 +243,42 @@ func TestExitCodesFollowBaseline(t *testing.T) {
 		t.Errorf("--no-fail: exit %d\n%s", code, h.out)
 	}
 }
+
+func TestIRPrintsLoweredFunctions(t *testing.T) {
+	h := newHarness(map[string]string{"bad/x.kt": "", "Repo.kt": ""})
+	if code := h.run("ir", "--classes"); code != ExitClean {
+		t.Fatalf("ir: exit %d %s", code, h.errb)
+	}
+	for _, want := range []string{"# IR version 2 · 1 functions", "# Repo.kt:3", "func com.acme.Repo.save(v0:email)", `call Log.d(v0:email)`, "class com.acme.Repo", "save -> com.acme.Repo.save"} {
+		if !strings.Contains(h.out.String(), want) {
+			t.Errorf("text output lacks %q:\n%s", want, h.out)
+		}
+	}
+	if !strings.Contains(h.errb.String(), "warning: kotlin: one file skipped") {
+		t.Errorf("warnings: %s", h.errb)
+	}
+	if code := h.run("ir", "--format", "json", "--func", "save$"); code != ExitClean || !strings.Contains(h.out.String(), `"id": "com.acme.Repo.save"`) || strings.Contains(h.out.String(), `"classes"`) {
+		t.Errorf("json: exit %d\n%s", code, h.out)
+	}
+	if code := h.run("ir", "bad", "--verify"); code != ExitViolation || !strings.Contains(h.out.String(), "invalid: ") {
+		t.Errorf("--verify: exit %d\n%s", code, h.out)
+	}
+	if code := h.run("ir", "--func", "save$", "--verify"); code != ExitClean {
+		t.Errorf("valid IR: exit %d\n%s", code, h.out)
+	}
+	if code := h.run("ir", "--format", "xml"); code != ExitError {
+		t.Errorf("bad format: exit %d", code)
+	}
+	if code := h.run("ir", "--func", "("); code != ExitError {
+		t.Errorf("bad regexp: exit %d", code)
+	}
+	h.app.Scanner = runOnly{h.scanner}
+	if code := h.run("ir"); code != ExitError {
+		t.Errorf("scanner without Lower: exit %d", code)
+	}
+}
+
+type runOnly struct{ Scanner }
 
 func TestReportWriteFailureExits2(t *testing.T) {
 	h := newHarness(nil)

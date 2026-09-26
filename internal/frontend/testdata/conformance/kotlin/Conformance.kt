@@ -354,3 +354,66 @@ fun closureReturn(email: String) {
     val printer = makePrinter()
     printer(email)
 }
+
+// scenario: consent-helper
+fun mayContact(consents: Consents): Boolean = consents.hasConsent()
+
+fun consentHelper(email: String, consents: Consents) {
+    if (mayContact(consents)) {
+        // ruleid: log.jvm.stdout
+        println(email)
+    }
+}
+
+// scenario: consent-caller
+fun consentedSend(email: String) {
+    // Only ever called after a consent check: reported with it.
+    // ruleid: log.jvm.stdout
+    println(email)
+}
+
+fun consentCaller(email: String, consents: Consents) {
+    if (consents.hasConsent()) consentedSend(email)
+}
+
+// scenario: validation-check
+fun isValidEmail(s: String): Boolean = s.contains("@")
+
+fun validationCheck(input: String) {
+    if (isValidEmail(input)) {
+        // ruleid: log.jvm.stdout
+        println(input)
+    }
+}
+
+// scenario: sanitizer-check
+fun isMasked(s: String): Boolean = s.startsWith("***")
+
+fun sanitizerCheck(email: String) {
+    if (isMasked(email)) {
+        // ok: log.jvm.stdout
+        println(email)
+    }
+}
+
+// scenario: alias
+class Card {
+    var holder = ""
+}
+
+fun aliasStore(email: String) {
+    val a = Card()
+    val b = a
+    b.holder = email
+    // ruleid: log.jvm.stdout
+    println(a.holder)
+}
+
+// scenario: overwritten-field
+fun overwrittenField(email: String) {
+    val c = Card()
+    c.holder = email
+    c.holder = "anonymous"
+    // ok: log.jvm.stdout
+    println(c.holder)
+}

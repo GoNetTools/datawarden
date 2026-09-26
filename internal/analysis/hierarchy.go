@@ -82,7 +82,10 @@ func (h *hierarchy) class(name string) *ir.Class {
 // targets lists the functions a call may run: its static target, and for
 // a call on a receiver of a known type the overrides and implementations
 // of the method in the receiver type's subtypes.
-func (h *hierarchy) targets(c *ir.Call) []string {
+//
+// Only classes of the caller's language (lang) are considered: a Go
+// err.Error() is not a call of a JavaScript class's Error method.
+func (h *hierarchy) targets(c *ir.Call, lang string) []string {
 	var out []string
 	if c.Target != "" {
 		out = append(out, c.Target)
@@ -104,6 +107,9 @@ func (h *hierarchy) targets(c *ir.Call) []string {
 			continue
 		}
 		seen[k] = true
+		if k.Lang != "" && lang != "" && k.Lang != lang {
+			continue
+		}
 		if id, ok := k.Methods[c.Name]; ok && !slices.Contains(out, id) {
 			out = append(out, id)
 		}

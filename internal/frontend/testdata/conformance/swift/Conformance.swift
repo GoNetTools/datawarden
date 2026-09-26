@@ -388,3 +388,74 @@ func closureReturn(email: String) {
     let printer = makePrinter()
     printer(email)
 }
+
+// scenario: consent-helper
+func mayContact(_ consents: Consents) -> Bool {
+    return consents.hasConsent()
+}
+
+func consentHelper(email: String, consents: Consents) {
+    if mayContact(consents) {
+        // ruleid: log.swift.print
+        print(email)
+    }
+}
+
+// scenario: consent-caller
+func consentedSend(email: String) {
+    // Only ever called after a consent check: reported with it.
+    // ruleid: log.swift.print
+    print(email)
+}
+
+func consentCaller(email: String, consents: Consents) {
+    if consents.hasConsent() {
+        consentedSend(email: email)
+    }
+}
+
+// scenario: validation-check
+func isValidEmail(_ s: String) -> Bool {
+    return s.contains("@")
+}
+
+func validationCheck(input: String) {
+    if isValidEmail(input) {
+        // ruleid: log.swift.print
+        print(input)
+    }
+}
+
+// scenario: sanitizer-check
+func isMasked(_ s: String) -> Bool {
+    return s.hasPrefix("***")
+}
+
+func sanitizerCheck(email: String) {
+    if isMasked(email) {
+        // ok: log.swift.print
+        print(email)
+    }
+}
+
+// scenario: alias
+class Card {
+    var holder = ""
+}
+
+func aliasStore(email: String) {
+    let a = Card()
+    let b = a
+    b.holder = email
+    // ruleid: log.swift.print
+    print(a.holder)
+}
+
+// scenario: overwritten-field
+func overwrittenField(email: String) {
+    let c = Card()
+    c.holder = email
+    c.holder = "anonymous"
+    // ok: log.swift.print
+    print(c.holder)
+}

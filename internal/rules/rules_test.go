@@ -90,7 +90,7 @@ func TestRuleFilesAreStrict(t *testing.T) {
 		"misspelt dest key":   "- id: sdk.x.y\n  lang: go\n  call: a.b\n  dest: {kind: log, hots: x}\n",
 		"wrapped misspelt":    "rules:\n  - id: sdk.x.y\n    lang: go\n    call: a.b\n    dest: {kind: log}\n    data-type: email\n",
 		"unknown language":    "- id: sdk.x.y\n  lang: kotln\n  call: a.b\n  dest: {kind: log}\n",
-		"negative arg":        "- id: sdk.x.y\n  lang: go\n  call: a.b\n  arg: -1\n  dest: {kind: log}\n",
+		"negative arg":        "- id: sdk.x.y\n  lang: go\n  call: a.b\n  arg: -2\n  dest: {kind: log}\n",
 		"negative host_arg":   "- id: sdk.x.y\n  lang: go\n  call: a.b\n  host_arg: -1\n  dest: {kind: log}\n",
 		"duplicate in file":   "- id: sdk.x.y\n  lang: go\n  call: a.b\n  dest: {kind: log}\n- id: sdk.x.y\n  lang: go\n  call: a.c\n  dest: {kind: log}\n",
 		"source without type": "- id: src.x\n  kind: source\n  lang: go\n  call: a.b\n",

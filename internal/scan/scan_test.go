@@ -185,7 +185,7 @@ func TestFullScanRoutesFilesToFrontends(t *testing.T) {
 	if fx.frontends.opts.FS == nil || fx.frontends.opts.Root != "/repo" || fx.frontends.opts.KnownFunc == nil {
 		t.Errorf("frontend options not wired: %+v", fx.frontends.opts)
 	}
-	if fx.analyzer.input.Rules == nil || fx.analyzer.input.Schema == nil || fx.analyzer.input.Lookup == nil {
+	if fx.analyzer.input.Rules == nil || fx.analyzer.input.Schema == nil || fx.analyzer.input.Lookup == nil || fx.analyzer.input.Callers != nil {
 		t.Errorf("analysis input not wired: %+v", fx.analyzer.input)
 	}
 	if len(fx.schemas.built) != 1 || fx.schemas.built[0].Name != "proto:api/user.proto" {
@@ -223,6 +223,9 @@ func TestDiffModeAddsCallersFromCachedCallGraph(t *testing.T) {
 	}
 	if !fx.store.Has("go:other.go") {
 		t.Error("partial update dropped an untouched function")
+	}
+	if fx.analyzer.input.Callers == nil {
+		t.Error("a partial run does not give the analysis the cached callers")
 	}
 }
 
@@ -270,5 +273,33 @@ func TestMissingDependenciesAreReported(t *testing.T) {
 	_, err := (&Scanner{}).Run(context.Background(), Request{})
 	if err == nil || !strings.Contains(err.Error(), "Scanner.Analyzer") || !strings.Contains(err.Error(), "Request.Repo.FS") {
 		t.Errorf("err = %v", err)
+	}
+}
+
+func TestLowerRunsFrontendsWithoutAnalysis(t *testing.T) {
+	fx := newFixture(t, map[string]string{"go.mod": "module x", "a.go": "package a", "app/src/B.kt": "class B"}, fakeVCS{})
+	m, err := fx.scanner.Lower(context.Background(), Request{Repo: fx.req.Repo, Config: fx.req.Config, Paths: []string{"app"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Funcs) != 1 || fx.frontends.lowered["go"] != nil || fx.analyzer.input.Rules != nil {
+		t.Errorf("lowered %v, funcs %d, analyzer input %+v", fx.frontends.lowered, len(m.Funcs), fx.analyzer.input)
+	}
+	if fx.frontends.opts.KnownFunc != nil {
+		t.Error("no cache, but KnownFunc set")
+	}
+	if _, err := (&Scanner{}).Lower(context.Background(), Request{}); err == nil {
+		t.Error("missing dependencies accepted")
+	}
+}
+
+func TestContactEmailsInCommunityDocsAreNotLiterals(t *testing.T) {
+	fx := newFixture(t, map[string]string{"go.mod": "module x", "CODE_OF_CONDUCT.md": "PII", "docs/SECURITY.md": "PII", "notes.txt": "PII"}, fakeVCS{})
+	res, err := fx.scanner.Run(context.Background(), fx.req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Literals) != 1 || res.Literals[0].Pos.File != "notes.txt" {
+		t.Errorf("literals: %+v", res.Literals)
 	}
 }
