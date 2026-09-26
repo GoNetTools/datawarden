@@ -195,13 +195,14 @@ Interfaces are declared by the consumer. The table shows where each one lives an
 
 ### The IR (`internal/ir`)
 
-Every frontend produces the same small language. It is deliberately simple: enough to follow values, not enough to run code.
+Every frontend produces the same small language. It is deliberately simple: enough to follow values, not enough to run code. [IR.md](IR.md) is its specification, and `ir.Verify` checks every frontend's output against it in the tests.
 
 ```mermaid
 classDiagram
     class Module {
         Funcs []*Func
         Types []*TypeDecl
+        Classes []*Class
         Warnings []string
     }
     class Func {
@@ -209,26 +210,40 @@ classDiagram
         Lang, File, Pos
         Vars []Var
         Params []VarID
+        Captures, Parent
         Instrs []Instr
+        Blocks []Block
     }
     class Var {
         Name "phoneNumber"
         Type "com.acme.User"
         Const *string
+        Cell bool
     }
     class Instr {
-        Op assign|load|store|call|return
+        Op assign|compute|phi|load|store|call|new|closure|return|throw|catch|yield
         Dst VarID
         Args []VarID
-        Field, Owner
+        Field, Owner, Operator, Func
+        From []BlockID
         Call *Call
-        Pos
+        Block, Pos
+    }
+    class Block {
+        Succs, Exc []BlockID
+        Term jump|if|return|throw
+        Cond VarID
     }
     class Call {
         Callee "io.sentry.Sentry.setUser"
         Name, RecvType, RecvText
+        HasRecv, Indirect
         Target "analysed function ID"
-        Callbacks []VarID
+        ArgNames []string
+    }
+    class Class {
+        Name, Supers []string
+        Methods name → Func ID
     }
     class TypeDecl {
         Name, Kind "struct|data|entity|class"
@@ -236,14 +251,18 @@ classDiagram
     }
     Module --> Func
     Module --> TypeDecl
+    Module --> Class
     Func --> Var
     Func --> Instr
+    Func --> Block
     Instr --> Call
 ```
 
-- **Five operations.** `assign` (copies, concatenation, conversions, container construction), `load` and `store` (fields and constant map keys), `call`, `return`. Anything else a language has lowers to these. An `assign` marked `Snapshot` (concatenation, interpolation, arithmetic, Go conversions) builds a new value from its arguments' state at that point; an unmarked one copies or merges references, so it sees the arguments' later mutations.
-- **A small code property graph.** The IR has three layers: the instructions (with source positions back into the syntax), data flow through SSA variables, and control flow through basic blocks. `Func.Blocks` lists the blocks and their successors, and every instruction names its block; within a block instructions run in slice order. Go gets its blocks from `x/tools/go/ssa`; the tree-sitter builder starts a block for every arm of a branch, loop header and exit, handler and join, a `return` ends its path, `break` and `continue` jump to their loop or switch (labels included; C-style `switch` cases fall through), and lambda bodies go in *floating* blocks that are ordered neither before nor after anything. Conditions that are constant in the source (literals, negations, locals and declared constants such as `static final boolean DEBUG = false`) are folded, so the arm that cannot run is not lowered; Go does the same for SSA branches on constants. A function without blocks is analysed as before, with every mutation visible everywhere.
-- **One variable per assignment (SSA form).** Instructions are unordered, so order is encoded in the variables instead. Assigning to a local creates a new variable with the same name; later reads use it, earlier reads keep the old one. Where paths join (after `if`/`else`, `switch`, `when`, `match`, `try`/`catch`) a name bound to different versions gets a merged version assigned from all of them, leaving out paths that returned; a loop gives each variable its body changes a loop-header version, fed from before the loop and from the end of the body. Go gets this from `x/tools/go/ssa`; the tree-sitter frontends use the shared helpers in `internal/frontend/treesitter/common.go` (`redefine`, `branches`, `loop`, `tryCatch`). Inside lambdas an assignment still updates the variable in place, since the lambda may run at any time.
+- **Three-address instructions over SSA variables.** Each instruction reads variables and defines at most one. `assign` copies or merges references (the result aliases its arguments and sees their later mutations); `compute` builds a new value from the arguments' current state (concatenation, interpolation, arithmetic, conversions), and a logical `compute` (`!`, `&&`, a comparison) yields a boolean that carries no data. `phi` merges the versions arriving from each predecessor block. `load` and `store` read and write fields and constant map keys; `call`, `new` (the constructor is its `Target`), `closure`, `return`, `throw`, `catch` and `yield` do what their names say. Anything else a language has lowers to these.
+- **One variable per assignment (SSA form).** Assigning to a local creates a new variable with the same name; later reads use it, earlier reads keep the old one. Where paths join (after `if`/`else`, `switch`, `when`, `match`, `try`/`catch`, a loop header) a name bound to different versions gets a phi. A definition dominates its uses. The only exception is a *cell*, a location written by weak updates: an array written by index, a Go variable written through a pointer, a captured variable a closure assigns. Go gets SSA form from `x/tools/go/ssa`; the tree-sitter frontends use the shared helpers in `internal/frontend/treesitter/common.go` (`redefine`, `join`, `branches`, `loopWith`, `switchCases`, `tryCatch`, `valued`).
+- **A control-flow graph of basic blocks.** Every instruction names its block; the instructions of a block are contiguous and run in order. A block ends with a terminator: a jump, a two-way branch on a condition variable, a return or a throw. Go gets its blocks from `x/tools/go/ssa`; the tree-sitter builder starts a block for every arm of a branch, loop header, body and exit, handler and join, a `return` ends its path, `break` and `continue` jump to their loop or switch (labels included; C-style `switch` cases fall through), and an `if` ends with a branch on its condition (a negation swaps the successors' meaning through its `!` operator). Inside a `try`, every call and `throw` ends its block with an *exceptional edge* to the handlers, which start with a `catch` and a phi of the state at each of those points. Conditions that are constant in the source (literals, negations, locals and declared constants such as `static final boolean DEBUG = false`) are folded, so the arm that cannot run is not lowered; Go does the same for SSA branches on constants.
+- **Closures are functions.** A lambda, closure, local function or method of an anonymous class is lowered as its own function (`parent$1`) whose last `Captures` parameters are the enclosing variables it uses; `closure` creates it and binds them. Calling a closure held in a variable is an `Indirect` call.
+- **A class table.** `Module.Classes` lists classes, interfaces, protocols and Go named types with their supertypes and methods. The engine resolves dynamically dispatched calls with it (class hierarchy analysis); for Go, the supertypes are the interfaces a type implements.
 - **Callee names are qualified** the way rules are written: `importpath.Type.Method` for Go, `package.Class.method` for Kotlin/Java, `<module>.<export>` for TypeScript, `<module>.<name>` for Python, the type as written for Swift. `Target` is set when the callee is code datawarden analyses, so its summary can be applied.
 - **Positions are slash-separated and root-relative** on every platform.
 
@@ -290,8 +309,8 @@ A data type that is not in the taxonomy (a custom type named by a repository's s
 
 1. **Seeding.** A variable becomes a source when its name classifies as personal data (`phoneNumber`, not `phoneFormatter`) and it is not a new version of a same-named value (`email = sha256(email)` carries whatever its definition carries, the hash included), when its type has personal-data fields (a `User` value), when it is loaded from a field the schema marks, when it is stored under a key that names it (`{"email": v}`), when it comes from a getter (`getEmail()`), or when a source rule matches the call that produced it.
 2. **Propagation.** Facts flow through assignments, field stores and loads, calls and returns. Values are ordered by their SSA variables; mutations of objects by the control-flow graph: a fact put on an object by a field store, a mutating call (`add`, `append`, `put`, ...) or a callee that writes into an argument records the instruction, and only instructions that instruction can run before see it (`analysis/order.go`). Copies keep the mark, so `view = items; items.add(email); log(view)` is still reported. Unknown library calls pass their arguments' facts to the result, with a small confidence decay; transform rules and names like `maskEmail` record a transform instead. Network sinks are the exception: their result is the remote's response, not the request, so a login call's reply does not carry the password.
-3. **Summaries.** Each function gets a summary: which parameter reaches which sink, the return value, an exception it throws, or another parameter. Entries can name a field (`Field`: `this.addr` reaches the log; `DstField`: a constructor stores the value in `this.addr`, a factory returns it in `result.addr`), so objects keep their structure across calls. Callers apply the summaries of their callees, arranging keyword arguments by name (`Call.ArgNames`), running constructors on the new object (`Call.Ctor`), every override or implementation of a dynamically dispatched call (`Call.Targets`, from class hierarchy analysis), and sending what a callee throws to the handler that catches it (`Call.Catch`). Strongly connected components (recursion) iterate to a fixed point. This is how a value is followed through helpers several calls deep.
-4. **Flows.** When a fact reaches a sink argument, a flow is emitted with confidence = source × propagation × rule match.
+3. **Summaries.** Each function gets a summary: which parameter reaches which sink, the return value, an exception it throws, or another parameter. Entries can name a field (`Field`: `this.addr` reaches the log; `DstField`: a constructor stores the value in `this.addr`, a factory returns it in `result.addr`), so objects keep their structure across calls. Field entries are access paths up to three fields deep (`profile.note`): a store into an object read from another one's field (`t = user.profile; t.note = email`) is also a store into the longer path of the outer object. Callers apply the summaries of their callees, arranging keyword arguments by name (`Call.ArgNames`), running constructors on the new object (`new`), every override or implementation of a dynamically dispatched call (`analysis/hierarchy.go`, over the class table), and sending what a callee throws to the handler its block's exceptional edge leads to, or out of the caller. A closure's summary is applied where it runs: at an indirect call with the call's arguments, or, for a closure passed as an argument, at that call with the call's other arguments and with its captures as they are at any time (the callee may keep it and run it later). A flow inside a closure is reported in the named function that contains it. Strongly connected components (recursion) iterate to a fixed point. This is how a value is followed through helpers several calls deep.
+4. **Flows.** When a fact reaches a sink argument, a flow is emitted with confidence = source × propagation × rule match. If the sink runs only after a consent check passed (its block, or the call leading to it, is dominated by the "consent given" successor of a branch on `hasConsent()`, `user.optedIn`, `analyticsEnabled` and the like), the flow lists that check in `Guards`; reports show it, and an unguarded path to the same sink wins over a guarded one.
 
 Everything downstream is policy, not analysis: `policy` turns flows into violations (destination kinds that fail the build, minimum confidence, safe transforms, allow-list entries, each overridable per class).
 
@@ -331,7 +350,7 @@ flowchart LR
 ```
 
 - **Unit tests** exercise each component with fakes of its interfaces: the CLI with an in-memory workspace and a fake scanner, the scanner with fake frontends and analyzer, the engine with a fake rule matcher.
-- **Contract tests** run real code through the full scan. Every built-in rule has an annotated example (`internal/rules/testdata/examples/`). Every frontend implements the same 29 conformance scenarios (`internal/frontend/testdata/conformance/`). Known gaps are marked `todoruleid:`, and the test fails once one is fixed, so the list stays accurate.
+- **Contract tests** run real code through the full scan. Every built-in rule has an annotated example (`internal/rules/testdata/examples/`). Every frontend implements the same 32 conformance scenarios (`internal/frontend/testdata/conformance/`), and the IR it produces for them, the rule examples and the test repositories passes `ir.Verify` (`TestLoweredIRVerifies`). Known gaps are marked `todoruleid:`, and the test fails once one is fixed, so the list stays accurate.
 - **End-to-end tests** scan the fixtures in `testdata/` with the production wiring.
 - **Accuracy** is measured on the labelled corpus (`testdata/eval.yaml`, including the vulnerable-by-design `testdata/vulnshop`). CI fails when a case drops below its minimum precision or recall.
 - **Structure tests** keep the architecture from eroding: interface-only communication, every language wired, rule conventions, a consistent language table.

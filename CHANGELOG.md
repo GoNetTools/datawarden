@@ -27,6 +27,11 @@ All notable changes to datawarden are documented here. The format follows [Keep 
 
 ### Changed
 
+- The IR is specified in `docs/IR.md` (version 2) and checked: `ir.Verify` validates SSA form, phis, terminators and exceptional edges, and every frontend's output passes it in the tests. It now has phis tied to predecessor blocks, typed operations for what were flags (`compute`, `new`, `throw`, `catch`, `closure`, `yield`), branch conditions and exceptional edges in the control-flow graph, cells for weak updates, closures as functions of their own with capture parameters, and a class table (`Module.Classes`) from which the engine resolves overrides for every language. `ir.Format` prints a function. What this changes in results:
+  - A sink that runs only after a consent check (`hasConsent()`, `optedIn`, `analyticsEnabled`, ...) is reported with the check in `guards`, and reports say "guarded by" / "only after".
+  - Access paths are followed three fields deep (`user.profile.note = email`), within a function and through summaries.
+  - A closure's summary is applied where it runs, with its captured variables; a closure assigning a captured variable updates it (Go included), and a handler in a `try` sees the state at each call or `throw` that can raise.
+  - Flows inside a Go function literal are now reported in the enclosing function (`service.Register`, was `service.Register$1`), as they already were in the other languages, which changes their baseline fingerprints. The cache format changes.
 - Frontends and the engine follow much more of each language:
   - Objects across methods and constructors: summaries track fields (`this.addr`), constructors run on the new object, factories return objects with their fields, and keyword/named arguments reach the parameter of their name.
   - Calls through an interface, protocol, abstract class or overridable method reach every override and implementation (class hierarchy analysis), in all six languages. Go now lowers the methods of every declared type, not only of types the program instantiates.
