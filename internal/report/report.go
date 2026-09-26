@@ -179,6 +179,9 @@ func (r *Report) message(f *finding.Flow) string {
 	if len(f.Transforms) > 0 {
 		msg += fmt.Sprintf(" (after %s)", strings.Join(f.Transforms, ", "))
 	}
+	if len(f.Guards) > 0 {
+		msg += fmt.Sprintf(" (only after %s)", strings.Join(f.Guards, "; "))
+	}
 	return msg
 }
 

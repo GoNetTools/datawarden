@@ -204,7 +204,7 @@ func (s *Scanner) Run(ctx context.Context, req Request) (*Result, error) {
 
 	// Taint analysis.
 	ar, err := s.Analyzer.Analyze(ctx, prog.Funcs, analysis.Input{
-		Rules: req.Rules, Schema: res.Schema, Lookup: req.Cache.Lookup, FirstPartyDomains: cfg.FirstPartyDomains,
+		Rules: req.Rules, Schema: res.Schema, Lookup: req.Cache.Lookup, FirstPartyDomains: cfg.FirstPartyDomains, Classes: prog.Classes,
 	})
 	if err != nil {
 		return nil, err

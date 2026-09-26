@@ -270,3 +270,44 @@ def lambda_variable(email: str):
     # ruleid: log.py.print
     show = lambda v: print(v)
     show(email)
+
+
+# scenario: consent-guard
+def consent_guard(email: str, consents):
+    if not consents.has_consent():
+        return
+    # Reported with the consent check that guards it.
+    # ruleid: log.py.print
+    print(email)
+
+
+# scenario: nested-field
+class Note:
+    def __init__(self):
+        self.text = ""
+
+
+class Folder:
+    def __init__(self):
+        self.note = Note()
+
+
+def nested_field(email: str):
+    f = Folder()
+    f.note.text = email
+    # ruleid: log.py.print
+    print(f.note.text)
+
+
+# scenario: closure-assign
+def closure_assign(email: str, items: list):
+    found = ""
+
+    def remember(item):
+        nonlocal found
+        found = email
+
+    for item in items:
+        remember(item)
+    # ruleid: log.py.print
+    print(found)

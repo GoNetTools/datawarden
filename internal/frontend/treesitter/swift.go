@@ -55,6 +55,7 @@ func (fe *swFrontend) Lower(ctx context.Context, files []string) (*ir.Module, er
 	for _, f := range sp.files {
 		sp.lowerFile(f)
 	}
+	sp.mod.Classes = sp.classTable()
 	return sp.mod, nil
 }
 
@@ -639,6 +640,7 @@ func (sb *swBuilder) conditions(n *sitter.Node) {
 	var pending *sitter.Node // the name of an `if let` binding
 	var then, els *sitter.Node
 	var conds []*sitter.Node
+	var condVals []ir.VarID
 	bound := false
 	afterElse := false
 	for i := 0; i < int(n.ChildCount()); i++ {
@@ -656,6 +658,7 @@ func (sb *swBuilder) conditions(n *sitter.Node) {
 		case field == "condition":
 			conds = append(conds, c)
 			v := sb.expr(c)
+			condVals = append(condVals, v)
 			if pending != nil {
 				dst := sb.declare(sb.text(pending), sb.fn.Vars[v].Type, pending)
 				sb.assign(dst, c, v)
@@ -673,11 +676,14 @@ func (sb *swBuilder) conditions(n *sitter.Node) {
 		// The else branch must leave the scope; the code after the guard
 		// continues from the conditions only.
 		entry, from, dead := sb.snapshot(), sb.fn.CurBlock(), sb.terminated
-		sb.newBlock(from)
+		elseBlock := sb.newBlock(from)
 		sb.stmt(els)
 		sb.scope = entry
-		sb.newBlock(from)
+		cont := sb.newBlock(from)
 		sb.terminated = dead
+		if len(condVals) == 1 && !bound {
+			sb.branch(from, condVals[0], cont, elseBlock)
+		}
 		return
 	}
 	var elseArm func()
@@ -685,7 +691,7 @@ func (sb *swBuilder) conditions(n *sitter.Node) {
 		elseArm = func() { sb.stmt(els) }
 	}
 	if len(conds) == 1 && !bound {
-		sb.ifElse(n, conds[0], func() { sb.stmt(then) }, elseArm)
+		sb.ifElse(n, conds[0], condVals[0], func() { sb.stmt(then) }, elseArm)
 		return
 	}
 	arms := []func(){func() { sb.stmt(then) }}
@@ -745,7 +751,7 @@ func (sb *swBuilder) assignment(n *sitter.Node) ir.VarID {
 		if name == "_" {
 			return v
 		}
-		if old, ok := sb.scope[name]; ok {
+		if old, ok := sb.lookup(name); ok {
 			sb.assign(sb.redefine(name, old, "", target), n, v)
 			return v
 		}
@@ -774,7 +780,7 @@ func (sb *swBuilder) assignment(n *sitter.Node) ir.VarID {
 			sb.store(base, key, "", v, n)
 		} else if base != ir.NoVar {
 			sb.assign(base, n, v)
-			sb.noteAssign(base)
+			sb.cell(base)
 		}
 	}
 	return v
@@ -832,7 +838,7 @@ func (sb *swBuilder) expr(n *sitter.Node) ir.VarID {
 	switch n.Type() {
 	case "simple_identifier":
 		name := sb.text(n)
-		if _, local := sb.scope[name]; !local && isUpperStart(name) && !sb.hasField(name) {
+		if _, local := sb.lookup(name); !local && isUpperStart(name) && !sb.hasField(name) {
 			return sb.fn.Named(name, name, sb.pos(n))
 		}
 		return sb.ident(name, n)
@@ -907,14 +913,15 @@ func (sb *swBuilder) expr(n *sitter.Node) ir.VarID {
 		}
 		v := sb.expr(target)
 		if op != nil && sb.text(op) == "!" {
-			return sb.temp(n)
+			return sb.logic(n, v)
 		}
 		return v
 	case "comparison_expression", "equality_expression", "conjunction_expression", "disjunction_expression", "check_expression":
+		var vs []ir.VarID
 		for _, c := range named(n) {
-			sb.expr(c)
+			vs = append(vs, sb.expr(c))
 		}
-		return sb.temp(n)
+		return sb.logic(n, vs...)
 	case "ternary_expression":
 		sb.expr(n.ChildByFieldName("condition"))
 		a, b := sb.expr(n.ChildByFieldName("if_true")), sb.expr(n.ChildByFieldName("if_false"))
@@ -1051,7 +1058,7 @@ func (sb *swBuilder) staticPath(n *sitter.Node) string {
 	switch n.Type() {
 	case "simple_identifier":
 		name := sb.text(n)
-		if _, local := sb.scope[name]; local || !isUpperStart(name) || sb.hasField(name) {
+		if _, local := sb.lookup(name); local || !isUpperStart(name) || sb.hasField(name) {
 			return ""
 		}
 		return name
@@ -1069,7 +1076,7 @@ func (sb *swBuilder) typeOf(n *sitter.Node) string {
 	}
 	switch n.Type() {
 	case "simple_identifier":
-		if v, ok := sb.scope[sb.text(n)]; ok {
+		if v, ok := sb.lookup(sb.text(n)); ok {
 			return sb.fn.Vars[v].Type
 		}
 		if sb.cls != nil {
@@ -1088,7 +1095,7 @@ func (sb *swBuilder) typeOf(n *sitter.Node) string {
 			if c := sb.sp.class(sb.text(k[0])); c != nil {
 				return c.name
 			}
-			if _, local := sb.scope[sb.text(k[0])]; !local && isUpperStart(sb.text(k[0])) {
+			if _, local := sb.lookup(sb.text(k[0])); !local && isUpperStart(sb.text(k[0])) {
 				return sb.text(k[0]) // Data(...), URL(...)
 			}
 		}
@@ -1112,7 +1119,7 @@ func (sb *swBuilder) call(n *sitter.Node) ir.VarID {
 	switch fn.Type() {
 	case "simple_identifier":
 		name := sb.text(fn)
-		if v, local := sb.scope[name]; local {
+		if v, local := sb.lookup(name); local {
 			return sb.emitCall(n, &ir.Call{Name: name, HasRecv: true, RecvText: name}, append([]ir.VarID{v}, sb.args(suffix)...), "")
 		}
 		if sb.cls != nil {
@@ -1134,7 +1141,7 @@ func (sb *swBuilder) call(n *sitter.Node) ir.VarID {
 			if c := sb.sp.class(name); c != nil {
 				typ = c.name
 			}
-			return sb.emitCall(n, &ir.Call{Callee: typ, Name: shortName(typ), Construct: true}, sb.args(suffix), typ)
+			return sb.newObject(n, typ, sb.args(suffix), typ)
 		}
 		return sb.emitCall(n, &ir.Call{Callee: name, Name: name}, sb.args(suffix), "")
 	case "navigation_expression":

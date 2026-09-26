@@ -15,6 +15,7 @@ import (
 	"go/token"
 	"go/types"
 	"io/fs"
+	"maps"
 	"path"
 	"path/filepath"
 	"slices"
@@ -221,6 +222,7 @@ func (f *Frontend) lowerModule(ctx context.Context, modRel string, rels []string
 	for _, fn := range fns {
 		mod.Funcs = append(mod.Funcs, l.lowerFunc(fn))
 	}
+	mod.Classes = l.classes()
 	// Struct declarations of the loaded packages and of every named type
 	// the lowered code touched (dependencies included; their struct tags
 	// come from export data).
@@ -261,8 +263,11 @@ type lowerer struct {
 	lastPos      ir.Pos
 	seenTypes    map[string]*types.Named
 	emittedTypes map[string]bool
-	concrete     []types.Type        // named non-interface types of the module
-	impls        map[string][]string // interface method -> implementing function IDs
+	live         []bool // blocks of the current function that are lowered
+	// ifaces are the named interface types that calls dispatch on,
+	// dependencies' included; the class table records which of the
+	// module's types implement them.
+	ifaces map[string]*types.Named
 }
 
 func (l *lowerer) pos(p token.Pos) ir.Pos {
@@ -351,54 +356,68 @@ func typeStr(t types.Type) string {
 	return types.TypeString(t, nil)
 }
 
-// implementations lists the methods of the module's concrete types (T or
-// *T) that an interface method call may run (class hierarchy analysis).
-func (l *lowerer) implementations(c *ssa.CallCommon) []string {
-	iface, ok := c.Value.Type().Underlying().(*types.Interface)
-	if !ok || c.Method == nil {
-		return nil
+// classes builds the class table of the module: every named type with
+// its methods, and as supertypes the interfaces (of the module, or that
+// its code calls methods on) that the type or a pointer to it implements.
+// The analysis resolves interface method calls with it.
+func (l *lowerer) classes() []*ir.Class {
+	var named []*types.Named
+	ifaces := map[string]*types.Named{}
+	for k, v := range l.ifaces {
+		ifaces[k] = v
 	}
-	key := typeStr(c.Value.Type()) + "." + c.Method.Name()
-	if ids, ok := l.impls[key]; ok {
-		return ids
-	}
-	if l.impls == nil {
-		l.impls = map[string][]string{}
-		for _, pkg := range l.prog.AllPackages() {
-			if pkg.Pkg == nil || (pkg.Pkg.Path() != l.modPath && !strings.HasPrefix(pkg.Pkg.Path(), l.modPath+"/")) {
+	for _, pkg := range l.prog.AllPackages() {
+		if pkg.Pkg == nil || (pkg.Pkg.Path() != l.modPath && !strings.HasPrefix(pkg.Pkg.Path(), l.modPath+"/")) {
+			continue
+		}
+		for _, m := range pkg.Members {
+			t, ok := m.(*ssa.Type)
+			if !ok {
 				continue
 			}
-			for _, m := range pkg.Members {
-				if t, ok := m.(*ssa.Type); ok {
-					if _, isIface := t.Type().Underlying().(*types.Interface); !isIface {
-						l.concrete = append(l.concrete, t.Type())
-					}
+			n, ok := t.Type().(*types.Named)
+			if !ok || n.TypeParams().Len() > 0 {
+				continue
+			}
+			if _, isIface := n.Underlying().(*types.Interface); isIface {
+				ifaces[typeStr(n)] = n
+			} else {
+				named = append(named, n)
+			}
+		}
+	}
+	var out []*ir.Class
+	for _, k := range slices.Sorted(maps.Keys(ifaces)) {
+		out = append(out, &ir.Class{Name: k, Lang: lang.Go})
+	}
+	sort.Slice(named, func(i, j int) bool { return typeStr(named[i]) < typeStr(named[j]) })
+	for _, n := range named {
+		c := &ir.Class{Name: typeStr(n), Lang: lang.Go, Methods: map[string]string{}}
+		ptr := types.NewPointer(n)
+		// Methods declared on T, then on *T (whose method set also holds
+		// T's, as wrappers).
+		for _, recv := range []types.Type{n, ptr} {
+			ms := l.prog.MethodSets.MethodSet(recv)
+			for i := 0; i < ms.Len(); i++ {
+				name := ms.At(i).Obj().Name()
+				if _, done := c.Methods[name]; done {
+					continue
+				}
+				if fn := l.prog.MethodValue(ms.At(i)); fn != nil && fn.Synthetic == "" && l.internal(fn) {
+					c.Methods[name] = funcID(fn)
 				}
 			}
 		}
-	}
-	var ids []string
-	for _, t := range l.concrete {
-		for _, recv := range []types.Type{t, types.NewPointer(t)} {
-			if !types.Implements(recv, iface) {
-				continue
+		for _, k := range slices.Sorted(maps.Keys(ifaces)) {
+			if iface, ok := ifaces[k].Underlying().(*types.Interface); ok && (types.Implements(n, iface) || types.Implements(ptr, iface)) {
+				c.Supers = append(c.Supers, k)
 			}
-			sel := l.prog.MethodSets.MethodSet(recv).Lookup(c.Method.Pkg(), c.Method.Name())
-			if sel == nil {
-				continue
-			}
-			if fn := l.prog.MethodValue(sel); fn != nil && l.internal(fn) && !slices.Contains(ids, funcID(fn)) {
-				ids = append(ids, funcID(fn))
-			}
-			break
 		}
-		if len(ids) >= 16 {
-			break
+		if len(c.Methods) > 0 || len(c.Supers) > 0 {
+			out = append(out, c)
 		}
 	}
-	sort.Strings(ids)
-	l.impls[key] = ids
-	return ids
+	return out
 }
 
 func (l *lowerer) internal(fn *ssa.Function) bool {
@@ -495,6 +514,9 @@ func parseTag(tag string) map[string]string {
 
 func (l *lowerer) lowerFunc(fn *ssa.Function) *ir.Func {
 	F := &ir.Func{ID: funcID(fn), Name: fn.Name(), Lang: lang.Go, Pos: l.pos(fn.Pos())}
+	if p := fn.Parent(); p != nil {
+		F.Parent = funcID(p)
+	}
 	F.File = F.Pos.File
 	l.fn = F
 	l.vars = map[ssa.Value]ir.VarID{}
@@ -504,14 +526,16 @@ func (l *lowerer) lowerFunc(fn *ssa.Function) *ir.Func {
 		l.vars[p] = F.AddParam(p.Name(), typeStr(p.Type()), l.pos(p.Pos()))
 		l.noteTypeOf(p.Type())
 	}
+	// A closure's free variables are its capture parameters, which the
+	// MakeClosure creating it binds.
 	for _, fv := range fn.FreeVars {
-		l.vars[fv] = F.Named(fv.Name(), typeStr(fv.Type()), l.pos(fv.Pos()))
+		l.vars[fv] = F.AddCapture(fv.Name(), typeStr(fv.Type()), l.pos(fv.Pos()))
 	}
 	// The IR blocks are the SSA blocks, in the same order. A branch on a
 	// constant (if debug, with const debug = false) has one live
 	// successor; blocks reachable only through the other are not lowered.
 	for range fn.Blocks {
-		F.NewBlock(false)
+		F.NewBlock()
 	}
 	live := make([]bool, len(fn.Blocks))
 	var work []*ssa.BasicBlock
@@ -528,11 +552,18 @@ func (l *lowerer) lowerFunc(fn *ssa.Function) *ir.Func {
 			continue
 		}
 		live[b.Index] = true
-		for _, s := range liveSuccs(b) {
+		succs := liveSuccs(b)
+		for _, s := range succs {
 			F.Edge(int32(b.Index), int32(s.Index))
 			work = append(work, s)
 		}
+		if len(succs) == 2 {
+			if i, ok := b.Instrs[len(b.Instrs)-1].(*ssa.If); ok {
+				F.Branch(int32(b.Index), l.v(i.Cond), int32(succs[0].Index), int32(succs[1].Index))
+			}
+		}
 	}
+	l.live = live
 	for _, b := range fn.Blocks {
 		if !live[b.Index] {
 			continue
@@ -655,15 +686,18 @@ func (l *lowerer) instr(ins ssa.Instruction) {
 			l.lastPos = p
 		}
 	case *ssa.Alloc:
-		l.v(x)
+		l.cell(l.v(x))
 	case *ssa.Store:
+		// A store through a pointer is a weak update of the location.
 		addr, val := l.v(x.Addr), l.v(x.Val)
+		l.cell(addr)
 		F.Assign(addr, pos, val)
 		switch a := x.Addr.(type) {
 		case *ssa.FieldAddr:
 			name, owner := fieldInfo(a.X.Type(), a.Field)
 			F.Emit(ir.Instr{Op: ir.OpStore, Dst: ir.NoVar, Args: []ir.VarID{l.v(a.X), val}, Field: name, Owner: owner, Pos: pos})
 		case *ssa.IndexAddr:
+			l.cell(l.v(a.X))
 			F.Assign(l.v(a.X), pos, val)
 		}
 	case *ssa.FieldAddr:
@@ -675,17 +709,22 @@ func (l *lowerer) instr(ins ssa.Instruction) {
 		l.noteTypeOf(x.X.Type())
 		F.Emit(ir.Instr{Op: ir.OpLoad, Dst: l.v(x), Args: []ir.VarID{l.v(x.X)}, Field: name, Owner: owner, Pos: pos})
 	case *ssa.UnOp:
-		F.Assign(l.v(x), pos, l.v(x.X))
+		if x.Op == token.NOT {
+			F.Compute(l.v(x), pos, "!", l.v(x.X))
+		} else {
+			F.Assign(l.v(x), pos, l.v(x.X))
+		}
 	case *ssa.BinOp:
 		switch x.Op {
 		case token.EQL, token.NEQ, token.LSS, token.LEQ, token.GTR, token.GEQ:
+			// A comparison carries no data of its operands.
 			l.v(x)
 		default:
-			F.Compute(l.v(x), pos, l.v(x.X), l.v(x.Y))
+			F.Compute(l.v(x), pos, x.Op.String(), l.v(x.X), l.v(x.Y))
 		}
 	case *ssa.Convert:
 		// string <-> []byte and numeric conversions copy the value.
-		F.Compute(l.v(x), pos, l.v(x.X))
+		F.Compute(l.v(x), pos, "convert", l.v(x.X))
 	case *ssa.ChangeType:
 		F.Assign(l.v(x), pos, l.v(x.X))
 	case *ssa.MakeInterface:
@@ -701,11 +740,15 @@ func (l *lowerer) instr(ins ssa.Instruction) {
 	case *ssa.Extract:
 		F.Assign(l.v(x), pos, l.v(x.Tuple))
 	case *ssa.Phi:
-		args := make([]ir.VarID, 0, len(x.Edges))
-		for _, e := range x.Edges {
-			args = append(args, l.v(e))
+		// One argument per live predecessor.
+		var args []ir.VarID
+		var from []int32
+		for i, e := range x.Edges {
+			if p := x.Block().Preds[i]; l.live[p.Index] && slices.Contains(liveSuccs(p), x.Block()) {
+				args, from = append(args, l.v(e)), append(from, int32(p.Index))
+			}
 		}
-		F.Assign(l.v(x), pos, args...)
+		F.Phi(l.v(x), pos, args, from)
 	case *ssa.Slice:
 		F.Assign(l.v(x), pos, l.v(x.X))
 	case *ssa.Index:
@@ -723,6 +766,7 @@ func (l *lowerer) instr(ins ssa.Instruction) {
 		if k, ok := constString(x.Key); ok {
 			F.Emit(ir.Instr{Op: ir.OpStore, Dst: ir.NoVar, Args: []ir.VarID{m, val}, Field: k, Pos: pos})
 		} else {
+			l.cell(m)
 			F.Assign(m, pos, val, l.v(x.Key))
 		}
 	case *ssa.Range:
@@ -734,8 +778,9 @@ func (l *lowerer) instr(ins ssa.Instruction) {
 		for _, b := range x.Bindings {
 			args = append(args, l.v(b))
 		}
-		F.Assign(l.v(x), pos, args...)
+		F.Emit(ir.Instr{Op: ir.OpClosure, Dst: l.v(x), Args: args, Func: funcID(x.Fn.(*ssa.Function)), Pos: pos})
 	case *ssa.Send:
+		l.cell(l.v(x.Chan))
 		F.Assign(l.v(x.Chan), pos, l.v(x.X))
 	case *ssa.Select:
 		var args []ir.VarID
@@ -750,13 +795,22 @@ func (l *lowerer) instr(ins ssa.Instruction) {
 		for _, r := range x.Results {
 			args = append(args, l.v(r))
 		}
-		F.Emit(ir.Instr{Op: ir.OpReturn, Dst: ir.NoVar, Args: args, Pos: pos})
+		F.Return(pos, args...)
+	case *ssa.Panic:
+		F.Throw(pos, l.v(x.X))
 	case *ssa.Call:
 		l.call(x.Common(), l.v(x), pos)
 	case *ssa.Go:
 		l.call(x.Common(), ir.NoVar, pos)
 	case *ssa.Defer:
 		l.call(x.Common(), ir.NoVar, pos)
+	}
+}
+
+// cell marks a variable as a location that stores update weakly.
+func (l *lowerer) cell(v ir.VarID) {
+	if v >= 0 && int(v) < len(l.fn.Vars) && l.fn.Vars[v].Const == nil {
+		l.fn.Vars[v].Cell = true
 	}
 }
 
@@ -774,7 +828,12 @@ func (l *lowerer) call(c *ssa.CallCommon, dst ir.VarID, pos ir.Pos) {
 		call.Name = c.Method.Name()
 		call.HasRecv = true
 		call.RecvType = typeStr(c.Value.Type())
-		call.Targets = l.implementations(c)
+		if n, ok := c.Value.Type().(*types.Named); ok {
+			if l.ifaces == nil {
+				l.ifaces = map[string]*types.Named{}
+			}
+			l.ifaces[typeStr(n)] = n
+		}
 		args = append(args, l.v(c.Value))
 	default:
 		if b, ok := c.Value.(*ssa.Builtin); ok {
@@ -787,6 +846,7 @@ func (l *lowerer) call(c *ssa.CallCommon, dst ir.VarID, pos ir.Pos) {
 				F.Assign(dst, pos, as...)
 			case "copy":
 				if len(c.Args) == 2 {
+					l.cell(l.v(c.Args[0]))
 					F.Assign(l.v(c.Args[0]), pos, l.v(c.Args[1]))
 				}
 			case "print", "println":
@@ -798,7 +858,16 @@ func (l *lowerer) call(c *ssa.CallCommon, dst ir.VarID, pos ir.Pos) {
 			}
 			return
 		}
-		if fn := c.StaticCallee(); fn != nil {
+		if _, ok := c.Value.(*ssa.MakeClosure); ok || c.StaticCallee() == nil {
+			// A call of a closure or function value: the function value
+			// is the first argument.
+			call.Indirect = true
+			call.Name = l.fn.Vars[l.v(c.Value)].Name
+			if call.Name == "" {
+				call.Name = c.Value.Name()
+			}
+			args = append(args, l.v(c.Value))
+		} else if fn := c.StaticCallee(); fn != nil {
 			call.Name = fn.Name()
 			if obj, ok := fn.Object().(*types.Func); ok && obj != nil && fn.Parent() == nil {
 				call.Callee = canonObj(obj)
@@ -812,11 +881,6 @@ func (l *lowerer) call(c *ssa.CallCommon, dst ir.VarID, pos ir.Pos) {
 			}
 			if l.internal(fn) {
 				call.Target = funcID(fn)
-			}
-		} else {
-			call.Name = l.fn.Vars[l.v(c.Value)].Name
-			if call.Name == "" {
-				call.Name = c.Value.Name()
 			}
 		}
 	}

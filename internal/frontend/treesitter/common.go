@@ -17,6 +17,7 @@ import (
 	"maps"
 	"path"
 	"slices"
+	"strconv"
 	"strings"
 
 	sitter "github.com/smacker/go-tree-sitter"
@@ -73,12 +74,14 @@ type program struct {
 	// getters maps "Class.prop" to the function that computes the
 	// property (Python @property, Kotlin get(), Swift computed properties).
 	getters map[string]string
+	// closureSeq numbers the closures of each function.
+	closureSeq map[string]int
 }
 
 func newProgram(lang string, o frontend.Options) *program {
 	return &program{lang: lang, opts: o, classes: map[string]*classInfo{}, byShort: map[string][]*classInfo{},
 		funcs: map[string]bool{}, top: map[string]string{}, ext: map[string][]string{}, modules: map[string]bool{}, mod: &ir.Module{Lang: lang},
-		consts: map[string]bool{}, getters: map[string]string{}}
+		consts: map[string]bool{}, getters: map[string]string{}, closureSeq: map[string]int{}}
 }
 
 func (p *program) warnf(format string, args ...any) {
@@ -205,43 +208,6 @@ func (p *program) addClass(c *classInfo) {
 	p.classes[c.name] = c
 	p.byShort[c.short] = append(p.byShort[c.short], c)
 	p.subs = nil
-}
-
-// overrides lists the methods named m that a call on a receiver of type
-// cls may run besides static: the overrides and implementations in cls's
-// subclasses and implementers (class hierarchy analysis).
-func (p *program) overrides(cls, m, static string) []string {
-	root := p.class(cls)
-	if root == nil || m == "" {
-		return nil
-	}
-	if p.subs == nil {
-		p.subs = map[string][]*classInfo{}
-		for _, name := range slices.Sorted(maps.Keys(p.classes)) {
-			c := p.classes[name]
-			for _, s := range c.supers {
-				if sc := p.class(s); sc != nil && sc != c {
-					p.subs[sc.name] = append(p.subs[sc.name], c)
-				}
-			}
-		}
-	}
-	var out []string
-	seen := map[*classInfo]bool{root: true}
-	work := append([]*classInfo(nil), p.subs[root.name]...)
-	for len(work) > 0 && len(out) < 16 {
-		c := work[0]
-		work = work[1:]
-		if seen[c] {
-			continue
-		}
-		seen[c] = true
-		if id, ok := c.methods[m]; ok && id != static && !slices.Contains(out, id) {
-			out = append(out, id)
-		}
-		work = append(work, p.subs[c.name]...)
-	}
-	return out
 }
 
 // resolveType maps a type name as written in f to a qualified name.
@@ -391,36 +357,48 @@ func isUpperStart(s string) bool { return s != "" && s[0] >= 'A' && s[0] <= 'Z' 
 // ---- per-function builder ----
 
 type builder struct {
-	p       *program
-	f       *srcFile
-	cls     *classInfo
-	fn      *ir.Func
-	scope   map[string]ir.VarID
-	this    ir.VarID
-	names   map[string]ir.VarID // unresolved identifiers read as values
-	lambdas map[ir.VarID]ir.VarID
-	assigns [][]ir.VarID        // stack of variables assigned inside lambdas
-	kwargs  map[ir.VarID]string // keyword-argument variables -> parameter name
+	p     *program
+	f     *srcFile
+	cls   *classInfo
+	fn    *ir.Func
+	scope map[string]ir.VarID
+	this  ir.VarID
+	names map[string]ir.VarID // unresolved identifiers read as values
+	// closures maps variables holding a closure to its function ID.
+	closures map[ir.VarID]string
+	kwargs   map[ir.VarID]string // keyword-argument variables -> parameter name
 
-	// Control flow. floating counts the enclosing lambdas: their blocks
-	// have no fixed place in the function's order. terminated is set once
-	// the current path has returned; what follows it is unreachable.
-	floating   int
+	// Closures are lowered as functions of their own. While a closure body
+	// is lowered, outer is the enclosing function's builder: a name the
+	// closure reads from it becomes a capture parameter (captured maps the
+	// outer variable to it), and binds lists the outer variables in
+	// capture order.
+	outer    *builder
+	captured map[ir.VarID]ir.VarID
+	binds    []ir.VarID
+
+	// Control flow. terminated is set once the current path has returned;
+	// what follows it is unreachable.
 	terminated bool
 	targets    []*jumpTarget // enclosing loops and switches, innermost last
 	label      string        // label of the statement being lowered
 
-	// Exceptions. catchers holds, per enclosing try body, the variable its
-	// handlers catch; caught is the one the handler being lowered binds;
-	// escaped collects what leaves the function (NoVar until needed).
-	catchers []ir.VarID
-	caught   ir.VarID
-	escaped  ir.VarID
+	// Exceptions. tries holds the enclosing try bodies, innermost last;
+	// caught is the exception the handler being lowered binds.
+	tries  []*tryBody
+	caught ir.VarID
 
 	// JVM reflection: variables holding a Class, Field or Method handle,
-	// and proxies with their invocation handler's callback input.
+	// and proxies with the invocation handler closure they run.
 	refl    map[ir.VarID]reflHandle
 	proxies map[ir.VarID]ir.VarID
+}
+
+// tryBody collects the points of a try body where an exception can be
+// raised: blocks ending in a throw or a call, with the scope there. Its
+// handlers are entered from them through exceptional edges.
+type tryBody struct {
+	sites []exit
 }
 
 // reflHandle is a reflective handle whose target is known from constant
@@ -454,14 +432,6 @@ func blocksOf(es []exit) []int32 {
 	return out
 }
 
-func scopesOf(es []exit) []map[string]ir.VarID {
-	out := make([]map[string]ir.VarID, len(es))
-	for i, e := range es {
-		out[i] = e.scope
-	}
-	return out
-}
-
 // takeLabel returns the label of the statement being lowered, once.
 func (b *builder) takeLabel() string {
 	l := b.label
@@ -490,11 +460,73 @@ func (b *builder) jump(isContinue bool, label string) {
 }
 
 func (p *program) newBuilder(f *srcFile, cls *classInfo, id, name string, n *sitter.Node) *builder {
-	b := &builder{p: p, f: f, cls: cls, scope: map[string]ir.VarID{}, this: ir.NoVar, names: map[string]ir.VarID{}, lambdas: map[ir.VarID]ir.VarID{},
-		caught: ir.NoVar, escaped: ir.NoVar}
+	b := &builder{p: p, f: f, cls: cls, scope: map[string]ir.VarID{}, this: ir.NoVar, names: map[string]ir.VarID{}, closures: map[ir.VarID]string{},
+		caught: ir.NoVar}
 	b.fn = &ir.Func{ID: id, Name: name, Lang: p.lang, File: f.rel, Pos: b.pos(n)}
-	b.fn.NewBlock(false) // entry
+	b.fn.NewBlock() // entry
 	return b
+}
+
+// lookup finds the variable a name refers to: a local, or, inside a
+// closure, a variable of an enclosing function, which the closure then
+// captures.
+func (b *builder) lookup(name string) (ir.VarID, bool) {
+	if v, ok := b.scope[name]; ok {
+		return v, true
+	}
+	if b.outer == nil {
+		return ir.NoVar, false
+	}
+	ov, ok := b.outer.lookup(name)
+	if !ok {
+		return ir.NoVar, false
+	}
+	v := b.capture(name, ov)
+	b.scope[name] = v
+	return v, true
+}
+
+// capture makes outer variable ov available in the closure being lowered
+// as a capture parameter.
+func (b *builder) capture(name string, ov ir.VarID) ir.VarID {
+	if v, ok := b.captured[ov]; ok {
+		return v
+	}
+	ovar := b.outer.fn.Vars[ov]
+	v := b.fn.AddCapture(name, ovar.Type, ovar.Pos)
+	b.captured[ov] = v
+	b.binds = append(b.binds, ov)
+	// What the builder knows about the value holds inside the closure too.
+	if id, ok := b.outer.closures[ov]; ok {
+		b.closures[v] = id
+	}
+	if r, ok := b.outer.refl[ov]; ok {
+		b.markRefl(v, r)
+	}
+	if h, ok := b.outer.proxies[ov]; ok {
+		if b.proxies == nil {
+			b.proxies = map[ir.VarID]ir.VarID{}
+		}
+		b.proxies[v] = b.capture("", h)
+	}
+	return v
+}
+
+// isCapture reports whether v is a capture parameter of the function.
+func (b *builder) isCapture(v ir.VarID) bool {
+	for _, c := range b.captured {
+		if c == v {
+			return true
+		}
+	}
+	return false
+}
+
+// cell marks a variable as a location that is written by weak updates.
+func (b *builder) cell(v ir.VarID) {
+	if v >= 0 && int(v) < len(b.fn.Vars) && !b.fn.Vars[v].IsConst() {
+		b.fn.Vars[v].Cell = true
+	}
 }
 
 func (b *builder) pos(n *sitter.Node) ir.Pos {
@@ -526,18 +558,18 @@ func (b *builder) param(name, typ string, n *sitter.Node) ir.VarID {
 func (b *builder) declare(name, typ string, n *sitter.Node) ir.VarID {
 	v := b.fn.Named(name, typ, b.pos(n))
 	b.scope[name] = v
-	b.noteAssign(v)
 	return v
 }
 
 // redefine gives a local a new version for a plain assignment (x = v):
 // reads after it see the returned variable, reads before it keep the old
-// one, so a value that is overwritten no longer reaches later sinks. Inside
-// a lambda, which may run any number of times and at any time, the
-// assignment stays a weak update of the existing variable.
+// one, so a value that is overwritten no longer reaches later sinks. A
+// closure assigning a variable it captured writes the enclosing
+// function's variable, which may be read at any time: the capture is a
+// cell and the assignment a weak update of it.
 func (b *builder) redefine(name string, old ir.VarID, typ string, n *sitter.Node) ir.VarID {
-	if len(b.assigns) > 0 || old == b.this {
-		b.noteAssign(old)
+	if old == b.this || b.isCapture(old) {
+		b.cell(old)
 		return old
 	}
 	if typ == "" {
@@ -550,28 +582,41 @@ func (b *builder) redefine(name string, old ir.VarID, typ string, n *sitter.Node
 
 func (b *builder) snapshot() map[string]ir.VarID { return maps.Clone(b.scope) }
 
-// join merges the scopes at the ends of alternative paths: a name bound to
-// different versions gets a new version assigned from all of them. Names
-// bound on only some paths are kept (Python, JS var and a missed block
-// scope all leave them visible).
-func (b *builder) join(n *sitter.Node, paths ...map[string]ir.VarID) {
+// join merges the scopes at the ends of alternative paths, which must be
+// the predecessors of the current block: a name bound to different
+// versions, or bound on only some paths (Python, JS var and a missed block
+// scope all leave it visible), gets a phi of the versions arriving from
+// each path.
+func (b *builder) join(n *sitter.Node, paths ...exit) {
 	out := map[string]ir.VarID{}
-	versions := map[string][]ir.VarID{}
+	names := map[string]bool{}
 	for _, p := range paths {
-		for name, v := range p {
-			if !slices.Contains(versions[name], v) {
-				versions[name] = append(versions[name], v)
-			}
+		for name := range p.scope {
+			names[name] = true
 		}
 	}
-	for _, name := range slices.Sorted(maps.Keys(versions)) {
-		vs := versions[name]
-		if len(vs) == 1 {
-			out[name] = vs[0]
+	for _, name := range slices.Sorted(maps.Keys(names)) {
+		var args []ir.VarID
+		var from []int32
+		same := true
+		for _, p := range paths {
+			v, ok := p.scope[name]
+			if !ok {
+				same = false
+				continue
+			}
+			if len(args) > 0 && v != args[0] {
+				same = false
+			}
+			args, from = append(args, v), append(from, p.block)
+		}
+		if same {
+			out[name] = args[0]
 			continue
 		}
-		phi := b.fn.Named(name, b.fn.Vars[vs[0]].Type, b.pos(n))
-		b.assign(phi, n, vs...)
+		phi := b.fn.Named(name, b.fn.Vars[args[0]].Type, b.pos(n))
+		b.fn.Phi(phi, b.pos(n), args, from)
+		b.propagate(phi, args...)
 		out[name] = phi
 	}
 	b.scope = out
@@ -583,30 +628,31 @@ func (b *builder) join(n *sitter.Node, paths ...map[string]ir.VarID) {
 //
 // Each arm starts a block from the current one, and the join is a new
 // block after them. An arm that returns is left out of the join; when all
-// of them return, what follows is unreachable.
-func (b *builder) branches(n *sitter.Node, skippable bool, arms ...func()) {
+// of them return, what follows is unreachable. It returns the arms' entry
+// blocks and the join block.
+func (b *builder) branches(n *sitter.Node, skippable bool, arms ...func()) (starts []int32, join int32) {
 	entry, from, dead := b.snapshot(), b.fn.CurBlock(), b.terminated
-	var scopes []map[string]ir.VarID
-	var ends []int32
+	var ends []exit
 	if skippable || len(arms) == 0 {
-		scopes, ends = append(scopes, entry), append(ends, from)
+		ends = append(ends, exit{entry, from})
 	}
 	for _, arm := range arms {
 		b.scope = maps.Clone(entry)
 		b.terminated = false
-		b.newBlock(from)
+		starts = append(starts, b.newBlock(from))
 		arm()
 		if !b.terminated {
-			scopes, ends = append(scopes, b.scope), append(ends, b.fn.CurBlock())
+			ends = append(ends, b.here())
 		}
 	}
-	b.newBlock(ends...)
-	b.terminated = dead || len(scopes) == 0
-	if len(scopes) == 0 {
+	join = b.newBlock(blocksOf(ends)...)
+	b.terminated = dead || len(ends) == 0
+	if len(ends) == 0 {
 		b.scope = entry
-		return
+		return starts, join
 	}
-	b.join(n, scopes...)
+	b.join(n, ends...)
+	return starts, join
 }
 
 // loop lowers a loop body that may run zero or more times.
@@ -621,17 +667,20 @@ type loopSpec struct {
 	infinite bool
 }
 
-// loopWith lowers a loop. The body starts in a header block that the end of
-// the body and every continue loop back to. A local the body redefines gets
-// a header version merging the value from before the loop with the value at
-// each of those back edges; reads in the body are rewritten to it. The code
-// after the loop joins the header's exit with every break.
+// loopWith lowers a loop. A header block, which the end of the body and
+// every continue loop back to, leads to the body and to the exit. A local the body redefines gets
+// a phi at the start of the header merging the value from before the loop
+// with the value at each back edge; reads in the body are rewritten to it.
+// The code after the loop joins the header's exit with every break.
 func (b *builder) loopWith(n *sitter.Node, spec loopSpec) {
 	entry, dead := b.snapshot(), b.terminated
+	pre := b.fn.CurBlock()
 	t := &jumpTarget{label: b.takeLabel(), loop: true}
-	head := b.newBlock(b.fn.CurBlock())
-	b.targets = append(b.targets, t)
+	head := b.newBlock(pre)
 	start := len(b.fn.Instrs)
+	// The header holds only the phis; the body starts after it.
+	b.newBlock(head)
+	b.targets = append(b.targets, t)
 	b.terminated = false
 	spec.body()
 	end := len(b.fn.Instrs)
@@ -643,28 +692,53 @@ func (b *builder) loopWith(n *sitter.Node, spec loopSpec) {
 	for _, bk := range backs {
 		b.fn.Edge(bk.block, head)
 	}
-	if spec.infinite {
-		b.newBlock()
-	} else {
-		b.newBlock(head)
-	}
 
-	// Header versions, emitted after the body so the rewrite leaves them alone.
+	// Header phis. A name bound for the first time in the body gets one
+	// too when it stays visible after the loop (Python, JS var): it
+	// merges the values the back edges bring.
+	pos := b.pos(n)
+	names := map[string]bool{}
+	for _, bk := range backs {
+		for name := range bk.scope {
+			names[name] = true
+		}
+	}
 	rename := map[ir.VarID]ir.VarID{}
-	for _, name := range slices.Sorted(maps.Keys(entry)) {
-		pre := entry[name]
-		var vs []ir.VarID
+	headScope := maps.Clone(entry)
+	var phis []ir.Instr
+	for _, name := range slices.Sorted(maps.Keys(names)) {
+		old, before := entry[name]
+		changed := false
 		for _, bk := range backs {
-			if v, ok := bk.scope[name]; ok && v != pre && !slices.Contains(vs, v) {
-				vs = append(vs, v)
+			if v, ok := bk.scope[name]; ok && v != old {
+				changed = true
 			}
 		}
-		if len(vs) == 0 {
+		if !changed {
 			continue
 		}
-		h := b.fn.Named(name, b.fn.Vars[pre].Type, b.pos(n))
-		rename[pre] = h
-		b.assign(h, n, append([]ir.VarID{pre}, vs...)...)
+		var typ string
+		if before {
+			typ = b.fn.Vars[old].Type
+		}
+		h := b.fn.Named(name, typ, pos)
+		phi := ir.Instr{Op: ir.OpPhi, Dst: h, Pos: pos, Block: head}
+		if before {
+			phi.Args, phi.From = append(phi.Args, old), append(phi.From, pre)
+			rename[old] = h
+		}
+		for _, bk := range backs {
+			v, ok := bk.scope[name]
+			switch {
+			case !ok:
+				continue
+			case before && v == old:
+				v = h // unchanged on this path: the header value
+			}
+			phi.Args, phi.From = append(phi.Args, v), append(phi.From, bk.block)
+		}
+		phis = append(phis, phi)
+		headScope[name] = h
 	}
 	for i := start; i < end; i++ {
 		in := &b.fn.Instrs[i]
@@ -674,6 +748,23 @@ func (b *builder) loopWith(n *sitter.Node, spec loopSpec) {
 			}
 		}
 	}
+	for blk := int(head); blk < len(b.fn.Blocks); blk++ {
+		if h, ok := rename[b.fn.Blocks[blk].Cond]; ok && b.fn.Blocks[blk].Term == ir.TermIf {
+			b.fn.Blocks[blk].Cond = h
+		}
+	}
+	for i := range phis {
+		// A back edge value read before its redefinition is the header's.
+		for j, a := range phis[i].Args {
+			if h, ok := rename[a]; ok && phis[i].From[j] != pre {
+				phis[i].Args[j] = h
+			}
+		}
+		for _, a := range phis[i].Args {
+			b.propagate(phis[i].Dst, a)
+		}
+	}
+	b.fn.Instrs = slices.Insert(b.fn.Instrs, start, phis...)
 	remap := func(sc map[string]ir.VarID) map[string]ir.VarID {
 		out := maps.Clone(sc)
 		for k, v := range out {
@@ -686,20 +777,10 @@ func (b *builder) loopWith(n *sitter.Node, spec loopSpec) {
 
 	var exits []exit
 	if !spec.infinite {
-		// Leaving from the header: the header versions, plus the names
-		// the body binds for the first time as the last iteration left them.
-		paths := []map[string]ir.VarID{remap(entry)}
-		for _, bk := range backs {
-			fresh := map[string]ir.VarID{}
-			for k, v := range bk.scope {
-				if _, ok := entry[k]; !ok {
-					fresh[k] = v
-				}
-			}
-			paths = append(paths, fresh)
-		}
+		// Leaving from the header, with the header's versions.
+		b.newBlock(head)
+		b.scope = headScope
 		b.terminated = false
-		b.join(n, paths...)
 		if spec.orelse != nil {
 			spec.orelse()
 		}
@@ -713,10 +794,10 @@ func (b *builder) loopWith(n *sitter.Node, spec loopSpec) {
 	b.newBlock(blocksOf(exits)...)
 	b.terminated = dead || len(exits) == 0
 	if len(exits) == 0 {
-		b.scope = remap(entry) // while(true) without break: nothing follows
+		b.scope = headScope // while(true) without break: nothing follows
 		return
 	}
-	b.join(n, scopesOf(exits)...)
+	b.join(n, exits...)
 }
 
 // switchCases lowers the cases of a switch statement. With fallthrough (C,
@@ -736,7 +817,7 @@ func (b *builder) switchCases(n *sitter.Node, fallsThrough, exhaustive bool, cas
 		}
 		b.newBlock(blocksOf(starts)...)
 		b.terminated = false
-		b.join(n, scopesOf(starts)...)
+		b.join(n, starts...)
 		c()
 		prev = nil
 		if !b.terminated {
@@ -761,14 +842,16 @@ func (b *builder) switchCases(n *sitter.Node, fallsThrough, exhaustive bool, cas
 		b.scope = entry
 		return
 	}
-	b.join(n, scopesOf(ends)...)
+	b.join(n, ends...)
 }
 
-// ifElse lowers an if statement whose condition was already lowered: then
-// and els (nil without an else) are alternative paths. A constant
-// condition (see truth) leaves out the arm that cannot run.
-func (b *builder) ifElse(n, cond *sitter.Node, then, els func()) {
+// ifElse lowers an if statement whose condition was already lowered to c:
+// then and els (nil without an else) are alternative paths, and the
+// current block ends with a branch on c. A constant condition (see truth)
+// leaves out the arm that cannot run.
+func (b *builder) ifElse(n, cond *sitter.Node, c ir.VarID, then, els func()) {
 	v, known := b.truth(cond)
+	from := b.fn.CurBlock()
 	switch {
 	case known && v:
 		b.branches(n, false, then)
@@ -777,9 +860,18 @@ func (b *builder) ifElse(n, cond *sitter.Node, then, els func()) {
 	case known:
 		// if false { ... } without else: nothing runs.
 	case els != nil:
-		b.branches(n, false, then, els)
+		starts, _ := b.branches(n, false, then, els)
+		b.branch(from, c, starts[0], starts[1])
 	default:
-		b.branches(n, true, then)
+		starts, join := b.branches(n, true, then)
+		b.branch(from, c, starts[0], join)
+	}
+}
+
+// branch ends block from with a branch on c, when c is known.
+func (b *builder) branch(from int32, c ir.VarID, ifTrue, ifFalse int32) {
+	if c >= 0 && int(c) < len(b.fn.Vars) && ifTrue != ifFalse {
+		b.fn.Branch(from, c, ifTrue, ifFalse)
 	}
 }
 
@@ -885,58 +977,112 @@ func (b *builder) constTruth(v ir.VarID, depth int) (value, known bool) {
 			def = &b.fn.Instrs[i]
 		}
 	}
-	if def == nil || def.Op != ir.OpAssign || def.Snapshot || len(def.Args) != 1 {
+	if def == nil || def.Op != ir.OpAssign || len(def.Args) != 1 {
 		return false, false
 	}
 	return b.constTruth(def.Args[0], depth+1)
 }
 
-// tryCatch lowers try/catch/finally. A handler can start after any part of
-// the body ran, so it starts from the join of the scopes before and after
-// the body; the finally block runs after either.
-//
-// Handler blocks have edges from the start and the end of the body.
+// tryCatch lowers try/catch/finally. Every call and throw in the body
+// ends its block, with an exceptional edge to a dispatch block that starts
+// with the caught exception (OpCatch) and joins the scopes at those
+// points; each handler is a path from it. An empty block before the body
+// is such a point too, for exceptions the runtime raises anywhere in it.
+// The finally block runs after the body or a handler.
 func (b *builder) tryCatch(n *sitter.Node, body func(), handlers []func(), finally func()) {
 	entry, from, dead := b.snapshot(), b.fn.CurBlock(), b.terminated
-	start := b.newBlock(from)
+	first := b.newBlock(from)
+	b.newBlock(first)
 	b.terminated = false
-	thrown := b.fn.Temp(b.pos(n))
-	b.catchers = append(b.catchers, thrown)
+	var t *tryBody
+	if len(handlers) > 0 {
+		t = &tryBody{}
+		b.tries = append(b.tries, t)
+	}
 	body()
-	b.catchers = b.catchers[:len(b.catchers)-1]
-	done, doneBlock := b.snapshot(), b.fn.CurBlock()
-	var scopes []map[string]ir.VarID
-	var ends []int32
+	var ends []exit
+	if t != nil {
+		b.tries = b.tries[:len(b.tries)-1]
+	}
 	if !b.terminated {
-		scopes, ends = append(scopes, done), append(ends, doneBlock)
+		ends = append(ends, b.here())
 	}
-	for _, h := range handlers {
-		b.newBlock(from, start, doneBlock)
-		b.terminated = false
-		b.join(n, entry, done)
-		saved := b.caught
-		b.caught = thrown
-		h()
-		b.caught = saved
-		if !b.terminated {
-			scopes, ends = append(scopes, b.scope), append(ends, b.fn.CurBlock())
+	if t != nil {
+		sites := append([]exit{{entry, first}}, t.sites...)
+		dispatch := b.newBlock()
+		for _, st := range sites {
+			b.fn.ExcEdge(st.block, dispatch)
 		}
+		b.terminated = false
+		b.join(n, sites...)
+		caught := b.fn.Named("", "", b.pos(n))
+		b.fn.Emit(ir.Instr{Op: ir.OpCatch, Dst: caught, Pos: b.pos(n)})
+		hentry := b.snapshot()
+		saved := b.caught
+		b.caught = caught
+		for _, h := range handlers {
+			b.scope = maps.Clone(hentry)
+			b.terminated = false
+			b.newBlock(dispatch)
+			h()
+			if !b.terminated {
+				ends = append(ends, b.here())
+			}
+		}
+		b.caught = saved
 	}
-	b.newBlock(ends...)
-	b.terminated = dead || len(scopes) == 0
-	if len(scopes) == 0 {
+	b.newBlock(blocksOf(ends)...)
+	b.terminated = dead || len(ends) == 0
+	if len(ends) == 0 {
 		b.scope = entry
 	} else {
-		b.join(n, scopes...)
+		b.join(n, ends...)
 	}
 	if finally != nil {
 		finally()
 	}
 }
 
-func (b *builder) noteAssign(v ir.VarID) {
-	if len(b.assigns) > 0 {
-		b.assigns[len(b.assigns)-1] = append(b.assigns[len(b.assigns)-1], v)
+// mayThrow ends the current block after an instruction that may throw
+// inside a try body: the handlers are entered from here.
+func (b *builder) mayThrow() {
+	if len(b.tries) == 0 {
+		return
+	}
+	t := b.tries[len(b.tries)-1]
+	t.sites = append(t.sites, b.here())
+	b.newBlock(b.fn.CurBlock())
+}
+
+// resultName is the scope entry that the arms of a construct with a value
+// (Kotlin if and when, a Java switch expression) bind their value to, so
+// that the join merges the arms' values with a phi.
+const resultName = "#result"
+
+// valued lowers a construct whose arms call setResult, and returns the
+// value it has after them.
+func (b *builder) valued(n *sitter.Node, lower func()) ir.VarID {
+	saved, had := b.scope[resultName]
+	delete(b.scope, resultName)
+	lower()
+	v, ok := b.scope[resultName]
+	delete(b.scope, resultName)
+	if had {
+		b.scope[resultName] = saved
+	}
+	if !ok {
+		return b.temp(n)
+	}
+	if b.fn.Vars[v].Name == resultName {
+		b.fn.Vars[v].Name = "" // a phi of the arms' values
+	}
+	return v
+}
+
+// setResult binds the value of the arm being lowered.
+func (b *builder) setResult(v ir.VarID) {
+	if v != ir.NoVar {
+		b.scope[resultName] = v
 	}
 }
 
@@ -955,7 +1101,7 @@ func (b *builder) kwarg(name string, v ir.VarID, n *sitter.Node) ir.VarID {
 // ident reads an identifier used as a value: a local, a field of this, or
 // an unresolved name (kept as a named variable so name detectors see it).
 func (b *builder) ident(name string, n *sitter.Node) ir.VarID {
-	if v, ok := b.scope[name]; ok {
+	if v, ok := b.lookup(name); ok {
 		return v
 	}
 	if b.cls != nil && b.this != ir.NoVar {
@@ -975,32 +1121,90 @@ func (b *builder) ident(name string, n *sitter.Node) ir.VarID {
 
 func (b *builder) assign(dst ir.VarID, n *sitter.Node, args ...ir.VarID) {
 	b.fn.Assign(dst, b.pos(n), args...)
-	// Reflective handles and proxies stay what they are through copies
-	// and casts.
+	b.propagate(dst, args...)
+}
+
+// propagate carries what the builder knows about values through a copy,
+// cast or merge: reflective handles, proxies and closures stay what they
+// are, so calling the copy of a closure (show = { log(it) }; show(x))
+// runs it.
+func (b *builder) propagate(dst ir.VarID, args ...ir.VarID) {
+	if dst < 0 {
+		return
+	}
 	for _, a := range args {
-		if r, ok := b.refl[a]; ok && dst >= 0 {
+		if r, ok := b.refl[a]; ok {
 			b.markRefl(dst, r)
 		}
-		if cb, ok := b.proxies[a]; ok && dst >= 0 {
-			b.proxies[dst] = cb
+		if h, ok := b.proxies[a]; ok {
+			b.proxies[dst] = h
 		}
-	}
-	// A variable holding a lambda (show = { log(it) }) is one: calling it
-	// feeds the lambda's parameters.
-	if _, has := b.lambdas[dst]; !has {
-		for _, a := range args {
-			if cb, ok := b.lambdas[a]; ok && dst >= 0 {
-				b.lambdas[dst] = cb
-				break
+		if id, ok := b.closures[a]; ok {
+			if _, has := b.closures[dst]; !has {
+				b.closures[dst] = id
 			}
 		}
 	}
 }
 
 // compute is assign for a new value built from the arguments' current
-// state (concatenation, interpolation, arithmetic), not a reference to them.
+// state (concatenation, interpolation, arithmetic), not a reference to
+// them. The operator is read off n.
 func (b *builder) compute(dst ir.VarID, n *sitter.Node, args ...ir.VarID) {
-	b.fn.Compute(dst, b.pos(n), args...)
+	b.fn.Compute(dst, b.pos(n), b.operator(n), args...)
+}
+
+// logic lowers a boolean operation (a comparison, !, &&, ||, not, and,
+// or): its result carries no data of the operands, but the analysis reads
+// consent checks through it.
+func (b *builder) logic(n *sitter.Node, args ...ir.VarID) ir.VarID {
+	dst := b.temp(n)
+	op := b.operator(n)
+	if !ir.Logical(op) {
+		op = "cmp"
+	}
+	b.fn.Compute(dst, b.pos(n), op, args...)
+	return dst
+}
+
+// operator is the operator of an expression node, normalized: "!" for
+// every negation, "&&" and "||" for the boolean connectives.
+func (b *builder) operator(n *sitter.Node) string {
+	if n == nil {
+		return ""
+	}
+	var op string
+	for _, field := range []string{"operator", "operation"} {
+		if o := n.ChildByFieldName(field); o != nil {
+			op = strings.TrimSpace(b.text(o))
+			break
+		}
+	}
+	switch n.Type() {
+	case "not_operator":
+		op = "!"
+	case "conjunction_expression":
+		op = "&&"
+	case "disjunction_expression":
+		op = "||"
+	case "prefix_expression", "unary_expression":
+		if t := strings.TrimSpace(b.text(n)); strings.HasPrefix(t, "!") && !strings.HasSuffix(t, "!!") {
+			op = "!"
+		}
+	case "comparison_operator", "comparison_expression", "equality_expression", "check_expression":
+		if op == "" {
+			op = "=="
+		}
+	}
+	switch op {
+	case "not":
+		op = "!"
+	case "and":
+		op = "&&"
+	case "or":
+		op = "||"
+	}
+	return op
 }
 
 func (b *builder) load(obj ir.VarID, field, owner string, n *sitter.Node) ir.VarID {
@@ -1022,17 +1226,10 @@ func (b *builder) store(obj ir.VarID, field, owner string, val ir.VarID, n *sitt
 		return
 	}
 	b.fn.Emit(ir.Instr{Op: ir.OpStore, Dst: ir.NoVar, Args: []ir.VarID{obj, val}, Field: field, Owner: owner, Pos: b.pos(n)})
-	b.noteAssign(obj)
 }
 
 func (b *builder) ret(n *sitter.Node, vals ...ir.VarID) {
-	var args []ir.VarID
-	for _, v := range vals {
-		if v != ir.NoVar {
-			args = append(args, v)
-		}
-	}
-	b.fn.Emit(ir.Instr{Op: ir.OpReturn, Dst: ir.NoVar, Args: args, Pos: b.pos(n)})
+	b.fn.Return(b.pos(n), vals...)
 	// Whatever follows on this path is unreachable.
 	b.terminated = true
 	b.newBlock()
@@ -1042,44 +1239,28 @@ func (b *builder) ret(n *sitter.Node, vals ...ir.VarID) {
 // caller, like a return, but the function goes on.
 func (b *builder) yieldValue(v ir.VarID, n *sitter.Node) {
 	if v != ir.NoVar {
-		b.fn.Emit(ir.Instr{Op: ir.OpReturn, Dst: ir.NoVar, Args: []ir.VarID{v}, Pos: b.pos(n)})
+		b.fn.Emit(ir.Instr{Op: ir.OpYield, Dst: ir.NoVar, Args: []ir.VarID{v}, Pos: b.pos(n)})
 	}
 }
 
 // newBlock starts a new basic block with edges from preds.
 func (b *builder) newBlock(preds ...int32) int32 {
-	return b.fn.NewBlock(b.floating > 0, preds...)
+	return b.fn.NewBlock(preds...)
 }
 
-// floatingRegion lowers code that runs at no fixed point of the function:
-// a lambda or local function body, which may run when it is created, later
-// or never. Its blocks are unordered, and a return inside it ends only it.
-func (b *builder) floatingRegion(body func()) {
-	from, terminated, targets, catchers := b.fn.CurBlock(), b.terminated, b.targets, b.catchers
-	b.floating++
-	b.targets, b.catchers = nil, nil
-	b.newBlock()
-	body()
-	b.floating--
-	b.fn.SetBlock(from)
-	b.terminated, b.targets, b.catchers = terminated, targets, catchers
-}
-
-// thrown is the variable a throw at this point reaches: the innermost
-// enclosing handler's, or the function's escaping exception.
-func (b *builder) thrown() ir.VarID {
-	if n := len(b.catchers); n > 0 {
-		return b.catchers[n-1]
-	}
-	if b.escaped == ir.NoVar {
-		b.escaped = b.fn.Temp(b.fn.Pos)
-	}
-	return b.escaped
-}
-
-// throwValue lowers throw/raise v.
+// throwValue lowers throw/raise v: the block ends, and the exception goes
+// to the enclosing try's handlers or leaves the function.
 func (b *builder) throwValue(v ir.VarID, n *sitter.Node) {
-	b.assign(b.thrown(), n, v)
+	if v == ir.NoVar {
+		v = b.temp(n)
+	}
+	b.fn.Throw(b.pos(n), v)
+	if len(b.tries) > 0 {
+		t := b.tries[len(b.tries)-1]
+		t.sites = append(t.sites, b.here())
+	}
+	b.terminated = true
+	b.newBlock()
 }
 
 // caughtValue is the value a catch clause binds: what the try body threw.
@@ -1097,34 +1278,27 @@ func (b *builder) emitCall(n *sitter.Node, c *ir.Call, args []ir.VarID, resultTy
 	}
 	dst := b.fn.Named("", resultType, b.pos(n))
 	defer b.noteReflect(c, args, dst)
-	// A call on a proxy runs its invocation handler with the arguments.
-	if c.HasRecv && len(args) > 0 {
-		if cb, ok := b.proxies[args[0]]; ok {
-			c.Callbacks = append(c.Callbacks, cb)
-			c.Target, c.Targets = "", nil
+	switch {
+	case c.HasRecv && len(args) > 0 && hasKey(b.proxies, args[0]):
+		// A call on a proxy runs its invocation handler with the proxy,
+		// the method and the arguments.
+		all := b.temp(n)
+		b.assign(all, n, args[1:]...)
+		c = &ir.Call{Name: c.Name, RecvText: c.RecvText, Indirect: true}
+		args = []ir.VarID{b.proxies[args[0]], args[0], b.constVar(c.Name, n), all}
+	case c.Target == "" && !c.HasRecv:
+		// Calling a closure held in a variable: show(email).
+		v, local := b.scope[c.Name]
+		if !local && b.closureInScope(c.Name) {
+			v, local = b.lookup(c.Name)
 		}
-	}
-	if c.Construct && c.Ctor == "" {
-		c.Ctor = b.p.ctorID(c.Callee)
-	}
-	c.Catch = []ir.VarID{b.thrown()}
-	// Calling a lambda held in a variable: show(email), show.invoke(email),
-	// show.accept(email), show.call(email). Its arguments reach the
-	// lambda's parameters.
-	if c.Target == "" && !c.Construct {
-		if v, ok := b.scope[c.Name]; ok && !c.HasRecv {
-			if cb, ok := b.lambdas[v]; ok {
-				c.Callbacks = append(c.Callbacks, cb)
-			}
+		if local && hasKey(b.closures, v) {
+			c.Indirect = true
+			args = append([]ir.VarID{v}, args...)
 		}
-		if c.HasRecv && len(args) > 0 {
-			if cb, ok := b.lambdas[args[0]]; ok {
-				c.Callbacks = append(c.Callbacks, cb)
-			}
-		}
-	}
-	if !c.Construct && c.RecvType != "" && c.Targets == nil {
-		c.Targets = b.p.overrides(c.RecvType, c.Name, c.Target)
+	case c.Target == "" && c.HasRecv && len(args) > 0 && hasKey(b.closures, args[0]):
+		// show.invoke(email), show.accept(email), show.call(email).
+		c.HasRecv, c.Indirect = false, true
 	}
 	for i, a := range args {
 		if name, ok := b.kwargs[a]; ok {
@@ -1134,54 +1308,100 @@ func (b *builder) emitCall(n *sitter.Node, c *ir.Call, args []ir.VarID, resultTy
 			c.ArgNames[i] = name
 		}
 	}
-	for _, a := range args {
-		if cb, ok := b.lambdas[a]; ok {
-			c.Callbacks = append(c.Callbacks, cb)
-		}
-	}
 	b.fn.Emit(ir.Instr{Op: ir.OpCall, Dst: dst, Args: args, Call: c, Pos: b.pos(n)})
+	b.mayThrow()
 	return dst
 }
 
-// lambda lowers a lambda/closure inline. params are declared in scope and
-// fed from a callback-input variable; the returned value variable carries
-// the lambda's result and anything assigned inside it.
-func (b *builder) lambda(n *sitter.Node, params []*sitter.Node, paramNames []string, implicitIt bool, body func() ir.VarID) ir.VarID {
-	cb := b.temp(n)
-	saved := map[string]ir.VarID{}
-	had := map[string]bool{}
-	declare := func(name string, pn *sitter.Node) {
-		if old, ok := b.scope[name]; ok {
-			saved[name], had[name] = old, true
-		} else {
-			had[name] = false
+// closureInScope reports whether name is an enclosing function's variable
+// holding a closure.
+func (b *builder) closureInScope(name string) bool {
+	for o := b.outer; o != nil; o = o.outer {
+		if v, ok := o.scope[name]; ok {
+			return hasKey(o.closures, v)
 		}
-		v := b.fn.Named(name, "", b.pos(pn))
-		b.scope[name] = v
-		b.assign(v, pn, cb)
 	}
+	return false
+}
+
+func hasKey[K comparable, V any](m map[K]V, k K) bool {
+	_, ok := m[k]
+	return ok
+}
+
+// newObject emits the construction of an object of class cls, running its
+// constructor when it is code under analysis.
+func (b *builder) newObject(n *sitter.Node, cls string, args []ir.VarID, resultType string) ir.VarID {
+	dst := b.fn.Named("", resultType, b.pos(n))
+	c := &ir.Call{Callee: cls, Name: shortName(cls), Target: b.p.ctorID(cls)}
+	for i, a := range args {
+		if name, ok := b.kwargs[a]; ok {
+			if c.ArgNames == nil {
+				c.ArgNames = make([]string, len(args))
+			}
+			c.ArgNames[i] = name
+		}
+	}
+	b.fn.Emit(ir.Instr{Op: ir.OpNew, Dst: dst, Args: args, Call: c, Pos: b.pos(n)})
+	b.mayThrow()
+	return dst
+}
+
+// lambda lowers a lambda, closure, anonymous class or local function as a
+// function of its own, with params (paramNames, or it when implicitIt) as
+// its parameters, and returns a variable holding the closure. Names the
+// body reads from the enclosing function become capture parameters, and
+// the closure binds the enclosing variables to them; this is captured
+// whenever there is one. body returns the value of an expression body.
+func (b *builder) lambda(n *sitter.Node, params []*sitter.Node, paramNames []string, implicitIt bool, body func() ir.VarID) ir.VarID {
+	b.p.closureSeq[b.fn.ID]++
+	id := fmt.Sprintf("%s$%d", b.fn.ID, b.p.closureSeq[b.fn.ID])
+	outer := *b
+	inner := builder{p: b.p, f: b.f, cls: b.cls, scope: map[string]ir.VarID{}, this: ir.NoVar, names: map[string]ir.VarID{},
+		closures: map[ir.VarID]string{}, caught: ir.NoVar, outer: &outer, captured: map[ir.VarID]ir.VarID{}}
+	inner.fn = &ir.Func{ID: id, Name: b.fn.Name + "$" + strconv.Itoa(b.p.closureSeq[b.fn.ID]), Lang: b.p.lang, File: b.f.rel, Pos: b.pos(n), Parent: b.fn.ID}
+	inner.fn.NewBlock()
+	*b = inner
 	for i, name := range paramNames {
-		declare(name, params[i])
+		b.param(name, "", params[i])
 	}
 	if implicitIt && len(paramNames) == 0 {
-		declare("it", n)
+		b.param("it", "", n)
 	}
-	b.assigns = append(b.assigns, nil)
-	last := ir.NoVar
-	b.floatingRegion(func() { last = body() })
-	assigned := b.assigns[len(b.assigns)-1]
-	b.assigns = b.assigns[:len(b.assigns)-1]
-	val := b.temp(n)
-	b.assign(val, n, append([]ir.VarID{last}, assigned...)...)
-	for name, was := range had {
-		if was {
-			b.scope[name] = saved[name]
-		} else {
-			delete(b.scope, name)
+	if outer.this != ir.NoVar {
+		b.this = b.capture("this", outer.this)
+	}
+	last := body()
+	if !b.terminated && last != ir.NoVar {
+		b.fn.Return(b.pos(n), last)
+	}
+	b.inputsFirst()
+	b.p.mod.Funcs = append(b.p.mod.Funcs, b.fn)
+	binds := b.binds
+	*b = outer
+	dst := b.temp(n)
+	b.fn.Emit(ir.Instr{Op: ir.OpClosure, Dst: dst, Args: binds, Func: id, Pos: b.pos(n)})
+	b.closures[dst] = id
+	return dst
+}
+
+// inputsFirst orders a closure's parameters as the IR requires: its own
+// parameters, then the captures in binding order.
+func (b *builder) inputsFirst() {
+	var in, caps []ir.VarID
+	for _, p := range b.fn.Params {
+		if b.isCapture(p) {
+			continue
 		}
+		in = append(in, p)
 	}
-	b.lambdas[val] = cb
-	return val
+	for _, ov := range b.binds {
+		caps = append(caps, b.captured[ov])
+	}
+	b.fn.Params = append(in, caps...)
+	for i, p := range b.fn.Params {
+		b.fn.Vars[p].Param = i
+	}
 }
 
 func (b *builder) markRefl(v ir.VarID, r reflHandle) {
@@ -1241,7 +1461,7 @@ func (b *builder) reflectCall(n *sitter.Node, c *ir.Call, args []ir.VarID) (ir.V
 		}
 		return b.emitCall(n, call, args[1:], ""), true
 	case h.kind == 'c' && c.Name == "newInstance":
-		return b.emitCall(n, &ir.Call{Callee: h.class, Name: shortName(h.class), Construct: true}, args[1:], h.class), true
+		return b.newObject(n, h.class, args[1:], h.class), true
 	}
 	return ir.NoVar, false
 }
@@ -1267,11 +1487,11 @@ func (b *builder) noteReflect(c *ir.Call, args []ir.VarID, dst ir.VarID) {
 		return
 	case "newProxyInstance":
 		if len(args) > 0 {
-			if cb, ok := b.lambdas[args[len(args)-1]]; ok {
+			if h := args[len(args)-1]; hasKey(b.closures, h) {
 				if b.proxies == nil {
 					b.proxies = map[ir.VarID]ir.VarID{}
 				}
-				b.proxies[dst] = cb
+				b.proxies[dst] = h
 			}
 		}
 		return
@@ -1301,13 +1521,28 @@ func (b *builder) noteReflect(c *ir.Call, args []ir.VarID, dst ir.VarID) {
 }
 
 func (b *builder) finish() *ir.Func {
-	if b.escaped != ir.NoVar {
-		// What the function throws, from wherever it is thrown.
-		b.fn.NewBlock(true)
-		b.fn.Emit(ir.Instr{Op: ir.OpReturn, Dst: ir.NoVar, Args: []ir.VarID{b.escaped}, Throw: true, Pos: b.fn.Pos})
-	}
 	b.p.mod.Funcs = append(b.p.mod.Funcs, b.fn)
 	return b.fn
+}
+
+// classTable is the class table of the program: every class, interface,
+// protocol and object with its supertypes and methods.
+func (p *program) classTable() []*ir.Class {
+	var out []*ir.Class
+	for _, name := range slices.Sorted(maps.Keys(p.classes)) {
+		c := p.classes[name]
+		k := &ir.Class{Name: c.name, Lang: p.lang, Methods: maps.Clone(c.methods)}
+		for _, s := range c.supers {
+			if sc := p.class(s); sc != nil {
+				s = sc.name
+			}
+			if !slices.Contains(k.Supers, s) {
+				k.Supers = append(k.Supers, s)
+			}
+		}
+		out = append(out, k)
+	}
+	return out
 }
 
 // ---- tree helpers ----

@@ -52,6 +52,7 @@ func (fe *javaFrontend) Lower(ctx context.Context, files []string) (*ir.Module, 
 			jp.lowerType(f, c, f.pkg)
 		}
 	}
+	jp.mod.Classes = jp.classTable()
 	return jp.mod, nil
 }
 
@@ -372,12 +373,12 @@ func (jb *jvBuilder) stmt(n *sitter.Node) ir.VarID {
 		return ir.NoVar
 	case "if_statement":
 		cond := n.ChildByFieldName("condition")
-		jb.stmt(cond)
+		c := jb.expr(cond)
 		var els func()
 		if alt := n.ChildByFieldName("alternative"); alt != nil {
 			els = func() { jb.stmt(alt) }
 		}
-		jb.ifElse(n, cond, func() { jb.stmt(n.ChildByFieldName("consequence")) }, els)
+		jb.ifElse(n, cond, c, func() { jb.stmt(n.ChildByFieldName("consequence")) }, els)
 		return ir.NoVar
 	case "while_statement", "do_statement":
 		cond := n.ChildByFieldName("condition")
@@ -419,7 +420,6 @@ func (jb *jvBuilder) stmt(n *sitter.Node) ir.VarID {
 		return ir.NoVar
 	case "switch_expression", "switch_statement":
 		jb.stmt(n.ChildByFieldName("condition"))
-		result := jb.temp(n)
 		var cases []func()
 		exhaustive, fallsThrough := false, false
 		for _, c := range named(n.ChildByFieldName("body")) {
@@ -428,10 +428,9 @@ func (jb *jvBuilder) stmt(n *sitter.Node) ir.VarID {
 			}
 			// case 1: ... falls through; case 1 -> ... does not.
 			fallsThrough = fallsThrough || c.Type() == "switch_block_statement_group"
-			cases = append(cases, func() { jb.assign(result, c, jb.stmt(c)) })
+			cases = append(cases, func() { jb.setResult(jb.stmt(c)) })
 		}
-		jb.switchCases(n, fallsThrough, exhaustive, cases)
-		return result
+		return jb.valued(n, func() { jb.switchCases(n, fallsThrough, exhaustive, cases) })
 	case "throw_statement":
 		if k := named(n); len(k) > 0 {
 			jb.throwValue(jb.expr(k[0]), n)
@@ -491,7 +490,7 @@ func (jb *jvBuilder) expr(n *sitter.Node) ir.VarID {
 	switch n.Type() {
 	case "identifier":
 		name := jb.text(n)
-		if _, local := jb.scope[name]; !local {
+		if _, local := jb.lookup(name); !local {
 			if q := jb.classRef(n); q != "" {
 				return jb.fn.Named(shortName(q), q, jb.pos(n))
 			}
@@ -529,18 +528,16 @@ func (jb *jvBuilder) expr(n *sitter.Node) ir.VarID {
 	case "object_creation_expression":
 		typ := jb.jp.resolveType(jb.f, javaTypeText(jb.f, n.ChildByFieldName("type")))
 		args := jb.args(n.ChildByFieldName("arguments"))
-		c := &ir.Call{Callee: typ, Name: shortName(typ), Construct: true}
-		if cb := firstOf(n, "class_body"); cb != nil {
-			anon := jb.lambda(cb, nil, nil, false, func() ir.VarID {
-				for _, m := range allOf(cb, "method_declaration") {
-					jb.params(m.ChildByFieldName("parameters"))
-					jb.stmt(m.ChildByFieldName("body"))
-				}
+		// Each method of an anonymous class is a closure the new object
+		// may run with what it is given.
+		for _, m := range allOf(firstOf(n, "class_body"), "method_declaration") {
+			args = append(args, jb.lambda(m, nil, nil, false, func() ir.VarID {
+				jb.params(m.ChildByFieldName("parameters"))
+				jb.stmt(m.ChildByFieldName("body"))
 				return ir.NoVar
-			})
-			args = append(args, anon)
+			}))
 		}
-		return jb.emitCall(n, c, args, typ)
+		return jb.newObject(n, typ, args, typ)
 	case "array_access":
 		base := jb.expr(n.ChildByFieldName("array"))
 		jb.expr(n.ChildByFieldName("index"))
@@ -555,11 +552,11 @@ func (jb *jvBuilder) expr(n *sitter.Node) ir.VarID {
 			op = jb.text(o)
 		}
 		l, r := jb.expr(n.ChildByFieldName("left")), jb.expr(n.ChildByFieldName("right"))
-		dst := jb.temp(n)
 		switch op {
 		case "==", "!=", "<", ">", "<=", ">=", "&&", "||":
-			return dst
+			return jb.logic(n, l, r)
 		}
+		dst := jb.temp(n)
 		jb.compute(dst, n, l, r)
 		return dst
 	case "ternary_expression":
@@ -581,7 +578,7 @@ func (jb *jvBuilder) expr(n *sitter.Node) ir.VarID {
 		if k := named(n); len(k) > 0 {
 			v := jb.expr(k[len(k)-1])
 			if strings.HasPrefix(jb.text(n), "!") {
-				return jb.temp(n)
+				return jb.logic(n, v)
 			}
 			return v
 		}
@@ -647,7 +644,7 @@ func (jb *jvBuilder) assignment(n *sitter.Node) ir.VarID {
 	switch left.Type() {
 	case "identifier":
 		name := jb.text(left)
-		if old, ok := jb.scope[name]; ok {
+		if old, ok := jb.lookup(name); ok {
 			dst := jb.redefine(name, old, "", left)
 			if op != "=" {
 				jb.assign(dst, n, old, v)
@@ -671,7 +668,7 @@ func (jb *jvBuilder) assignment(n *sitter.Node) ir.VarID {
 	case "array_access":
 		base := jb.expr(left.ChildByFieldName("array"))
 		jb.assign(base, n, v)
-		jb.noteAssign(base)
+		jb.cell(base)
 	}
 	return v
 }
@@ -689,7 +686,7 @@ func (jb *jvBuilder) classRef(n *sitter.Node) string {
 		return ""
 	}
 	name := jb.text(n)
-	if _, local := jb.scope[name]; local || !isUpperStart(name) {
+	if _, local := jb.lookup(name); local || !isUpperStart(name) {
 		return ""
 	}
 	if jb.cls != nil {
@@ -718,7 +715,7 @@ func (jb *jvBuilder) staticPath(n *sitter.Node) string {
 		txt := strings.ReplaceAll(jb.text(n), " ", "")
 		segs := strings.Split(txt, ".")
 		if len(segs) >= 2 && !isUpperStart(segs[0]) && isUpperStart(segs[len(segs)-1]) {
-			if _, local := jb.scope[segs[0]]; local {
+			if _, local := jb.lookup(segs[0]); local {
 				return ""
 			}
 			if jb.cls != nil {
@@ -741,7 +738,7 @@ func (jb *jvBuilder) typeOf(n *sitter.Node) string {
 	switch n.Type() {
 	case "identifier":
 		name := jb.text(n)
-		if v, ok := jb.scope[name]; ok {
+		if v, ok := jb.lookup(name); ok {
 			return jb.fn.Vars[v].Type
 		}
 		if jb.cls != nil {
@@ -811,10 +808,10 @@ func (jb *jvBuilder) methodRef(n *sitter.Node) ir.VarID {
 	}
 	obj, name := k[0], jb.text(k[len(k)-1])
 	return jb.lambda(n, nil, nil, true, func() ir.VarID {
-		it := jb.scope["it"]
+		it, _ := jb.lookup("it")
 		if strings.HasSuffix(jb.text(n), "::new") {
 			typ := jb.jp.resolveType(jb.f, jb.text(obj))
-			return jb.emitCall(n, &ir.Call{Callee: typ, Name: shortName(typ), Construct: true}, []ir.VarID{it}, typ)
+			return jb.newObject(n, typ, []ir.VarID{it}, typ)
 		}
 		return jb.invoke(n, obj, name, func() []ir.VarID { return []ir.VarID{it} })
 	})

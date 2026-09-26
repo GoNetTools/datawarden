@@ -58,6 +58,7 @@ func (fe *pyFrontend) Lower(ctx context.Context, files []string) (*ir.Module, er
 	for _, f := range pp.files {
 		pp.lowerFile(f)
 	}
+	pp.mod.Classes = pp.classTable()
 	return pp.mod, nil
 }
 
@@ -496,37 +497,33 @@ func (pb *pyBuilder) stmt(n *sitter.Node) ir.VarID {
 	}
 	switch n.Type() {
 	case "if_statement":
-		// if/elif/else: a clause whose condition is constant false is
+		// if/elif/else is a chain of ifs, each elif in the else branch of
+		// the one before. A clause whose condition is constant false is
 		// dropped; one that is constant true ends the chain.
-		var arms []func()
-		skippable := true
-		clause := func(cond, body *sitter.Node) bool {
-			pb.expr(cond)
-			v, known := pb.truth(cond)
-			if !known || v {
-				arms = append(arms, func() { pb.stmt(body) })
+		type clause struct{ cond, body *sitter.Node }
+		clauses := []clause{{n.ChildByFieldName("condition"), n.ChildByFieldName("consequence")}}
+		var elseBody *sitter.Node
+		for _, alt := range fieldChildren(n, "alternative") {
+			if alt.Type() == "else_clause" {
+				elseBody = alt.ChildByFieldName("body")
+				break
 			}
-			if known && v {
-				skippable = false
-				return false
+			clauses = append(clauses, clause{alt.ChildByFieldName("condition"), alt.ChildByFieldName("consequence")})
+		}
+		var chain func(i int)
+		chain = func(i int) {
+			c := clauses[i]
+			v := pb.expr(c.cond)
+			var els func()
+			switch {
+			case i+1 < len(clauses):
+				els = func() { chain(i + 1) }
+			case elseBody != nil:
+				els = func() { pb.stmt(elseBody) }
 			}
-			return true
+			pb.ifElse(n, c.cond, v, func() { pb.stmt(c.body) }, els)
 		}
-		if clause(n.ChildByFieldName("condition"), n.ChildByFieldName("consequence")) {
-			for _, alt := range fieldChildren(n, "alternative") {
-				if alt.Type() == "else_clause" {
-					skippable = false
-					arms = append(arms, func() { pb.stmt(alt.ChildByFieldName("body")) })
-					break
-				}
-				if !clause(alt.ChildByFieldName("condition"), alt.ChildByFieldName("consequence")) {
-					break
-				}
-			}
-		}
-		if len(arms) > 0 {
-			pb.branches(n, skippable, arms...)
-		}
+		chain(0)
 		return ir.NoVar
 	case "while_statement":
 		cond := n.ChildByFieldName("condition")
@@ -669,7 +666,7 @@ func (pb *pyBuilder) bind(t *sitter.Node, v ir.VarID) {
 	case "identifier":
 		name := pb.text(t)
 		var dst ir.VarID
-		if old, ok := pb.scope[name]; ok {
+		if old, ok := pb.lookup(name); ok {
 			dst = pb.redefine(name, old, "", t)
 		} else {
 			dst = pb.declare(name, "", t)
@@ -693,7 +690,7 @@ func (pb *pyBuilder) bind(t *sitter.Node, v ir.VarID) {
 			return
 		}
 		pb.assign(base, t, v)
-		pb.noteAssign(base)
+		pb.cell(base)
 	}
 }
 
@@ -717,7 +714,7 @@ func (pb *pyBuilder) assignment(n *sitter.Node) ir.VarID {
 	}
 	pb.bind(left, v)
 	if left != nil && left.Type() == "identifier" {
-		dst := pb.scope[pb.text(left)]
+		dst, _ := pb.lookup(pb.text(left))
 		typ := pb.pp.resolveType(pb.f, pyTypeName(pb.f, n.ChildByFieldName("type")))
 		if typ == "" && right != nil {
 			typ = pb.typeOf(right)
@@ -736,7 +733,7 @@ func (pb *pyBuilder) expr(n *sitter.Node) ir.VarID {
 	switch n.Type() {
 	case "identifier":
 		name := pb.text(n)
-		if _, local := pb.scope[name]; !local {
+		if _, local := pb.lookup(name); !local {
 			if q, ok := pb.f.imports[name]; ok {
 				return pb.fn.Named(name, q, pb.pos(n))
 			}
@@ -798,10 +795,11 @@ func (pb *pyBuilder) expr(n *sitter.Node) ir.VarID {
 		pb.yieldValue(v, n)
 		return pb.temp(n)
 	case "comparison_operator", "not_operator":
+		var vs []ir.VarID
 		for _, c := range named(n) {
-			pb.expr(c)
+			vs = append(vs, pb.expr(c))
 		}
-		return pb.temp(n)
+		return pb.logic(n, vs...)
 	case "conditional_expression":
 		k := named(n)
 		var parts []ir.VarID
@@ -913,7 +911,7 @@ func (pb *pyBuilder) staticPath(n *sitter.Node) string {
 	switch n.Type() {
 	case "identifier":
 		name := pb.text(n)
-		if _, local := pb.scope[name]; local {
+		if _, local := pb.lookup(name); local {
 			return ""
 		}
 		if q, ok := pb.f.imports[name]; ok {
@@ -936,7 +934,7 @@ func (pb *pyBuilder) typeOf(n *sitter.Node) string {
 	}
 	switch n.Type() {
 	case "identifier":
-		if v, ok := pb.scope[pb.text(n)]; ok {
+		if v, ok := pb.lookup(pb.text(n)); ok {
 			return pb.fn.Vars[v].Type
 		}
 		if c := pb.pp.class(pb.pp.resolveType(pb.f, pb.text(n))); c != nil {
@@ -949,7 +947,7 @@ func (pb *pyBuilder) typeOf(n *sitter.Node) string {
 	case "call":
 		fn := n.ChildByFieldName("function")
 		if fn != nil && fn.Type() == "identifier" {
-			if _, local := pb.scope[pb.text(fn)]; !local {
+			if _, local := pb.lookup(pb.text(fn)); !local {
 				if c := pb.pp.class(pb.pp.resolveType(pb.f, pb.text(fn))); c != nil {
 					return c.name
 				}
@@ -984,7 +982,7 @@ func (pb *pyBuilder) callWith(n, fn *sitter.Node, pre []ir.VarID) ir.VarID {
 	switch fn.Type() {
 	case "identifier":
 		name := pb.text(fn)
-		if v, local := pb.scope[name]; local {
+		if v, local := pb.lookup(name); local {
 			return pb.emitCall(n, &ir.Call{Name: name, HasRecv: true, RecvText: name}, append([]ir.VarID{v}, args()...), "")
 		}
 		if id, ok := pb.pp.top[pb.f.pkg+"."+name]; ok {
@@ -1023,7 +1021,7 @@ func (pb *pyBuilder) callWith(n, fn *sitter.Node, pre []ir.VarID) ir.VarID {
 		}
 		typ := pb.typeOf(obj)
 		if obj.Type() == "identifier" {
-			if _, local := pb.scope[pb.text(obj)]; !local {
+			if _, local := pb.lookup(pb.text(obj)); !local {
 				if c := pb.pp.class(pb.pp.resolveType(pb.f, pb.text(obj))); c != nil {
 					// Class.method(...): a static or class method.
 					if id := pb.pp.methodID(c.name, m, 0); id != "" {
@@ -1054,5 +1052,5 @@ func (pb *pyBuilder) callWith(n, fn *sitter.Node, pre []ir.VarID) ir.VarID {
 // construct lowers Class(...): like a constructor in the JVM frontends,
 // the new object carries its arguments.
 func (pb *pyBuilder) construct(n *sitter.Node, c *classInfo, args []ir.VarID) ir.VarID {
-	return pb.emitCall(n, &ir.Call{Callee: c.name, Name: c.short, Construct: true}, args, c.name)
+	return pb.newObject(n, c.name, args, c.name)
 }

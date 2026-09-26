@@ -283,3 +283,39 @@ func lambdaVariable(email: String) {
     }
     show(email)
 }
+
+// scenario: consent-guard
+protocol Consents {
+    func hasConsent() -> Bool
+}
+
+func consentGuard(email: String, consents: Consents) {
+    guard consents.hasConsent() else { return }
+    // Reported with the consent check that guards it.
+    // ruleid: log.swift.print
+    print(email)
+}
+
+// scenario: nested-field
+class Note {
+    var text = ""
+}
+
+class Folder {
+    var note = Note()
+}
+
+func nestedField(email: String) {
+    let f = Folder()
+    f.note.text = email
+    // ruleid: log.swift.print
+    print(f.note.text)
+}
+
+// scenario: closure-assign
+func closureAssign(email: String, items: [String]) {
+    var found = ""
+    items.forEach { _ in found = email }
+    // ruleid: log.swift.print
+    print(found)
+}

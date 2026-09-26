@@ -57,6 +57,7 @@ func (fe *ktFrontend) Lower(ctx context.Context, files []string) (*ir.Module, er
 	for _, f := range kp.files {
 		kp.lowerDecls(f, f.root, nil)
 	}
+	kp.mod.Classes = kp.classTable()
 	return kp.mod, nil
 }
 
@@ -477,7 +478,7 @@ func (kb *ktBuilder) callableRef(n *sitter.Node) ir.VarID {
 		}
 	}
 	return kb.lambda(n, nil, nil, true, func() ir.VarID {
-		it := kb.scope["it"]
+		it, _ := kb.lookup("it")
 		if c := kb.kp.class(cls); c != nil {
 			// Unbound: the first argument is the receiver.
 			call := &ir.Call{Callee: c.name + "." + member, Name: member, HasRecv: true, RecvType: c.name}
@@ -486,7 +487,7 @@ func (kb *ktBuilder) callableRef(n *sitter.Node) ir.VarID {
 			}
 			return kb.emitCall(n, call, []ir.VarID{it, it}, "")
 		}
-		if _, local := kb.scope[kb.text(owner)]; local || kb.this != ir.NoVar {
+		if _, local := kb.lookup(kb.text(owner)); local || kb.this != ir.NoVar {
 			// Bound: obj::send, this::send. The grammar parses the
 			// receiver as a type name, so it is looked up by name.
 			recv := kb.ident(kb.text(owner), owner)
@@ -722,18 +723,24 @@ func (kb *ktBuilder) stmt(n *sitter.Node) ir.VarID {
 		}})
 		return ir.NoVar
 	case "function_declaration":
-		// Local function: lower its body inline with its parameters as locals.
+		// Local function: a closure bound to its name, so calls of it run it.
+		var pnodes []*sitter.Node
+		var pnames []string
 		for _, p := range allOf(firstOf(n, "function_value_parameters"), "parameter") {
 			if id := firstOf(p, "simple_identifier"); id != nil {
-				kb.declare(kb.text(id), "", id)
+				pnodes, pnames = append(pnodes, id), append(pnames, kb.text(id))
 			}
 		}
-		if body := firstOf(n, "function_body"); body != nil {
-			kb.floatingRegion(func() {
-				for _, k := range named(body) {
-					kb.block(k)
-				}
-			})
+		body := firstOf(n, "function_body")
+		fn := kb.lambda(n, pnodes, pnames, false, func() ir.VarID {
+			last := ir.NoVar
+			for _, k := range named(body) {
+				last = kb.block(k)
+			}
+			return last
+		})
+		if id := firstOf(n, "simple_identifier"); id != nil {
+			kb.scope[kb.text(id)] = fn
 		}
 		return ir.NoVar
 	case "class_declaration", "object_declaration", "type_alias", "line_comment", "multiline_comment":
@@ -754,7 +761,7 @@ func (kb *ktBuilder) assignment(n *sitter.Node) {
 	switch {
 	case len(tk) == 1 && tk[0].Type() == "simple_identifier":
 		name := kb.text(tk[0])
-		if old, ok := kb.scope[name]; ok {
+		if old, ok := kb.lookup(name); ok {
 			dst := kb.redefine(name, old, "", tk[0])
 			if augmented {
 				kb.assign(dst, n, old, v)
@@ -769,13 +776,27 @@ func (kb *ktBuilder) assignment(n *sitter.Node) {
 				return
 			}
 		}
+		if it, ok := kb.scope["it"]; ok && kb.outer != nil && kb.fn.Vars[it].Param >= 0 {
+			// A property of the lambda's receiver: User().apply { email = x }.
+			kb.store(it, name, "", v, n)
+			return
+		}
 		dst := kb.declare(name, "", tk[0])
 		kb.assign(dst, n, v)
 	case len(tk) >= 2 && tk[len(tk)-1].Type() == "navigation_suffix":
 		objNode := tk[0]
-		obj := kb.expr(objNode)
+		obj, owner := kb.expr(objNode), kb.typeOf(objNode)
+		// a.b.c = v: the object is a.b.
+		for _, suf := range tk[1 : len(tk)-1] {
+			if suf.Type() != "navigation_suffix" {
+				break
+			}
+			name := kb.text(firstOf(suf, "simple_identifier"))
+			obj = kb.load(obj, name, owner, suf)
+			owner = kb.fn.Vars[obj].Type
+		}
 		field := kb.text(firstOf(tk[len(tk)-1], "simple_identifier"))
-		kb.store(obj, field, kb.typeOf(objNode), v, n)
+		kb.store(obj, field, owner, v, n)
 	case len(tk) >= 2 && tk[len(tk)-1].Type() == "indexing_suffix":
 		obj := kb.expr(tk[0])
 		idx := named(tk[len(tk)-1])
@@ -783,7 +804,7 @@ func (kb *ktBuilder) assignment(n *sitter.Node) {
 			kb.store(obj, unquote(kb.text(idx[0])), "", v, n)
 		} else {
 			kb.assign(obj, n, v)
-			kb.noteAssign(obj)
+			kb.cell(obj)
 		}
 	default:
 		for _, t := range tk {
@@ -805,7 +826,7 @@ func (kb *ktBuilder) expr(n *sitter.Node) ir.VarID {
 	switch t := n.Type(); t {
 	case "simple_identifier":
 		name := kb.text(n)
-		if _, local := kb.scope[name]; !local {
+		if _, local := kb.lookup(name); !local {
 			if q := kb.classRef(n); q != "" {
 				v := kb.fn.Named(shortName(q), q, kb.pos(n))
 				return v
@@ -919,8 +940,7 @@ func (kb *ktBuilder) expr(n *sitter.Node) ir.VarID {
 			return kb.temp(n)
 		}
 		if strings.HasPrefix(kb.text(n), "!") && !strings.HasSuffix(kb.text(n), "!!") {
-			kb.expr(kids[len(kids)-1])
-			return kb.temp(n)
+			return kb.logic(n, kb.expr(kids[len(kids)-1]))
 		}
 		for _, k := range kids {
 			if k.Type() != "annotation" && k.Type() != "label" {
@@ -976,10 +996,11 @@ func (kb *ktBuilder) expr(n *sitter.Node) ir.VarID {
 		return kb.temp(n)
 	default:
 		if ktBool[t] {
+			var vs []ir.VarID
 			for _, c := range named(n) {
-				kb.expr(c)
+				vs = append(vs, kb.expr(c))
 			}
-			return kb.temp(n)
+			return kb.logic(n, vs...)
 		}
 	}
 	// Generic: the value depends on every child (additive, elvis, range,
@@ -1005,20 +1026,25 @@ var ktComputed = map[string]bool{"additive_expression": true, "multiplicative_ex
 // path from the scope before it, and the expression's value is the value of
 // whichever arm ran.
 func (kb *ktBuilder) conditional(n *sitter.Node) ir.VarID {
-	result := kb.temp(n)
+	return kb.valued(n, func() { kb.conditionalArms(n) })
+}
+
+func (kb *ktBuilder) conditionalArms(n *sitter.Node) {
+	set := kb.setResult
 	arm := func(body *sitter.Node) func() {
-		return func() { kb.assign(result, body, kb.block(body)) }
+		return func() { set(kb.block(body)) }
 	}
 	switch n.Type() {
 	case "if_expression":
 		var cond *sitter.Node
+		cv := ir.NoVar
 		var bodies []*sitter.Node
 		for _, c := range named(n) {
 			if c.Type() == "control_structure_body" {
 				bodies = append(bodies, c)
 			} else {
 				cond = c
-				kb.expr(c)
+				cv = kb.expr(c)
 			}
 		}
 		if len(bodies) == 0 {
@@ -1028,7 +1054,7 @@ func (kb *ktBuilder) conditional(n *sitter.Node) ir.VarID {
 		if len(bodies) > 1 {
 			els = arm(bodies[1])
 		}
-		kb.ifElse(n, cond, arm(bodies[0]), els)
+		kb.ifElse(n, cond, cv, arm(bodies[0]), els)
 	case "when_expression":
 		var arms []func()
 		exhaustive := false
@@ -1075,7 +1101,7 @@ func (kb *ktBuilder) conditional(n *sitter.Node) ir.VarID {
 						kb.assign(kb.declare(kb.text(id), "", id), id, kb.caughtValue(id))
 					}
 					if b := firstOf(c, "statements"); b != nil {
-						kb.assign(result, b, kb.block(b))
+						set(kb.block(b))
 					}
 				})
 			case "finally_block":
@@ -1088,11 +1114,10 @@ func (kb *ktBuilder) conditional(n *sitter.Node) ir.VarID {
 		}
 		kb.tryCatch(n, func() {
 			if body != nil {
-				kb.assign(result, body, kb.block(body))
+				set(kb.block(body))
 			}
 		}, handlers, finally)
 	}
-	return result
 }
 
 func (kb *ktBuilder) lambdaLit(n *sitter.Node) ir.VarID {
@@ -1139,7 +1164,7 @@ func (kb *ktBuilder) classRef(n *sitter.Node) string {
 	switch n.Type() {
 	case "simple_identifier":
 		name := kb.text(n)
-		if _, local := kb.scope[name]; local {
+		if _, local := kb.lookup(name); local {
 			return ""
 		}
 		if kb.cls != nil {
@@ -1170,7 +1195,7 @@ func (kb *ktBuilder) classRef(n *sitter.Node) string {
 		}
 		// Fully qualified: android.util.Log
 		if !isUpperStart(segs[0]) && isUpperStart(segs[len(segs)-1]) {
-			if _, local := kb.scope[segs[0]]; local {
+			if _, local := kb.lookup(segs[0]); local {
 				return ""
 			}
 			for _, s := range segs[:len(segs)-1] {
@@ -1189,7 +1214,7 @@ func (kb *ktBuilder) typeOf(n *sitter.Node) string {
 	switch n.Type() {
 	case "simple_identifier":
 		name := kb.text(n)
-		if v, ok := kb.scope[name]; ok {
+		if v, ok := kb.lookup(name); ok {
 			return kb.fn.Vars[v].Type
 		}
 		if kb.cls != nil {
@@ -1297,7 +1322,7 @@ func (kb *ktBuilder) call(n *sitter.Node) ir.VarID {
 	case "simple_identifier":
 		name := kb.text(calleeNode)
 		args := kb.args(suffix)
-		if v, local := kb.scope[name]; local {
+		if v, local := kb.lookup(name); local {
 			return kb.emitCall(n, &ir.Call{Name: "invoke", HasRecv: true, RecvText: name}, append([]ir.VarID{v}, args...), "")
 		}
 		// Method of the enclosing class (or its companion/object).
@@ -1332,7 +1357,7 @@ func (kb *ktBuilder) call(n *sitter.Node) ir.VarID {
 		// Constructor.
 		if isUpperStart(name) {
 			q := kb.kp.resolveType(kb.f, name)
-			return kb.emitCall(n, &ir.Call{Callee: q, Name: name, Construct: true}, args, q)
+			return kb.newObject(n, q, args, q)
 		}
 		c := &ir.Call{Name: name}
 		if q, ok := kb.f.imports[name]; ok {
