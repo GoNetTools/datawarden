@@ -26,6 +26,8 @@ type LiteralHit struct {
 	Hash     string  `json:"value_hash"`
 	Conf     float64 `json:"confidence"`
 	Detector string  `json:"detector"`
+	// Class is the data type's class (pii, credential, ...).
+	Class string `json:"class,omitempty"`
 }
 
 // LiteralScanner finds sensitive values (literals) in text.
@@ -171,6 +173,12 @@ func (s *LiteralScanner) Scan(content []byte) []LiteralHit {
 				}
 				emit("bank_account", m[0], v, conf, "iban-mod97")
 			}
+		}
+	}
+	for i := range hits {
+		hits[i].Class = "pii"
+		if s.Classifier != nil {
+			hits[i].Class = s.Classifier.Lookup(hits[i].DataType).Class
 		}
 	}
 	return hits

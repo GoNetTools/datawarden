@@ -1346,6 +1346,39 @@ func (b *builder) load(obj ir.VarID, field, owner string, n *sitter.Node) ir.Var
 	return dst
 }
 
+// literalField is a property of an object or map literal with a static key.
+type literalField struct {
+	name string
+	val  ir.VarID
+	n    *sitter.Node
+}
+
+// objectLiteral lowers an object or map literal: a new value holding the
+// merged parts (spreads, computed keys), then a store of each field. A
+// function-valued field stays merged into the value, so it is called only
+// through that object ({run: () => ...}.run()), not by every method call
+// of that name on an object of unknown type.
+func (b *builder) objectLiteral(n *sitter.Node, parts []ir.VarID, fields []literalField) ir.VarID {
+	var data []literalField
+	for _, f := range fields {
+		if _, fn := b.closures[f.val]; fn {
+			parts = append(parts, f.val)
+			continue
+		}
+		data = append(data, f)
+	}
+	dst := b.temp(n)
+	if len(parts) > 0 {
+		b.assign(dst, n, parts...)
+	} else {
+		b.fn.Emit(ir.Instr{Op: ir.OpNew, Dst: dst, Call: &ir.Call{Name: "{}"}, Pos: b.pos(n)})
+	}
+	for _, f := range data {
+		b.store(dst, f.name, "", f.val, f.n)
+	}
+	return dst
+}
+
 func (b *builder) store(obj ir.VarID, field, owner string, val ir.VarID, n *sitter.Node) {
 	if obj == ir.NoVar || val == ir.NoVar {
 		return

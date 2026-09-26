@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"slices"
 	"sort"
 	"strings"
 
@@ -121,9 +122,8 @@ func (s *Summary) addParamSink(i int, h SinkHit) {
 		s.ParamSink = map[int][]SinkHit{}
 	}
 	list := s.ParamSink[i]
-	k := h.Rule + "|" + h.Sink.String() + "|" + xfKey(h.Xf) + "|" + h.Field
 	for j := range list {
-		if list[j].Rule+"|"+list[j].Sink.String()+"|"+xfKey(list[j].Xf)+"|"+list[j].Field == k {
+		if o := &list[j]; o.Rule == h.Rule && o.Sink == h.Sink && o.Field == h.Field && slices.Equal(o.Xf, h.Xf) {
 			// An unguarded path outweighs a guarded one.
 			og, ng := len(list[j].Guards) > 0, len(h.Guards) > 0
 			if (og && !ng) || (og == ng && h.Conf > list[j].Conf) {

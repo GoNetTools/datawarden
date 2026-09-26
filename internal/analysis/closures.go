@@ -144,23 +144,32 @@ func (cf *closureFlow) addField(owner, field string, src []closure) {
 	cf.grew = cf.grew || grew
 }
 
-// field returns the closures stored in field of objects of type owner, its
-// supertypes, or of unknown type; with owner unknown, of any type.
-func (cf *closureFlow) field(owner, field string) []closure {
+// field returns the closures of language lang stored in field of objects
+// of type owner, its supertypes, or of unknown type; with owner unknown,
+// of any type. Code in one language does not read another's objects.
+func (cf *closureFlow) field(owner, field, lang string) []closure {
 	m := cf.fields[field]
 	if len(m) == 0 {
 		return nil
 	}
+	var out []closure
+	add := func(src []closure) {
+		for _, c := range src {
+			if f := cf.a.funcs[c.fn]; f != nil && f.Lang != lang {
+				continue
+			}
+			out, _ = cf.addAll(out, []closure{c}, false, nil)
+		}
+	}
 	if owner == "" {
-		var out []closure
 		for _, k := range sortedKeys(m) {
-			out, _ = cf.addAll(out, m[k], false, nil)
+			add(m[k])
 		}
 		return out
 	}
-	out, _ := cf.addAll(nil, m[""], false, nil)
+	add(m[""])
 	for _, o := range cf.a.cha.ancestors(owner) {
-		out, _ = cf.addAll(out, m[o], false, nil)
+		add(m[o])
 	}
 	return out
 }
@@ -265,7 +274,7 @@ func (cf *closureFlow) invoked(fn *ir.Func, in *ir.Instr, of func(ir.VarID) []cl
 		if owner == "" {
 			owner = ownerOf(fn, recv)
 		}
-		out := cf.field(owner, c.Name)
+		out := cf.field(owner, c.Name, fn.Lang)
 		if held := of(recv); len(held) > 0 {
 			closureArg := false
 			for _, a := range in.Args[1:] {
@@ -280,7 +289,7 @@ func (cf *closureFlow) invoked(fn *ir.Func, in *ir.Instr, of func(ir.VarID) []cl
 	// A method calling a closure-typed property of its own class without
 	// writing the receiver (onSend(v) in Swift).
 	if c.Name != "" && len(fn.Params) > 0 && fn.Parent == "" && isSelf(fn.Vars[fn.Params[0]].Name) {
-		return cf.field(ownerOf(fn, fn.Params[0]), c.Name), 0
+		return cf.field(ownerOf(fn, fn.Params[0]), c.Name, fn.Lang), 0
 	}
 	return nil, 0
 }
@@ -310,12 +319,17 @@ func (cf *closureFlow) transfer(fn *ir.Func, in *ir.Instr) {
 		if owner == "" {
 			owner = ownerOf(fn, in.Args[0])
 		}
-		cf.addVar(fn.ID, in.Dst, cf.field(owner, in.Field), false)
+		cf.addVar(fn.ID, in.Dst, cf.field(owner, in.Field, fn.Lang), false)
 		// An element of a collection holding closures.
 		cf.addVar(fn.ID, in.Dst, of(in.Args[0]), false)
 		// The loaded object is the one in the field: what is added to it
-		// (this.handlers.add(h)) is in the field.
-		cf.addField(owner, in.Field, of(in.Dst))
+		// (this.handlers.add(h)) is in the field. Only for an owner of
+		// known type: with an unknown one, the field would stand for that
+		// field of every object, and what one local object holds would
+		// reach every read of a field of that name.
+		if owner != "" {
+			cf.addField(owner, in.Field, of(in.Dst))
+		}
 	case ir.OpStore:
 		if len(in.Args) < 2 {
 			return

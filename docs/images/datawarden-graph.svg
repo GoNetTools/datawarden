@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1087" height="650" viewBox="0 0 1087 650" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+<style>
+  .bg { fill: #ffffff; }
+  .title { fill: #1f2328; font-size: 16px; font-weight: 600; }
+  .sub, .detail, .elabel { fill: #59636e; }
+  .sub { font-size: 12px; }
+  .detail { font-size: 10px; }
+  .label { font-size: 12px; font-weight: 600; fill: #1f2328; }
+  .fn rect { fill: #f6f8fa; stroke: #d0d7de; }
+  .caller rect { fill: #ffffff; stroke: #d0d7de; stroke-dasharray: 4 3; }
+  .source rect { fill: #2f6fce; stroke: #2f6fce; }
+  .source .label, .source .detail, .sink .label, .sink .detail { fill: #ffffff; }
+  .edge { fill: none; stroke: #8c959f; stroke-width: 1.4; }
+  .edge.calls { stroke-dasharray: 5 4; stroke: #afb8c1; }
+  .elabel { font-size: 10px; }
+  .elabg { fill: #ffffff; opacity: 0.85; }
+  .arrow { fill: #8c959f; }
+  @media (prefers-color-scheme: dark) {
+    .bg { fill: #0d1117; }
+    .title, .label { fill: #e6edf3; }
+    .sub, .detail, .elabel { fill: #9198a1; }
+    .fn rect { fill: #161b22; stroke: #3d444d; }
+    .caller rect { fill: #0d1117; stroke: #3d444d; }
+    .edge { stroke: #6e7681; }
+    .edge.calls { stroke: #484f58; }
+    .elabg { fill: #0d1117; }
+    .arrow { fill: #6e7681; }
+  }
+</style>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="arrow" d="M 0 0 L 10 5 L 0 10 z"/></marker></defs>
+<rect class="bg" width="1087" height="650"/>
+<text class="title" x="24" y="32">Personal data flows</text>
+<text class="sub" x="24" y="52">8 flow(s) · 8 sink(s) · sources → functions → sinks · dashed: callers</text>
+<rect x="975.4" y="43" width="10" height="10" rx="2" style="fill:#d64545"/><text class="sub" x="989.4" y="52">third party</text>
+<rect x="903.4" y="43" width="10" height="10" rx="2" style="fill:#8e5cc7"/><text class="sub" x="917.4" y="52">storage</text>
+<rect x="831.4" y="43" width="10" height="10" rx="2" style="fill:#2f8f9d"/><text class="sub" x="845.4" y="52">network</text>
+<rect x="783.4" y="43" width="10" height="10" rx="2" style="fill:#d9822b"/><text class="sub" x="797.4" y="52">log</text>
+<path class="edge" d="M 290.0 141.0 C 393.4 141.0, 393.4 265.0, 494.8 265.0" marker-end="url(#arrow)"/>
+<rect class="elabg" x="353.4" y="193.0" width="80.0" height="14" rx="3"/><text class="elabel" x="393.4" y="204.0" text-anchor="middle">access_token</text>
+<path class="edge" d="M 627.8 265.0 C 680.2 265.0, 680.2 110.0, 730.6 110.0" marker-end="url(#arrow)"/>
+<rect class="elabg" x="640.2" y="177.5" width="80.0" height="14" rx="3"/><text class="elabel" x="680.2" y="188.5" text-anchor="middle">access_token</text>
+<path class="edge" d="M 392.0 203.0 C 437.0 203.0, 437.0 327.0, 480.0 327.0" marker-end="url(#arrow)"/>
+<rect class="elabg" x="412.0" y="255.0" width="50.0" height="14" rx="3"/><text class="elabel" x="437.0" y="266.0" text-anchor="middle">address</text>
+<path class="edge" d="M 642.6 327.0 C 687.6 327.0, 687.6 172.0, 730.6 172.0" marker-end="url(#arrow)"/>
+<rect class="elabg" x="662.6" y="239.5" width="50.0" height="14" rx="3"/><text class="elabel" x="687.6" y="250.5" text-anchor="middle">address</text>
+<path class="edge" d="M 353.0 265.0 C 417.5 265.0, 417.5 327.0, 480.0 327.0" marker-end="url(#arrow)"/>
+<rect class="elabg" x="380.5" y="286.0" width="74.0" height="14" rx="3"/><text class="elabel" x="417.5" y="297.0" text-anchor="middle">credit_card</text>
+<path class="edge" d="M 642.6 327.0 C 687.6 327.0, 687.6 296.0, 730.6 296.0" marker-end="url(#arrow)"/>
+<rect class="elabg" x="650.6" y="301.5" width="74.0" height="14" rx="3"/><text class="elabel" x="687.6" y="312.5" text-anchor="middle">credit_card</text>
+<path class="edge" d="M 272.0 327.0 C 377.0 327.0, 377.0 327.0, 480.0 327.0" marker-end="url(#arrow)"/>
+<rect class="elabg" x="358.0" y="317.0" width="38.0" height="14" rx="3"/><text class="elabel" x="377.0" y="328.0" text-anchor="middle">email</text>
+<path class="edge" d="M 642.6 327.0 C 687.6 327.0, 687.6 420.0, 730.6 420.0" marker-end="url(#arrow)"/>
+<rect class="elabg" x="668.6" y="363.5" width="38.0" height="14" rx="3"/><text class="elabel" x="687.6" y="374.5" text-anchor="middle">email</text>
+<path class="edge" d="M 266.0 389.0 C 374.0 389.0, 374.0 327.0, 480.0 327.0" marker-end="url(#arrow)"/>
+<rect class="elabg" x="355.0" y="348.0" width="38.0" height="14" rx="3"/><text class="elabel" x="374.0" y="359.0" text-anchor="middle">email</text>
+<path class="edge" d="M 642.6 327.0 C 687.6 327.0, 687.6 358.0, 730.6 358.0" marker-end="url(#arrow)"/>
+<rect class="elabg" x="668.6" y="332.5" width="38.0" height="14" rx="3"/><text class="elabel" x="687.6" y="343.5" text-anchor="middle">email</text>
+<path class="edge" d="M 353.0 513.0 C 417.5 513.0, 417.5 389.0, 480.0 389.0" marker-end="url(#arrow)"/>
+<rect class="elabg" x="389.5" y="441.0" width="56.0" height="14" rx="3"/><text class="elabel" x="417.5" y="452.0" text-anchor="middle">location</text>
+<path class="edge" d="M 642.6 389.0 C 687.6 389.0, 687.6 544.0, 730.6 544.0" marker-end="url(#arrow)"/>
+<rect class="elabg" x="659.6" y="456.5" width="56.0" height="14" rx="3"/><text class="elabel" x="687.6" y="467.5" text-anchor="middle">location</text>
+<path class="edge" d="M 272.0 451.0 C 377.0 451.0, 377.0 327.0, 480.0 327.0" marker-end="url(#arrow)"/>
+<rect class="elabg" x="358.0" y="379.0" width="38.0" height="14" rx="3"/><text class="elabel" x="377.0" y="390.0" text-anchor="middle">phone</text>
+<path class="edge" d="M 642.6 327.0 C 687.6 327.0, 687.6 234.0, 730.6 234.0" marker-end="url(#arrow)"/>
+<rect class="elabg" x="668.6" y="270.5" width="38.0" height="14" rx="3"/><text class="elabel" x="687.6" y="281.5" text-anchor="middle">phone</text>
+<path class="edge" d="M 642.6 327.0 C 687.6 327.0, 687.6 482.0, 730.6 482.0" marker-end="url(#arrow)"/>
+<rect class="elabg" x="668.6" y="394.5" width="38.0" height="14" rx="3"/><text class="elabel" x="687.6" y="405.5" text-anchor="middle">phone</text>
+<g class="source"><title>src:access_token:identifier &#34;accessToken&#34;</title><rect x="126.0" y="119.0" width="164.0" height="44" rx="8"/><text class="label" x="136.0" y="137.0">access_token</text><text class="detail" x="136.0" y="152.0">identifier &#34;accessToken&#34;</text></g>
+<g class="fn"><title>fn:web/src/checkout:signIn</title><rect x="496.8" y="243.0" width="131.0" height="44" rx="8"/><text class="label" x="506.8" y="261.0">checkout.signIn</text><text class="detail" x="506.8" y="276.0">checkout.ts</text></g>
+<g class="sink"><title>sink:storage.ts.web_storage:web/src/checkout.ts:53:3</title><rect x="732.6" y="88.0" width="301.2" height="44" rx="8" style="fill:#8e5cc7;stroke:#8e5cc7"/><text class="label" x="742.6" y="106.0">localStorage.setItem → browser-storage</text><text class="detail" x="742.6" y="121.0">checkout.ts:53:3</text></g>
+<g class="source"><title>src:address:field Shopper.shippingAddress (field name shippingAddress)</title><rect x="24.0" y="181.0" width="368.0" height="44" rx="8"/><text class="label" x="34.0" y="199.0">address</text><text class="detail" x="34.0" y="214.0">field Shopper.shippingAddress (field name shippingAddress)</text></g>
+<g class="fn"><title>fn:web/src/checkout:placeOrder</title><rect x="482.0" y="305.0" width="160.6" height="44" rx="8"/><text class="label" x="492.0" y="323.0">checkout.placeOrder</text><text class="detail" x="492.0" y="338.0">checkout.ts</text></g>
+<g class="sink"><title>sink:log.ts.console:web/src/checkout.ts:27:3</title><rect x="732.6" y="150.0" width="175.4" height="44" rx="8" style="fill:#d9822b;stroke:#d9822b"/><text class="label" x="742.6" y="168.0">console.log → console</text><text class="detail" x="742.6" y="183.0">checkout.ts:27:3</text></g>
+<g class="source"><title>src:credit_card:field Card.cardNumber (field name cardNumber)</title><rect x="63.0" y="243.0" width="290.0" height="44" rx="8"/><text class="label" x="73.0" y="261.0">credit_card</text><text class="detail" x="73.0" y="276.0">field Card.cardNumber (field name cardNumber)</text></g>
+<g class="sink"><title>sink:storage.ts.web_storage:web/src/checkout.ts:25:3</title><rect x="732.6" y="274.0" width="301.2" height="44" rx="8" style="fill:#8e5cc7;stroke:#8e5cc7"/><text class="label" x="742.6" y="292.0">localStorage.setItem → browser-storage</text><text class="detail" x="742.6" y="307.0">checkout.ts:25:3</text></g>
+<g class="source"><title>src:email:identifier &#34;email&#34;</title><rect x="144.0" y="305.0" width="128.0" height="44" rx="8"/><text class="label" x="154.0" y="323.0">email</text><text class="detail" x="154.0" y="338.0">identifier &#34;email&#34;</text></g>
+<g class="sink"><title>sink:sdk.ts.sentry.set_user:web/src/checkout.ts:21:3</title><rect x="732.6" y="398.0" width="197.6" height="44" rx="8" style="fill:#d64545;stroke:#d64545"/><text class="label" x="742.6" y="416.0">browser.setUser → Sentry</text><text class="detail" x="742.6" y="431.0">checkout.ts:21:3</text></g>
+<g class="source"><title>src:email:key &#34;emailOptIn&#34;</title><rect x="150.0" y="367.0" width="116.0" height="44" rx="8"/><text class="label" x="160.0" y="385.0">email</text><text class="detail" x="160.0" y="400.0">key &#34;emailOptIn&#34;</text></g>
+<g class="sink"><title>sink:storage.ts.web_storage:web/src/checkout.ts:39:3</title><rect x="732.6" y="336.0" width="301.2" height="44" rx="8" style="fill:#8e5cc7;stroke:#8e5cc7"/><text class="label" x="742.6" y="354.0">localStorage.setItem → browser-storage</text><text class="detail" x="742.6" y="369.0">checkout.ts:39:3</text></g>
+<g class="source"><title>src:location:call navigator.geolocation.getCurrentPosition</title><rect x="63.0" y="491.0" width="290.0" height="44" rx="8"/><text class="label" x="73.0" y="509.0">location</text><text class="detail" x="73.0" y="524.0">call navigator.geolocation.getCurrentPosition</text></g>
+<g class="fn"><title>fn:web/src/checkout:trackStore</title><rect x="482.0" y="367.0" width="160.6" height="44" rx="8"/><text class="label" x="492.0" y="385.0">checkout.trackStore</text><text class="detail" x="492.0" y="400.0">checkout.ts</text></g>
+<g class="sink"><title>sink:net.ts.beacon:web/src/checkout.ts:45:5</title><rect x="732.6" y="522.0" width="330.8" height="44" rx="8" style="fill:#2f8f9d;stroke:#2f8f9d"/><text class="label" x="742.6" y="540.0">navigator.sendBeacon → ads.tracker.example</text><text class="detail" x="742.6" y="555.0">checkout.ts:45:5</text></g>
+<g class="source"><title>src:phone:identifier &#34;phone&#34;</title><rect x="144.0" y="429.0" width="128.0" height="44" rx="8"/><text class="label" x="154.0" y="447.0">phone</text><text class="detail" x="154.0" y="462.0">identifier &#34;phone&#34;</text></g>
+<g class="sink"><title>sink:net.ts.fetch:web/src/checkout.ts:29:9</title><rect x="732.6" y="212.0" width="249.4" height="44" rx="8" style="fill:#2f8f9d;stroke:#2f8f9d"/><text class="label" x="742.6" y="230.0">fetch → api.partner-crm.example</text><text class="detail" x="742.6" y="245.0">checkout.ts:29:9</text></g>
+<g class="sink"><title>sink:sdk.ts.posthog:web/src/checkout.ts:23:3</title><rect x="732.6" y="460.0" width="227.2" height="44" rx="8" style="fill:#d64545;stroke:#d64545"/><text class="label" x="742.6" y="478.0">posthog-js.capture → PostHog</text><text class="detail" x="742.6" y="493.0">checkout.ts:23:3</text></g>
+</svg>

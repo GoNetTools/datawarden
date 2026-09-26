@@ -203,3 +203,44 @@ export function inlineObjectType(u: { email: string }) {
     console.log(key, value);
   }
 }
+
+function authConfig(apiKey: string) {
+  return { url: "https://api.example.com", key: apiKey };
+}
+
+async function loadAuthConfig(apiKey: string) {
+  return { url: "https://api.example.com", key: apiKey };
+}
+
+export async function literalFields(apiKey: string) {
+  // A property of an object literal holds only its own value, also when
+  // the object is returned (by an async function too).
+  const o = { url: "https://api.example.com", key: apiKey };
+  // ok: log.ts.console
+  console.log(o.url);
+  // ruleid: log.ts.console
+  console.log(o.key);
+  const c = await loadAuthConfig(apiKey);
+  // ok: log.ts.console
+  console.log(c.url);
+  const d = authConfig(apiKey);
+  // ok: log.ts.console
+  console.log(d.url);
+  // ruleid: log.ts.console
+  console.log(d.key);
+}
+
+const formatter = {
+  render: (v: string) => {
+    // A function in an object literal runs only when called through that
+    // object, not on every call of a method named render.
+    // ok: log.ts.console
+    console.log(v);
+    return v;
+  },
+};
+
+export function unrelatedRender(view: any, email: string) {
+  view.render(email);
+  return formatter;
+}

@@ -57,6 +57,8 @@ func TestIsTestPath(t *testing.T) {
 	for p, want := range map[string]bool{
 		"app/src/test/java/Foo.java": true, "pkg/x_test.go": true, "app/FooTest.kt": true, "web/app.spec.ts": true,
 		"web/__tests__/a.ts": true, "src/main/Foo.kt": false, "pkg/x.go": false,
+		"saleor/account/tests/factories.py": true, "test/oidc/config.yml": true, "spec/models/user.rb": true,
+		"fixtures/customers.json": false, "db/seed.sql": false, "src/testing/helpers.ts": false,
 	} {
 		if got := IsTestPath(p); got != want {
 			t.Errorf("IsTestPath(%s) = %v, want %v", p, got, want)
