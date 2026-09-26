@@ -137,6 +137,9 @@ type state struct {
 	order  *order
 	cur    int    // index of the instruction being analyzed
 	multi  []bool // variables with more than one definition
+	// fluent maps the result of a mutating call to its receiver:
+	// sb.append(a).append(b) mutates sb through the first call's result.
+	fluent map[ir.VarID]ir.VarID
 }
 
 // visible reports whether f can be seen by the current instruction.
@@ -473,6 +476,19 @@ func multiDefined(fn *ir.Func) []bool {
 	return out
 }
 
+// fluentResults maps the result of each mutating method call to its
+// receiver: builders return themselves (StringBuilder.append, put, add).
+func fluentResults(fn *ir.Func) map[ir.VarID]ir.VarID {
+	out := map[ir.VarID]ir.VarID{}
+	for i := range fn.Instrs {
+		in := &fn.Instrs[i]
+		if in.Op == ir.OpCall && in.Call != nil && in.Call.HasRecv && len(in.Args) > 0 && in.Dst >= 0 && isMutator(in.Call.Name) {
+			out[in.Dst] = in.Args[0]
+		}
+	}
+	return out
+}
+
 func shortType(t string) string {
 	t = strings.TrimLeft(t, "*&[]")
 	if i := strings.LastIndexAny(t, "/"); i >= 0 {
@@ -483,7 +499,7 @@ func shortType(t string) string {
 
 func (a *analyzer) analyzeFunc(fn *ir.Func) *Summary {
 	st := &state{facts: make([]map[string]*fact, len(fn.Vars)), stores: map[ir.VarID]map[string]map[string]*fact{}, minC: a.opts.MinConf,
-		order: newOrder(fn), multi: multiDefined(fn)}
+		order: newOrder(fn), multi: multiDefined(fn), fluent: fluentResults(fn)}
 	a.seed(st, fn)
 	sum := &Summary{}
 	for iter := 0; iter < 40; iter++ {
@@ -870,7 +886,17 @@ func (a *analyzer) call(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 			}
 			changed = st.add(in.Dst, derive(f, in.Pos, 0.95, nameXf)) || changed
 			if i >= recvOff && recvOff == 1 && !c.Construct && isMutator(c.Name) {
-				changed = st.add(in.Args[0], st.mutation(derive(f, in.Pos, 0.9))) || changed
+				// The receiver, and the object it came from when it is a
+				// builder call's result (sb.append(a).append(email)).
+				r := in.Args[0]
+				for depth := 0; r >= 0 && depth < 8; depth++ {
+					changed = st.add(r, st.mutation(derive(f, in.Pos, 0.9))) || changed
+					next, ok := st.fluent[r]
+					if !ok {
+						break
+					}
+					r = next
+				}
 			}
 			for _, cb := range c.Callbacks {
 				changed = st.add(cb, derive(f, in.Pos, 0.9)) || changed

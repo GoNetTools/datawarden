@@ -8,6 +8,7 @@ package treesitter
 import (
 	"context"
 	"path"
+	"sort"
 	"strings"
 
 	sitter "github.com/smacker/go-tree-sitter"
@@ -30,7 +31,9 @@ type tsProgram struct {
 	*program
 	static  map[string]bool
 	ctorIDs map[string]string // class short name -> constructor id
-	classOf map[string]string // class short name -> "module:Class"
+	// objectTypes are the inline object types already declared.
+	objectTypes map[string]bool
+	classOf     map[string]string // class short name -> "module:Class"
 }
 
 // Browser/Node globals whose members are resolved by name.
@@ -261,12 +264,50 @@ func tsTypeName(f *srcFile, ann *sitter.Node) string {
 			}
 		case "predefined_type":
 			return f.text(c)
+		case "object_type":
+			return tsObjectTypeName(f, c)
 		}
 	}
 	return ""
 }
 
+// tsObjectTypeName names an inline object type ({ email: string }) by its
+// property names, so values annotated with it get the schema's hints for
+// those properties (a PII-named property makes the value hold PII).
+func tsObjectTypeName(f *srcFile, n *sitter.Node) string {
+	var props []string
+	for _, ps := range allOf(n, "property_signature") {
+		props = append(props, unquote(f.text(ps.ChildByFieldName("name"))))
+	}
+	if len(props) == 0 {
+		return ""
+	}
+	sort.Strings(props)
+	return "{" + strings.Join(props, ",") + "}"
+}
+
+// collectObjectTypes declares the inline object types used in f.
+func (tp *tsProgram) collectObjectTypes(f *srcFile, n *sitter.Node, seen map[string]bool) {
+	for _, c := range named(n) {
+		if c.Type() == "object_type" {
+			if name := tsObjectTypeName(f, c); name != "" && !seen[name] {
+				seen[name] = true
+				td := &ir.TypeDecl{Name: name, Kind: "struct", Lang: lang.TypeScript, Pos: posOf(f, c)}
+				for _, ps := range allOf(c, "property_signature") {
+					td.Fields = append(td.Fields, ir.Field{Name: unquote(f.text(ps.ChildByFieldName("name"))), Type: tsTypeName(f, ps.ChildByFieldName("type")), Pos: posOf(f, ps)})
+				}
+				tp.mod.Types = append(tp.mod.Types, td)
+			}
+		}
+		tp.collectObjectTypes(f, c, seen)
+	}
+}
+
 func (tp *tsProgram) collect(f *srcFile) {
+	if tp.objectTypes == nil {
+		tp.objectTypes = map[string]bool{}
+	}
+	tp.collectObjectTypes(f, f.root, tp.objectTypes)
 	for _, d := range topDecls(f.root) {
 		switch d.Type() {
 		case "function_declaration", "generator_function_declaration":
@@ -785,7 +826,14 @@ func (tb *tsBuilder) expr(n *sitter.Node) ir.VarID {
 		typ := tb.tp.resolveType(tb.f, tb.text(ctor))
 		args := tb.args(n.ChildByFieldName("arguments"))
 		return tb.emitCall(n, &ir.Call{Callee: typ, Name: shortName(typ), Construct: true}, args, typ)
-	case "await_expression", "parenthesized_expression", "non_null_expression", "as_expression", "satisfies_expression", "type_assertion", "spread_element", "yield_expression":
+	case "yield_expression":
+		v := ir.NoVar
+		for _, c := range named(n) {
+			v = tb.expr(c)
+		}
+		tb.yieldValue(v, n)
+		return tb.temp(n)
+	case "await_expression", "parenthesized_expression", "non_null_expression", "as_expression", "satisfies_expression", "type_assertion", "spread_element":
 		k := named(n)
 		if len(k) == 0 {
 			return tb.temp(n)

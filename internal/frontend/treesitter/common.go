@@ -70,12 +70,15 @@ type program struct {
 	// subs indexes direct subclasses and implementers by class name; nil
 	// until first needed and whenever a class is added.
 	subs map[string][]*classInfo
+	// getters maps "Class.prop" to the function that computes the
+	// property (Python @property, Kotlin get(), Swift computed properties).
+	getters map[string]string
 }
 
 func newProgram(lang string, o frontend.Options) *program {
 	return &program{lang: lang, opts: o, classes: map[string]*classInfo{}, byShort: map[string][]*classInfo{},
 		funcs: map[string]bool{}, top: map[string]string{}, ext: map[string][]string{}, modules: map[string]bool{}, mod: &ir.Module{Lang: lang},
-		consts: map[string]bool{}}
+		consts: map[string]bool{}, getters: map[string]string{}}
 }
 
 func (p *program) warnf(format string, args ...any) {
@@ -331,6 +334,21 @@ func (p *program) ctorID(cls string) string {
 			if id := c.file.pkg + ":" + c.short + ".constructor"; p.funcs[id] {
 				return id // TypeScript
 			}
+		}
+		if len(c.supers) == 0 {
+			break
+		}
+		c = p.class(c.supers[0])
+	}
+	return ""
+}
+
+// getter is the function that computes property field of cls or a
+// superclass, or "".
+func (p *program) getter(cls, field string) string {
+	for c, depth := p.class(cls), 0; c != nil && depth < 5; depth++ {
+		if id, ok := p.getters[c.name+"."+field]; ok {
+			return id
 		}
 		if len(c.supers) == 0 {
 			break
@@ -964,6 +982,11 @@ func (b *builder) compute(dst ir.VarID, n *sitter.Node, args ...ir.VarID) {
 }
 
 func (b *builder) load(obj ir.VarID, field, owner string, n *sitter.Node) ir.VarID {
+	if id := b.p.getter(owner, field); id != "" && obj != ir.NoVar {
+		// A computed property: reading it runs its getter.
+		c := &ir.Call{Callee: id, Name: field, Target: id, HasRecv: true, RecvType: owner}
+		return b.emitCall(n, c, []ir.VarID{obj}, b.p.fieldType(owner, field))
+	}
 	dst := b.fn.Named("", "", b.pos(n))
 	if t := b.p.fieldType(owner, field); t != "" {
 		b.fn.Vars[dst].Type = t
@@ -991,6 +1014,14 @@ func (b *builder) ret(n *sitter.Node, vals ...ir.VarID) {
 	// Whatever follows on this path is unreachable.
 	b.terminated = true
 	b.newBlock()
+}
+
+// yieldValue lowers a generator's yield: the value is produced to the
+// caller, like a return, but the function goes on.
+func (b *builder) yieldValue(v ir.VarID, n *sitter.Node) {
+	if v != ir.NoVar {
+		b.fn.Emit(ir.Instr{Op: ir.OpReturn, Dst: ir.NoVar, Args: []ir.VarID{v}, Pos: b.pos(n)})
+	}
 }
 
 // newBlock starts a new basic block with edges from preds.

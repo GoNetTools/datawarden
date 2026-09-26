@@ -266,14 +266,23 @@ func (kp *ktProgram) collectClass(f *srcFile, n *sitter.Node, scope string, isOb
 	body := firstOf(n, "class_body", "enum_class_body")
 	var walkBody func(body *sitter.Node, static bool)
 	walkBody = func(body *sitter.Node, static bool) {
+		prop := "" // the property a following getter belongs to
 		for _, m := range named(body) {
 			switch m.Type() {
+			case "getter":
+				if prop != "" {
+					kp.noteGetter(ci, prop)
+				}
 			case "property_declaration":
 				vd := firstOf(m, "variable_declaration")
 				if vd == nil {
 					continue
 				}
 				id := firstOf(vd, "simple_identifier")
+				prop = f.text(id)
+				if firstOf(m, "getter") != nil {
+					kp.noteGetter(ci, prop)
+				}
 				typ := ktTypeText(f, ktTypeChild(vd))
 				if typ == "" {
 					typ = ktCtorType(f, m)
@@ -398,10 +407,21 @@ func (kp *ktProgram) lowerClass(f *srcFile, n *sitter.Node, outer *classInfo) {
 	body := firstOf(n, "class_body", "enum_class_body")
 	var walk func(body *sitter.Node, static bool)
 	walk = func(body *sitter.Node, static bool) {
+		prop := ""
 		for _, m := range named(body) {
 			switch m.Type() {
+			case "getter":
+				if prop != "" {
+					kp.lowerGetter(f, ci, prop, m)
+				}
 			case "property_declaration":
 				vd := firstOf(m, "variable_declaration")
+				if vd != nil {
+					prop = f.text(firstOf(vd, "simple_identifier"))
+					if g := firstOf(m, "getter"); g != nil {
+						kp.lowerGetter(f, ci, prop, g)
+					}
+				}
 				val := ktPropValue(m)
 				if vd == nil || val == nil {
 					continue
@@ -432,6 +452,33 @@ func (kp *ktProgram) lowerClass(f *srcFile, n *sitter.Node, outer *classInfo) {
 	if len(init.fn.Instrs) > 0 || len(init.fn.Params) > 1 {
 		init.finish()
 	}
+}
+
+// noteGetter records that property prop of ci has a custom getter, lowered
+// as the JVM accessor getProp.
+func (kp *ktProgram) noteGetter(ci *classInfo, prop string) {
+	id := ci.name + ".get" + strings.ToUpper(prop[:1]) + prop[1:]
+	kp.funcs[id] = true
+	kp.getters[ci.name+"."+prop] = id
+}
+
+// lowerGetter lowers a custom property getter (get() = expr, or a block).
+func (kp *ktProgram) lowerGetter(f *srcFile, ci *classInfo, prop string, g *sitter.Node) {
+	id := kp.getters[ci.name+"."+prop]
+	if id == "" {
+		return
+	}
+	b := kp.newBuilder(f, ci, id, shortName(id), g)
+	b.addThis(ci.name, g)
+	kb := &ktBuilder{builder: b, kp: kp}
+	if body := firstOf(g, "function_body"); body != nil {
+		if st := firstOf(body, "statements"); st != nil {
+			kb.block(st)
+		} else if k := named(body); len(k) > 0 {
+			kb.ret(k[0], kb.expr(k[0]))
+		}
+	}
+	b.finish()
 }
 
 func ktPropValue(prop *sitter.Node) *sitter.Node {
@@ -762,7 +809,15 @@ func (kb *ktBuilder) expr(n *sitter.Node) ir.VarID {
 		}
 		owner := kb.typeOf(kids[0])
 		obj := kb.expr(kids[0])
-		return kb.load(obj, kb.text(fieldNode), owner, n)
+		field := kb.text(fieldNode)
+		if strings.Contains(owner, ".") && kb.kp.class(owner) == nil && field != "" {
+			// A property of a Java class (telephony.line1Number) is its
+			// getter, getLine1Number(), which is what rules name.
+			getter := "get" + strings.ToUpper(field[:1]) + field[1:]
+			c := &ir.Call{Callee: owner + "." + getter, Name: getter, HasRecv: true, RecvType: owner, RecvText: trimText(kb.text(kids[0]))}
+			return kb.emitCall(n, c, []ir.VarID{obj}, "")
+		}
+		return kb.load(obj, field, owner, n)
 	case "call_expression":
 		return kb.call(n)
 	case "indexing_expression":

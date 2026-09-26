@@ -67,9 +67,9 @@ class Constructs {
     void builder(String email) {
         StringBuilder sb = new StringBuilder();
         sb.append("user=").append(email);
-        // Known gap: in a call chain the second append's receiver is the
-        // first call's result, so the data does not reach sb.
-        // todoruleid: log.jvm.stdout
+        // The second append's receiver is the first call's result, which
+        // is sb itself.
+        // ruleid: log.jvm.stdout
         System.out.println(sb.toString());
     }
 

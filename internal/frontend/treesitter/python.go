@@ -290,8 +290,11 @@ func (pp *pyProgram) collectClass(f *srcFile, d *sitter.Node) {
 			pp.funcs[id] = true
 			ci.methods[mn] = id
 			for _, dn := range pyDecorators(f, st) {
-				if dn == "staticmethod" || dn == "classmethod" {
+				switch dn {
+				case "staticmethod", "classmethod":
 					pp.static[id] = true
+				case "property", "cached_property":
+					pp.getters[ci.name+"."+mn] = id
 				}
 			}
 			if mn == "__init__" {
@@ -787,6 +790,13 @@ func (pb *pyBuilder) expr(n *sitter.Node) ir.VarID {
 			return pb.temp(n)
 		}
 		return pb.expr(k[len(k)-1])
+	case "yield":
+		v := ir.NoVar
+		for _, c := range named(n) {
+			v = pb.expr(c)
+		}
+		pb.yieldValue(v, n)
+		return pb.temp(n)
 	case "comparison_operator", "not_operator":
 		for _, c := range named(n) {
 			pb.expr(c)

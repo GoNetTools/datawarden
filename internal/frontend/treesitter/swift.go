@@ -221,6 +221,9 @@ func (sp *swProgram) collectClass(f *srcFile, d *sitter.Node, outer string) {
 				continue
 			}
 			fn := f.text(id)
+			if m.ChildByFieldName("computed_value") != nil {
+				sp.getters[ci.name+"."+fn] = name + "." + fn // lowered as a getter
+			}
 			typ := swTypeName(f, firstOf(m, "type_annotation"))
 			if typ == "" {
 				if v := m.ChildByFieldName("value"); v != nil && v.Type() == "call_expression" {
@@ -547,14 +550,27 @@ func (sb *swBuilder) stmt(n *sitter.Node) ir.VarID {
 		}})
 		return ir.NoVar
 	case "switch_statement":
-		sb.expr(n.ChildByFieldName("expr"))
+		subject := sb.expr(n.ChildByFieldName("expr"))
 		var cases []func()
 		exhaustive := false
 		for _, e := range allOf(n, "switch_entry") {
 			if firstOf(e, "default_keyword") != nil {
 				exhaustive = true
 			}
-			cases = append(cases, func() { sb.stmt(firstOf(e, "statements")) })
+			cases = append(cases, func() {
+				// case .some(let e), case let .user(name, mail): the
+				// bound names take (parts of) the subject.
+				for _, sp := range allOf(e, "switch_pattern") {
+					var bound []*sitter.Node
+					for _, p := range allOf(sp, "pattern") {
+						swCaseBindings(p, false, false, &bound)
+					}
+					for _, id := range bound {
+						sb.assign(sb.declare(sb.text(id), "", id), id, subject)
+					}
+				}
+				sb.stmt(firstOf(e, "statements"))
+			})
 		}
 		// Swift cases do not fall through; break leaves the switch.
 		sb.switchCases(n, false, exhaustive, cases)
@@ -590,6 +606,29 @@ func (sb *swBuilder) stmt(n *sitter.Node) ir.VarID {
 		return ir.NoVar
 	}
 	return sb.expr(n)
+}
+
+// swCaseBindings collects the names a case pattern binds: a
+// bound_identifier, or, under let/var, an identifier in a nested pattern
+// (let .some(g), let (a, b)); the enum case name itself is not bound.
+func swCaseBindings(p *sitter.Node, binding, nested bool, out *[]*sitter.Node) {
+	if firstOf(p, "value_binding_pattern") != nil {
+		binding = true
+	}
+	for i := 0; i < int(p.ChildCount()); i++ {
+		c := p.Child(i)
+		if !c.IsNamed() {
+			continue
+		}
+		switch {
+		case p.FieldNameForChild(i) == "bound_identifier":
+			*out = append(*out, c)
+		case c.Type() == "pattern":
+			swCaseBindings(c, binding, true, out)
+		case c.Type() == "simple_identifier" && binding && nested:
+			*out = append(*out, c)
+		}
+	}
 }
 
 // conditions lowers if/guard: `if let x = expr, cond { ... } else { ... }`
