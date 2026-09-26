@@ -155,7 +155,9 @@ dominates `P`. Dominance is computed over normal and exceptional edges
 
 ## Text form
 
-`ir.Format` prints a function for debugging:
+`ir.Format` prints a function for debugging; `datawarden ir [paths...]
+--func REGEXP [--verify] [--format json] [--classes]` prints the IR of
+files in a repository:
 
 ```
 func app.save(v0:email, v1:consents)

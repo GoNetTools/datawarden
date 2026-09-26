@@ -31,7 +31,7 @@ Six languages are analysed (Go, Python, Java, Kotlin, Swift, TypeScript/JavaScri
 
 ```mermaid
 flowchart TD
-    CMD["cli command<br/>scan · baseline · map · rules test"] --> SESSION["session<br/>ConfigLoader → Config<br/>RuleLoader → RuleSet"]
+    CMD["cli command<br/>scan · baseline · map · rules test · ir"] --> SESSION["session<br/>ConfigLoader → Config<br/>RuleLoader → RuleSet"]
     SESSION --> RUN["scan.Scanner.Run(Request)"]
 
     subgraph SCANNER ["scan.Scanner"]

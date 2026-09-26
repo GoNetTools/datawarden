@@ -33,6 +33,13 @@ type Scanner interface {
 	Run(ctx context.Context, req scan.Request) (*scan.Result, error)
 }
 
+// Lowerer lowers code to IR without analysing it (*scan.Scanner), for
+// `datawarden ir`. A Scanner that does not implement it cannot run that
+// command.
+type Lowerer interface {
+	Lower(ctx context.Context, req scan.Request) (*ir.Module, error)
+}
+
 // Workspace is the App's view of the machine: the working directory,
 // repositories and plain files. platform.OS implements it on disk; tests
 // use an in-memory workspace.
@@ -99,6 +106,7 @@ Usage:
   datawarden map --format dpia            personal-data map (dpia, json, csv, mermaid)
   datawarden rules                        print the effective sink/source/transform rules
   datawarden rules test DIR               check annotated examples in DIR against the rules
+  datawarden ir [paths...]                print the IR the analysis reads (--func, --format json, --verify)
   datawarden init                         write .datawarden.yaml and .datawardenignore
   datawarden comment datawarden.md           create/update the PR (GitHub) or MR (GitLab) summary comment
   datawarden version
@@ -132,6 +140,8 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		} else {
 			err = a.runRules(args[1:])
 		}
+	case "ir":
+		code, err = a.runIR(ctx, args[1:])
 	case "init":
 		err = a.runInit(args[1:])
 	case "comment":

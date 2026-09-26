@@ -272,3 +272,20 @@ func TestMissingDependenciesAreReported(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+func TestLowerRunsFrontendsWithoutAnalysis(t *testing.T) {
+	fx := newFixture(t, map[string]string{"go.mod": "module x", "a.go": "package a", "app/src/B.kt": "class B"}, fakeVCS{})
+	m, err := fx.scanner.Lower(context.Background(), Request{Repo: fx.req.Repo, Config: fx.req.Config, Paths: []string{"app"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Funcs) != 1 || fx.frontends.lowered["go"] != nil || fx.analyzer.input.Rules != nil {
+		t.Errorf("lowered %v, funcs %d, analyzer input %+v", fx.frontends.lowered, len(m.Funcs), fx.analyzer.input)
+	}
+	if fx.frontends.opts.KnownFunc != nil {
+		t.Error("no cache, but KnownFunc set")
+	}
+	if _, err := (&Scanner{}).Lower(context.Background(), Request{}); err == nil {
+		t.Error("missing dependencies accepted")
+	}
+}

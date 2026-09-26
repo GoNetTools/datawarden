@@ -9,6 +9,7 @@ package scan
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"sort"
@@ -220,6 +221,28 @@ func (s *Scanner) Run(ctx context.Context, req Request) (*Result, error) {
 	return res, nil
 }
 
+// Lower runs the frontends over the requested files (req.Paths, or the
+// whole repository) without analysing them, for inspecting the IR. The
+// request needs Repo and Config; Cache and Rules are not used.
+func (s *Scanner) Lower(ctx context.Context, req Request) (*ir.Module, error) {
+	if s.Files == nil || s.Frontends == nil || s.Clock == nil || req.Repo.FS == nil || req.Config == nil {
+		return nil, errors.New("scan: Lower needs Scanner.Files, Frontends and Clock, and Request.Repo.FS and Config")
+	}
+	all, err := s.Files.List(req.Repo.FS)
+	if err != nil {
+		return nil, err
+	}
+	targets := all
+	if len(req.Paths) > 0 {
+		targets = s.Files.Select(req.Repo.FS, all, req.Paths)
+	}
+	res := &Result{FilesAnalyzed: map[string]int{}}
+	prog, _ := s.lower(ctx, req, targets, res)
+	prog.Warnings = append(res.Warnings, prog.Warnings...)
+	dedupeIDs(prog.Funcs)
+	return prog, nil
+}
+
 func (s *Scanner) validate(req Request) error {
 	var missing []string
 	for name, ok := range map[string]bool{
@@ -371,7 +394,9 @@ func (s *Scanner) lower(ctx context.Context, req Request, targets []ingest.File,
 		FS:        req.Repo.FS,
 		BuildTags: cfg.GoBuildTags,
 		Logf:      req.Logf,
-		KnownFunc: req.Cache.Has,
+	}
+	if req.Cache != nil {
+		fopts.KnownFunc = req.Cache.Has
 	}
 	prog := &ir.Module{}
 	var lowered []string

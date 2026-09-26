@@ -94,6 +94,7 @@ datawarden map --format dpia > docs/data-map.md
 | `datawarden map --format dpia\|json\|csv\|mermaid` | Personal-data inventory. |
 | `datawarden rules [--kind sink] [--lang kotlin]` | Effective rules (built-in + repository overrides). |
 | `datawarden rules test DIR` | Checks annotated example code in `DIR` against the effective rules (see [Sink rules](#sink-rules)). |
+| `datawarden ir [paths...]` | Prints the IR the analysis reads for the given files ([docs/IR.md](docs/IR.md)): `--func REGEXP` to pick functions, `--format json`, `--classes` for the class table, `--verify` to check it (exit 1 when invalid). For rule and frontend authors. |
 | `datawarden comment datawarden.md` | Creates or updates the PR (GitHub) / MR (GitLab) comment. |
 | `datawarden init` | Writes starter config files. |
 
