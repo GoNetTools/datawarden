@@ -413,3 +413,27 @@ func consentCaller(email: String, consents: Consents) {
         consentedSend(email: email)
     }
 }
+
+// scenario: validation-check
+func isValidEmail(_ s: String) -> Bool {
+    return s.contains("@")
+}
+
+func validationCheck(input: String) {
+    if isValidEmail(input) {
+        // ruleid: log.swift.print
+        print(input)
+    }
+}
+
+// scenario: sanitizer-check
+func isMasked(_ s: String) -> Bool {
+    return s.hasPrefix("***")
+}
+
+func sanitizerCheck(email: String) {
+    if isMasked(email) {
+        // ok: log.swift.print
+        print(email)
+    }
+}

@@ -544,11 +544,25 @@ func (sb *swBuilder) stmt(n *sitter.Node) ir.VarID {
 			sb.expr(cond) // while false: the body never runs
 			return ir.NoVar
 		}
-		sb.loopWith(n, loopSpec{infinite: known && v, body: func() {
-			for _, c := range named(n) {
-				sb.stmt(c)
+		test := func() ir.VarID {
+			if cond == nil {
+				return ir.NoVar
 			}
-		}})
+			return sb.stmt(cond)
+		}
+		spec := loopSpec{infinite: known && v, body: func() {
+			for _, c := range named(n) {
+				if cond == nil || !c.Equal(cond) {
+					sb.stmt(c)
+				}
+			}
+		}}
+		if n.Type() == "repeat_while_statement" {
+			spec.post = test
+		} else {
+			spec.cond = test
+		}
+		sb.loopWith(n, spec)
 		return ir.NoVar
 	case "switch_statement":
 		subject := sb.expr(n.ChildByFieldName("expr"))
@@ -574,7 +588,7 @@ func (sb *swBuilder) stmt(n *sitter.Node) ir.VarID {
 			})
 		}
 		// Swift cases do not fall through; break leaves the switch.
-		sb.switchCases(n, false, exhaustive, cases)
+		sb.switchCases(n, switchSpec{exhaustive: exhaustive, cases: cases})
 		return ir.NoVar
 	case "do_statement":
 		var body *sitter.Node

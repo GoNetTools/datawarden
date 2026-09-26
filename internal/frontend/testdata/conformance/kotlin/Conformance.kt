@@ -375,3 +375,23 @@ fun consentedSend(email: String) {
 fun consentCaller(email: String, consents: Consents) {
     if (consents.hasConsent()) consentedSend(email)
 }
+
+// scenario: validation-check
+fun isValidEmail(s: String): Boolean = s.contains("@")
+
+fun validationCheck(input: String) {
+    if (isValidEmail(input)) {
+        // ruleid: log.jvm.stdout
+        println(input)
+    }
+}
+
+// scenario: sanitizer-check
+fun isMasked(s: String): Boolean = s.startsWith("***")
+
+fun sanitizerCheck(email: String) {
+    if (isMasked(email)) {
+        // ok: log.jvm.stdout
+        println(email)
+    }
+}

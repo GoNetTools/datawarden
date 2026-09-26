@@ -668,6 +668,14 @@ type loopSpec struct {
 	orelse func()
 	// infinite marks while(true): the loop is left only by break.
 	infinite bool
+	// cond, when set, lowers the condition tested before each iteration
+	// (while, for): a test block after the header branches on it to the
+	// body or out of the loop.
+	cond func() ir.VarID
+	// post, when set, lowers the condition tested after each iteration
+	// (do-while, repeat-while): the end of the body branches on it back
+	// to the header or out of the loop, and the header has no exit.
+	post func() ir.VarID
 }
 
 // loopWith lowers a loop. A header block, which the end of the body and
@@ -681,11 +689,26 @@ func (b *builder) loopWith(n *sitter.Node, spec loopSpec) {
 	t := &jumpTarget{label: b.takeLabel(), loop: true}
 	head := b.newBlock(pre)
 	start := len(b.fn.Instrs)
-	// The header holds only the phis; the body starts after it.
+	// The header holds only the phis; the test and the body start after
+	// it.
 	b.newBlock(head)
-	b.targets = append(b.targets, t)
 	b.terminated = false
+	test, testCond := int32(-1), ir.NoVar
+	var testScope map[string]ir.VarID
+	if spec.cond != nil && !spec.infinite {
+		testCond = spec.cond()
+		test, testScope = b.fn.CurBlock(), b.snapshot()
+		b.newBlock(test)
+	}
+	bodyStart := b.fn.CurBlock()
+	b.targets = append(b.targets, t)
 	spec.body()
+	var post exit
+	postCond := ir.NoVar
+	if spec.post != nil && !spec.infinite && !b.terminated {
+		postCond = spec.post()
+		post = b.here()
+	}
 	end := len(b.fn.Instrs)
 	b.targets = b.targets[:len(b.targets)-1]
 	backs := t.cont
@@ -779,11 +802,30 @@ func (b *builder) loopWith(n *sitter.Node, spec loopSpec) {
 	}
 
 	var exits []exit
-	if !spec.infinite {
-		// Leaving from the header, with the header's versions.
-		b.newBlock(head)
-		b.scope = headScope
+	switch {
+	case spec.infinite:
+	case postCond != ir.NoVar:
+		// Leaving after the body when the condition is false.
+		out := b.newBlock(post.block)
+		b.scope = remap(post.scope)
 		b.terminated = false
+		b.branch(post.block, postCond, head, out)
+		exits = append(exits, b.here())
+	case spec.post != nil:
+		// The body always ends in a jump: only break leaves.
+	default:
+		// Leaving from the header (or the test after it), with the
+		// header's versions.
+		from, scope := head, headScope
+		if test >= 0 {
+			from, scope = test, remap(testScope)
+		}
+		out := b.newBlock(from)
+		b.scope = scope
+		b.terminated = false
+		if test >= 0 {
+			b.branch(test, testCond, bodyStart, out)
+		}
 		if spec.orelse != nil {
 			spec.orelse()
 		}
@@ -807,18 +849,62 @@ func (b *builder) loopWith(n *sitter.Node, spec loopSpec) {
 // Java and JavaScript switch statements, fallsThrough), a case that does not end in break
 // continues into the next one; break leaves the switch. exhaustive means a
 // default case exists, so no path skips every case.
-func (b *builder) switchCases(n *sitter.Node, fallsThrough, exhaustive bool, cases []func()) {
-	entry, from, dead := b.snapshot(), b.fn.CurBlock(), b.terminated
-	t := &jumpTarget{label: b.takeLabel()}
-	b.targets = append(b.targets, t)
+//
+// tests, when given, holds each case's test: a function lowering the
+// condition under which the case is entered (subject == value, or the
+// condition of a when without subject), or nil for the default case. The
+// tests run in order, each in a block that branches to its case or to the
+// next test; the default case, or the end of the switch, follows the
+// last. A test returning NoVar is not known: its block goes to both.
+//
+// A Kotlin when is not a break target: break inside it leaves the
+// enclosing loop (noBreak).
+func (b *builder) switchCases(n *sitter.Node, s switchSpec) {
+	fallsThrough, exhaustive, cases, tests := s.fallsThrough, s.exhaustive, s.cases, s.tests
+	from, dead := b.fn.CurBlock(), b.terminated
+	// The chain of tests: case i is entered from enter[i].
+	enter := make([]int32, len(cases))
+	conds := make([]ir.VarID, len(cases))
+	for i := range enter {
+		enter[i], conds[i] = from, ir.NoVar
+	}
+	var falses []int32
+	if len(tests) == len(cases) {
+		for i, test := range tests {
+			if test == nil {
+				enter[i] = -1
+				continue
+			}
+			conds[i] = test()
+			enter[i] = b.fn.CurBlock()
+			falses = append(falses, b.newBlock(enter[i]))
+		}
+		from = b.fn.CurBlock() // every test failed
+		for i := range enter {
+			if enter[i] < 0 {
+				enter[i] = from
+			}
+		}
+	}
+	entry := b.snapshot()
+	t := &jumpTarget{}
+	if !s.noBreak {
+		t.label = b.takeLabel()
+		b.targets = append(b.targets, t)
+	}
 	var ends []exit
 	var prev *exit
-	for _, c := range cases {
-		starts := []exit{{entry, from}}
+	next := 0
+	for i, c := range cases {
+		starts := []exit{{entry, enter[i]}}
 		if prev != nil {
 			starts = append(starts, *prev)
 		}
-		b.newBlock(blocksOf(starts)...)
+		start := b.newBlock(blocksOf(starts)...)
+		if len(tests) == len(cases) && tests[i] != nil {
+			b.branch(enter[i], conds[i], start, falses[next])
+			next++
+		}
 		b.terminated = false
 		b.join(n, starts...)
 		c()
@@ -834,7 +920,9 @@ func (b *builder) switchCases(n *sitter.Node, fallsThrough, exhaustive bool, cas
 	if prev != nil {
 		ends = append(ends, *prev)
 	}
-	b.targets = b.targets[:len(b.targets)-1]
+	if !s.noBreak {
+		b.targets = b.targets[:len(b.targets)-1]
+	}
 	ends = append(ends, t.breaks...)
 	if !exhaustive || len(cases) == 0 {
 		ends = append(ends, exit{entry, from})
@@ -846,6 +934,40 @@ func (b *builder) switchCases(n *sitter.Node, fallsThrough, exhaustive bool, cas
 		return
 	}
 	b.join(n, ends...)
+}
+
+// switchSpec describes a switch for switchCases.
+type switchSpec struct {
+	fallsThrough, exhaustive, noBreak bool
+	cases                             []func()
+	tests                             []func() ir.VarID
+}
+
+// matches lowers a case test: subject equals one of values. With no
+// subject (a when without one) the value is the condition itself.
+func (b *builder) matches(n *sitter.Node, subject ir.VarID, values ...ir.VarID) ir.VarID {
+	var tests []ir.VarID
+	for _, v := range values {
+		if v == ir.NoVar {
+			return ir.NoVar // a pattern the builder does not read: unknown
+		}
+		if subject == ir.NoVar {
+			tests = append(tests, v)
+			continue
+		}
+		eq := b.temp(n)
+		b.fn.Compute(eq, b.pos(n), "==", subject, v)
+		tests = append(tests, eq)
+	}
+	switch len(tests) {
+	case 0:
+		return ir.NoVar
+	case 1:
+		return tests[0]
+	}
+	any := b.temp(n)
+	b.fn.Compute(any, b.pos(n), "||", tests...)
+	return any
 }
 
 // ifElse lowers an if statement whose condition was already lowered to c:

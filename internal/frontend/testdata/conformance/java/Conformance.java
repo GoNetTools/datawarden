@@ -391,4 +391,28 @@ class Conformance {
             consentedSend(email);
         }
     }
+
+    // scenario: validation-check
+    static boolean isValidEmail(String s) {
+        return s.contains("@");
+    }
+
+    void validationCheck(String input) {
+        if (isValidEmail(input)) {
+            // ruleid: log.jvm.stdout
+            System.out.println(input);
+        }
+    }
+
+    // scenario: sanitizer-check
+    static boolean isMasked(String s) {
+        return s.startsWith("***");
+    }
+
+    void sanitizerCheck(String email) {
+        if (isMasked(email)) {
+            // ok: log.jvm.stdout
+            System.out.println(email);
+        }
+    }
 }

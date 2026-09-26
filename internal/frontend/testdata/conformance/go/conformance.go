@@ -391,3 +391,23 @@ func consentCaller(email string, consents consentStore) {
 		consentedSend(email)
 	}
 }
+
+// scenario: validation-check
+func isValidEmail(s string) bool { return strings.Contains(s, "@") }
+
+func validationCheck(input string) {
+	if isValidEmail(input) {
+		// ruleid: log.go.stdlib
+		log.Println(input)
+	}
+}
+
+// scenario: sanitizer-check
+func isMasked(s string) bool { return strings.HasPrefix(s, "***") }
+
+func sanitizerCheck(email string) {
+	if isMasked(email) {
+		// ok: log.go.stdlib
+		log.Println(email)
+	}
+}

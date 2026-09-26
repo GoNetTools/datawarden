@@ -5,6 +5,7 @@ package analysis
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
@@ -480,6 +481,76 @@ func TestAccessPaths(t *testing.T) {
 	}{{"", "a", "a"}, {"a", "b", "a.b"}, {"a.b", "c", "a.b.c"}, {"a.b.c", "d", "a.b.c"}} {
 		if got := joinField(path.in, path.add); got != path.want {
 			t.Errorf("joinField(%q, %q) = %q", path.in, path.add, got)
+		}
+	}
+}
+
+// Branches on checks refine the checked value where they pass.
+func TestChecks(t *testing.T) {
+	// fun f(email, q, msg) {
+	//   if (isMasked(email)) log(email)       // line 3, masked
+	//   if (!containsPii(msg)) log(msg)       // line 5, pii-checked
+	//   if (isValidEmail(q)) log(q)           // line 7, an email
+	//   log(q)                                // line 8, nothing
+	// }
+	f := newFunc("p.f")
+	email := f.AddParam("email", "String", pos(1))
+	q := f.AddParam("q", "String", pos(1))
+	msg := f.AddParam("msg", "String", pos(1))
+	f.Emit(ir.Instr{Op: ir.OpStore, Dst: ir.NoVar, Args: []ir.VarID{msg, email}, Field: "body", Pos: pos(1)})
+	branch := func(line int, name string, arg ir.VarID, negate bool, then func()) {
+		c := f.Temp(pos(line))
+		f.Emit(ir.Instr{Op: ir.OpCall, Dst: c, Args: []ir.VarID{arg}, Call: &ir.Call{Name: name}, Pos: pos(line)})
+		if negate {
+			n := f.Temp(pos(line))
+			f.Compute(n, pos(line), "!", c)
+			c = n
+		}
+		from := f.CurBlock()
+		body := f.NewBlock(from)
+		then()
+		join := f.NewBlock(body, from)
+		f.Branch(from, c, body, join)
+	}
+	branch(2, "isMasked", email, false, func() { logTo(f, email, 3) })
+	branch(4, "containsPii", msg, true, func() { logTo(f, msg, 5) })
+	branch(6, "isValidEmail", q, false, func() { logTo(f, q, 7) })
+	logTo(f, q, 8)
+
+	a := &analyzer{opts: Options{Names: detect.NewClassifier(detect.DefaultTaxonomy())}}
+	rf, cks := a.refineChecks(f)
+	if len(cks) != 3 || rf == f {
+		t.Fatalf("checks: %v", cks)
+	}
+	if err := ir.Verify(rf); err != nil {
+		t.Fatalf("refined IR does not verify: %v\n%s", err, ir.Format(rf))
+	}
+	if err := ir.Verify(f); err != nil || len(f.Instrs) == len(rf.Instrs) {
+		t.Fatalf("the original function was changed: %v", err)
+	}
+
+	res := analyze(t, nil, f)
+	if fl := flowAt(res, 3); fl == nil || !slices.Contains(fl.Transforms, "masked") {
+		t.Errorf("isMasked: %+v", fl)
+	}
+	if fl := flowAt(res, 5); fl == nil || !slices.Contains(fl.Transforms, "pii-checked") {
+		t.Errorf("!containsPii: %+v", fl)
+	}
+	if fl := flowAt(res, 7); fl == nil || fl.DataType != "email" || !strings.Contains(fl.SourceDesc, "isValidEmail") {
+		t.Errorf("isValidEmail: %+v", fl)
+	}
+	if fl := flowAt(res, 8); fl != nil {
+		t.Errorf("after the if, q is not known to be an email: %+v", fl)
+	}
+
+	for name, want := range map[string]string{"wasAnonymised": "anonymized", "is_redacted": "redacted", "hasPii": "pii-checked", "isEmpty": "", "isValid": "", "validatePhoneNumber": "phone"} {
+		ck, _, ok := a.checkKind(name, pos(1))
+		got := ck.xf + strings.TrimPrefix(ck.dt, "pii.")
+		if ck.dt != "" {
+			got = ck.dt
+		}
+		if (want == "") == ok || (ok && !strings.Contains(got, want)) {
+			t.Errorf("checkKind(%s) = %+v %v, want %q", name, ck, ok, want)
 		}
 	}
 }

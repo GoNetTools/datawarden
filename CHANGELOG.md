@@ -59,6 +59,8 @@ All notable changes to datawarden are documented here. The format follows [Keep 
 ### Fixed
 
 - Consent guards are found in more places: a helper that returns a consent check (`if (mayContact(c))`), Python `and` (`if email and consents.has_consent():`), and the callers of a function that is only ever called after a check. `policy.consent_guarded` (also per class) accepts guarded flows to the listed destination kinds.
+- Loops branch on their condition, and `switch`/`when` cases on their tests (`subject == value`, or the condition of a `when` without subject), instead of jumping to every case; a `do`/`repeat` loop tests its condition after the body.
+- A branch on a check refines the checked value where it passed: `isMasked(v)`, `isRedacted(v)`, `isEncrypted(v)` and the like apply that transform, `!containsPii(v)` applies `pii-checked` (a new default safe transform), and `isValidEmail(v)`, `validatePhone(v)` make the value that data type.
 - `datawarden ir [paths...]` prints the IR of files (`--func`, `--format json`, `--classes`, `--verify`).
 
 - A closure passed to a function that runs it before returning (`forEach`, `map`, `filter`, `apply`, `let`, `sort.Slice`, …) sees its captured variables as they are at the call: `items.forEach { log(xs) }; xs.add(email)` is no longer reported. Closures passed to other functions are still treated as possibly running later.

@@ -392,3 +392,25 @@ def consented_send(email: str):
 def consent_caller(email: str, consents):
     if consents.has_consent():
         consented_send(email)
+
+
+# scenario: validation-check
+def is_valid_email(s: str) -> bool:
+    return "@" in s
+
+
+def validation_check(user_input: str):
+    if is_valid_email(user_input):
+        # ruleid: log.py.print
+        print(user_input)
+
+
+# scenario: sanitizer-check
+def is_masked(s: str) -> bool:
+    return s.startswith("***")
+
+
+def sanitizer_check(email: str):
+    if is_masked(email):
+        # ok: log.py.print
+        print(email)

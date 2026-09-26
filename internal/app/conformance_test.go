@@ -63,6 +63,8 @@ var conformanceScenarios = map[string]string{
 	"closure-return":           "a closure returned by a function and called by the caller with the data",
 	"consent-helper":           "after a call of a helper that returns a consent check, the flow is reported with it as its guard",
 	"consent-caller":           "a function only ever called after a consent check reports its flows with that check",
+	"validation-check":         "a value that passed a validation check (isValidEmail) is that kind of data where it passed",
+	"sanitizer-check":          "a value checked to be masked (isMasked) is treated as masked where the check passed (ok)",
 }
 
 var scenarioRe = regexp.MustCompile(`(?m)^\s*(?://+|#+)\s*scenario:\s*([a-z-]+)\s*$`)

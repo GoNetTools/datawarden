@@ -106,7 +106,7 @@ func Default() *Config {
 		Literals:      Literals{Enabled: &t, MinConfidence: 0.6},
 		Policy: Policy{
 			FailOn:         []string{"third_party", "log", "network", "storage", "ipc"},
-			SafeTransforms: []string{"masked", "redacted", "encrypted", "tokenized", "anonymized"},
+			SafeTransforms: []string{"masked", "redacted", "encrypted", "tokenized", "anonymized", "pii-checked"},
 			MinConfidence:  0.55,
 			FailOnLiterals: &t,
 			Classes: map[string]ClassPolicy{
@@ -115,7 +115,7 @@ func Default() *Config {
 				// storage are. Hashing a password is the point of hashing.
 				"credential": {
 					FailOn:         []string{"third_party", "log", "storage", "ipc"},
-					SafeTransforms: []string{"masked", "redacted", "encrypted", "tokenized", "hashed", "sha256", "sha512"},
+					SafeTransforms: []string{"masked", "redacted", "encrypted", "tokenized", "pii-checked", "hashed", "sha256", "sha512"},
 				},
 			},
 		},
@@ -225,7 +225,8 @@ policy:
   # A flow is acceptable if one of these transforms was applied first.
   # Hashes (sha256, hashed) are left out on purpose: phone numbers and
   # national ID numbers are low-entropy and hashes of them are reversible.
-  safe_transforms: [masked, redacted, encrypted, tokenized, anonymized]
+  # pii-checked: a PII detector found none (if (!containsPii(msg)) log(msg)).
+  safe_transforms: [masked, redacted, encrypted, tokenized, anonymized, pii-checked]
   min_confidence: 0.55
   fail_on_literals: true
   ignore_data_types: []
@@ -238,7 +239,7 @@ policy:
   classes:
     credential:
       fail_on: [third_party, log, storage, ipc]
-      safe_transforms: [masked, redacted, encrypted, tokenized, hashed, sha256, sha512]
+      safe_transforms: [masked, redacted, encrypted, tokenized, pii-checked, hashed, sha256, sha512]
   # Destination kinds whose flows are acceptable when they run only after
   # a consent check passed (if (consents.hasConsent()) analytics.track(...)).
   # Findings show the check either way.

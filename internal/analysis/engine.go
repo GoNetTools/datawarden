@@ -159,6 +159,8 @@ type state struct {
 	loads map[ir.VarID]loadRef
 	// guards lists, per block, the consent checks guarding it.
 	guards [][]string
+	// checks are the values a branch on a check refined (checks.go).
+	checks map[ir.VarID]check
 	// last is the index of each block's last instruction, or -1.
 	last []int
 }
@@ -357,7 +359,9 @@ type analyzer struct {
 	flow *closureFlow
 	// guards are, per function, the consent checks guarding each block:
 	// its own branches and those every caller passed (guard.go).
-	guards    map[string][][]string
+	guards map[string][][]string
+	// checks are, per function, the checked values (refineChecks).
+	checks    map[string]map[ir.VarID]check
 	opts      Options
 	summaries map[string]*Summary
 	digests   map[string]string
@@ -373,7 +377,17 @@ func Analyze(ctx context.Context, funcs []*ir.Func, opts Options) (*Result, erro
 	if opts.Rules == nil || opts.Schema == nil || opts.Names == nil {
 		return nil, errors.New("analysis: Rules, Schema and Names are required")
 	}
-	a := &analyzer{cha: newHierarchy(opts.Classes), opts: opts, summaries: map[string]*Summary{}, digests: map[string]string{}, funcs: map[string]*ir.Func{}, flows: map[string]*finding.Flow{}}
+	a := &analyzer{cha: newHierarchy(opts.Classes), opts: opts, summaries: map[string]*Summary{}, digests: map[string]string{}, funcs: map[string]*ir.Func{}, flows: map[string]*finding.Flow{},
+		checks: map[string]map[ir.VarID]check{}}
+	// Branches on checks (isMasked(v), isValidEmail(v)) give the checked
+	// value a new version where they pass; the caller's functions are not
+	// changed.
+	funcs = slices.Clone(funcs)
+	for i, f := range funcs {
+		if rf, cks := a.refineChecks(f); cks != nil {
+			funcs[i], a.checks[f.ID] = rf, cks
+		}
+	}
 	for _, f := range funcs {
 		a.funcs[f.ID] = f
 	}
@@ -702,7 +716,7 @@ func shortType(t string) string {
 func (a *analyzer) analyzeFunc(fn *ir.Func) *Summary {
 	st := &state{facts: make([]map[string]*fact, len(fn.Vars)), stores: map[ir.VarID]map[string]map[string]*fact{}, minC: a.opts.MinConf,
 		order: newOrder(fn), multi: multiDefined(fn), fluent: fluentResults(fn), loads: loadsOf(fn), guards: a.guards[fn.ID], last: lastInstrs(fn),
-		closures: a.flow.local(fn.ID)}
+		closures: a.flow.local(fn.ID), checks: a.checks[fn.ID]}
 	a.seed(st, fn)
 	sum := &Summary{}
 	for iter := 0; iter < 40; iter++ {
@@ -902,6 +916,9 @@ func (a *analyzer) step(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 			}
 		}
 	case ir.OpAssign, ir.OpPhi:
+		if ck, ok := st.checks[in.Dst]; ok {
+			return a.checkedValue(st, in, ck)
+		}
 		for _, arg := range in.Args {
 			if in.Dst >= 0 && int(in.Dst) < len(st.multi) && st.multi[in.Dst] {
 				// One of several definitions of a cell (arr[i] = v, a

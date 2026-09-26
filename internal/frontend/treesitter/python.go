@@ -535,11 +535,9 @@ func (pb *pyBuilder) stmt(n *sitter.Node) ir.VarID {
 		}
 		pb.loopWith(n, loopSpec{
 			infinite: known && v,
-			body: func() {
-				pb.expr(n.ChildByFieldName("condition"))
-				pb.stmt(n.ChildByFieldName("body"))
-			},
-			orelse: func() { pb.stmt(n.ChildByFieldName("alternative")) },
+			cond:     func() ir.VarID { return pb.expr(n.ChildByFieldName("condition")) },
+			body:     func() { pb.stmt(n.ChildByFieldName("body")) },
+			orelse:   func() { pb.stmt(n.ChildByFieldName("alternative")) },
 		})
 		return ir.NoVar
 	case "break_statement", "continue_statement":

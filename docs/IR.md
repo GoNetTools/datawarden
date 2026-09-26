@@ -114,6 +114,14 @@ every mutation as visible everywhere); every frontend emits blocks.
 |---|---|
 | `jump` | Continue at any of `Succs`; with none, the function ends. |
 | `if` | Branch on `Cond`: `Succs[0]` when it is true, `Succs[1]` when false. Exactly two successors, `Cond` a variable whose definition dominates the block. |
+
+Frontends branch on every condition they can read: `if`, a loop's
+condition (tested in a block after the header for `while` and `for`, at
+the end of the body for `do`/`repeat` loops), and each case of a `switch`
+or `when`, which is tested in turn (`subject == value`, `||` over several
+values, `is`/`in` tests, or the condition itself for a `when` without a
+subject) with the default case after the last test. A test the frontend
+cannot read (a pattern) is a block that jumps to both.
 | `return` | The block ends with a `return`; no successors. |
 | `throw` | The block ends with a `throw`; no successors. |
 
@@ -136,6 +144,13 @@ dominates `P`. Dominance is computed over normal and exceptional edges
   is reported with that check as a guard (`analysis/guard.go`). A call
   of a function whose every return is a consent check is one, and a
   function every call of which is guarded inherits the checks.
+- **Checks**: a branch on a predicate about a value refines it where it
+  passes: `isMasked(v)` (and `isRedacted`, `isEncrypted`, … : the
+  transform), `!containsPii(v)` (the `pii-checked` transform), and
+  `isValidEmail(v)` (the value is that data type). The engine gives the
+  value a new version at the start of the successor where the check
+  passed, used in every block that successor dominates
+  (`analysis/checks.go`).
 - **Closures**: `closure` values flow, over the whole program, through
   assigns and phis, into and out of fields (by owner type and field
   name) and collections, into the parameters of the functions they are

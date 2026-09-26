@@ -387,10 +387,14 @@ func (jb *jvBuilder) stmt(n *sitter.Node) ir.VarID {
 			jb.stmt(cond) // while (false): the body never runs
 			return ir.NoVar
 		}
-		jb.loopWith(n, loopSpec{infinite: known && v, body: func() {
-			jb.stmt(cond)
-			jb.stmt(n.ChildByFieldName("body"))
-		}})
+		test := func() ir.VarID { return jb.expr(cond) }
+		spec := loopSpec{infinite: known && v, body: func() { jb.stmt(n.ChildByFieldName("body")) }}
+		if n.Type() == "do_statement" {
+			spec.post = test
+		} else {
+			spec.cond = test
+		}
+		jb.loopWith(n, spec)
 		return ir.NoVar
 	case "for_statement":
 		for _, c := range fieldChildren(n, "init") {
@@ -398,8 +402,7 @@ func (jb *jvBuilder) stmt(n *sitter.Node) ir.VarID {
 		}
 		cond := n.ChildByFieldName("condition")
 		v, known := jb.truth(cond)
-		jb.loopWith(n, loopSpec{infinite: cond == nil || (known && v), body: func() {
-			jb.stmt(cond)
+		jb.loopWith(n, loopSpec{infinite: cond == nil || (known && v), cond: func() ir.VarID { return jb.expr(cond) }, body: func() {
 			jb.stmt(n.ChildByFieldName("body"))
 			for _, c := range fieldChildren(n, "update") {
 				jb.stmt(c)
@@ -419,18 +422,40 @@ func (jb *jvBuilder) stmt(n *sitter.Node) ir.VarID {
 		jb.tryCatch(n, func() { jb.stmt(n.ChildByFieldName("body")) }, handlers, finally)
 		return ir.NoVar
 	case "switch_expression", "switch_statement":
-		jb.stmt(n.ChildByFieldName("condition"))
+		subject := jb.expr(n.ChildByFieldName("condition"))
 		var cases []func()
+		var tests []func() ir.VarID
 		exhaustive, fallsThrough := false, false
 		for _, c := range named(n.ChildByFieldName("body")) {
-			if l := firstOf(c, "switch_label"); l != nil && strings.HasPrefix(jb.text(l), "default") {
-				exhaustive = true
+			isDefault := false
+			for _, l := range allOf(c, "switch_label") {
+				isDefault = isDefault || strings.Contains(jb.text(l), "default")
 			}
+			exhaustive = exhaustive || isDefault
 			// case 1: ... falls through; case 1 -> ... does not.
 			fallsThrough = fallsThrough || c.Type() == "switch_block_statement_group"
 			cases = append(cases, func() { jb.setResult(jb.stmt(c)) })
+			if isDefault {
+				tests = append(tests, nil)
+				continue
+			}
+			tests = append(tests, func() ir.VarID {
+				var vs []ir.VarID
+				for _, l := range allOf(c, "switch_label") {
+					for _, v := range named(l) {
+						if v.Type() == "pattern" || v.Type() == "record_pattern" || v.Type() == "type_pattern" || v.Type() == "guard" {
+							vs = append(vs, ir.NoVar)
+							continue
+						}
+						vs = append(vs, jb.expr(v))
+					}
+				}
+				return jb.matches(c, subject, vs...)
+			})
 		}
-		return jb.valued(n, func() { jb.switchCases(n, fallsThrough, exhaustive, cases) })
+		return jb.valued(n, func() {
+			jb.switchCases(n, switchSpec{fallsThrough: fallsThrough, exhaustive: exhaustive, cases: cases, tests: tests})
+		})
 	case "throw_statement":
 		if k := named(n); len(k) > 0 {
 			jb.throwValue(jb.expr(k[0]), n)

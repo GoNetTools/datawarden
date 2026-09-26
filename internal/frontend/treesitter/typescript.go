@@ -681,8 +681,7 @@ func (tb *tsBuilder) stmt(n *sitter.Node) ir.VarID {
 		v, known := tb.truth(cond)
 		// for (;;): the condition is an empty statement.
 		infinite := cond == nil || strings.TrimSpace(tb.text(cond)) == ";" || (known && v)
-		tb.loopWith(n, loopSpec{infinite: infinite, body: func() {
-			tb.stmt(cond)
+		tb.loopWith(n, loopSpec{infinite: infinite, cond: func() ir.VarID { return tb.stmt(cond) }, body: func() {
 			tb.stmt(n.ChildByFieldName("body"))
 			tb.stmt(n.ChildByFieldName("increment"))
 		}})
@@ -694,10 +693,14 @@ func (tb *tsBuilder) stmt(n *sitter.Node) ir.VarID {
 			tb.stmt(cond) // while (false): the body never runs
 			return ir.NoVar
 		}
-		tb.loopWith(n, loopSpec{infinite: known && v, body: func() {
-			tb.stmt(cond)
-			tb.stmt(n.ChildByFieldName("body"))
-		}})
+		test := func() ir.VarID { return tb.stmt(cond) }
+		spec := loopSpec{infinite: known && v, body: func() { tb.stmt(n.ChildByFieldName("body")) }}
+		if n.Type() == "do_statement" {
+			spec.post = test
+		} else {
+			spec.cond = test
+		}
+		tb.loopWith(n, spec)
 		return ir.NoVar
 	case "try_statement":
 		var handlers []func()
@@ -708,16 +711,20 @@ func (tb *tsBuilder) stmt(n *sitter.Node) ir.VarID {
 			func() { tb.stmt(n.ChildByFieldName("finalizer")) })
 		return ir.NoVar
 	case "switch_statement":
-		tb.stmt(n.ChildByFieldName("value"))
+		subject := tb.stmt(n.ChildByFieldName("value"))
 		var cases []func()
+		var tests []func() ir.VarID
 		exhaustive := false
 		for _, c := range named(n.ChildByFieldName("body")) {
+			cases = append(cases, func() { tb.stmt(c) })
 			if c.Type() == "switch_default" {
 				exhaustive = true
+				tests = append(tests, nil)
+				continue
 			}
-			cases = append(cases, func() { tb.stmt(c) })
+			tests = append(tests, func() ir.VarID { return tb.matches(c, subject, tb.expr(c.ChildByFieldName("value"))) })
 		}
-		tb.switchCases(n, true, exhaustive, cases)
+		tb.switchCases(n, switchSpec{fallsThrough: true, exhaustive: exhaustive, cases: cases, tests: tests})
 		return ir.NoVar
 	case "break_statement", "continue_statement":
 		label := ""

@@ -399,3 +399,27 @@ function consentedSend(email: string) {
 export function consentCaller(email: string, consents: Consents) {
   if (consents.hasConsent()) consentedSend(email);
 }
+
+// scenario: validation-check
+function isValidEmail(s: string): boolean {
+  return s.includes("@");
+}
+
+export function validationCheck(input: string) {
+  if (isValidEmail(input)) {
+    // ruleid: log.ts.console
+    console.log(input);
+  }
+}
+
+// scenario: sanitizer-check
+function isMasked(s: string): boolean {
+  return s.startsWith("***");
+}
+
+export function sanitizerCheck(email: string) {
+  if (isMasked(email)) {
+    // ok: log.ts.console
+    console.log(email);
+  }
+}
