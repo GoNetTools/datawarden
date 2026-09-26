@@ -6,6 +6,7 @@ All notable changes to datawarden are documented here. The format follows [Keep 
 
 ### Added
 
+- `datawarden graph` draws the call graph behind the violations: sources, the functions the data goes through, their callers, and the sinks colored by destination. It writes an SVG image laid out by datawarden (no Graphviz needed), or Graphviz DOT or Mermaid (`--format`); `--all`, `--function` and `--data-type` choose the flows.
 - `datawarden scan --call-graph` shows, for each flow, the functions its data goes through as a call tree (deeper for a call, shallower for a return) and the functions that call the one where it enters, in the text and Markdown reports. JSON reports always include them as `calls` and `called_by`.
 - Python and Swift frontends, with rules for their logging, crash-reporting, analytics, messaging, HTTP, storage and IPC APIs, annotated examples for every rule, the shared conformance scenarios and construct programs, and planted leaks in `testdata/vulnshop` (a Flask recommender and an iOS app). Swift unified logging (`Logger`, `os_log`) counts only values marked public, since the rest are redacted.
 - `datawarden scan` with full, path, PR (`--diff <ref>`, changed files plus their callers from the cached call graph) and pre-commit (`--literals-only`, `--staged`) modes. Exit codes: 0 clean, 1 new violation, 2 error.

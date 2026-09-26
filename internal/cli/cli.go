@@ -89,6 +89,7 @@ type App struct {
 	Baselines  BaselineCodec
 	Reporter   Reporter
 	DataMapper DataMapper
+	Grapher    FlowGrapher
 	RuleTester RuleTester
 	// Languages lists the available frontends (for `version`).
 	Languages func() []string
@@ -104,6 +105,7 @@ Usage:
   datawarden scan --diff origin/main      PR mode: changed files plus their callers
   datawarden baseline                     accept the current findings
   datawarden map --format dpia            personal-data map (dpia, json, csv, mermaid)
+  datawarden graph [paths...]             draw the call graph of the violations (svg, dot, mermaid)
   datawarden rules                        print the effective sink/source/transform rules
   datawarden rules test DIR               check annotated examples in DIR against the rules
   datawarden ir [paths...]                print the IR the analysis reads (--func, --format json, --verify)
@@ -134,6 +136,8 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		err = a.runBaseline(ctx, args[1:])
 	case "map":
 		err = a.runMap(ctx, args[1:])
+	case "graph":
+		err = a.runGraph(ctx, args[1:])
 	case "rules":
 		if len(args) > 1 && args[1] == "test" {
 			code, err = a.runRulesTest(ctx, args[2:])
@@ -190,7 +194,7 @@ func (a *App) check() error {
 	}
 	for name, ok := range map[string]bool{
 		"Configs": a.Configs != nil, "Rules": a.Rules != nil, "Policy": a.Policy != nil, "Baselines": a.Baselines != nil,
-		"Reporter": a.Reporter != nil, "DataMapper": a.DataMapper != nil, "RuleTester": a.RuleTester != nil,
+		"Reporter": a.Reporter != nil, "DataMapper": a.DataMapper != nil, "Grapher": a.Grapher != nil, "RuleTester": a.RuleTester != nil,
 	} {
 		if !ok {
 			missing = append(missing, name)

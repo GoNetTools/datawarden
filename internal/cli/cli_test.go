@@ -23,6 +23,7 @@ import (
 	"github.com/GoNetTools/datawarden/internal/datamap"
 	"github.com/GoNetTools/datawarden/internal/detect"
 	"github.com/GoNetTools/datawarden/internal/finding"
+	"github.com/GoNetTools/datawarden/internal/flowgraph"
 	"github.com/GoNetTools/datawarden/internal/ingest"
 	"github.com/GoNetTools/datawarden/internal/ir"
 	"github.com/GoNetTools/datawarden/internal/policy"
@@ -201,6 +202,7 @@ func newHarness(files map[string]string) *harness {
 		Baselines:  baseline.Codec{},
 		Reporter:   report.Writer{},
 		DataMapper: datamap.Mapper{},
+		Grapher:    flowgraph.Renderer{},
 		RuleTester: ruletest.Tester{},
 		Links:      func(p ir.Pos) string { return "https://example.test/" + p.File },
 		Clock:      func() time.Time { return testNow },
@@ -287,6 +289,35 @@ func TestCallGraphFlag(t *testing.T) {
 	}
 	if code := h.run("scan", "--no-fail", "--call-graph"); code != ExitClean || !strings.Contains(h.out.String(), "calls   com.acme.Repo.save  app/Repo.kt:9") {
 		t.Errorf("--call-graph: exit %d\n%s", code, h.out)
+	}
+}
+
+func TestGraphCommand(t *testing.T) {
+	h := newHarness(nil)
+	if code := h.run("graph"); code != ExitClean || !strings.Contains(h.out.String(), "datawarden-graph.svg: 1 flow(s)") {
+		t.Fatalf("graph: exit %d\n%s%s", code, h.out, h.errb)
+	}
+	if svg := h.file("datawarden-graph.svg"); !strings.HasPrefix(svg, "<svg") || !strings.Contains(svg, "Repo.save") {
+		t.Errorf("svg:\n%s", svg)
+	}
+	if code := h.run("graph", "--format", "dot", "-o", "-"); code != ExitClean || !strings.HasPrefix(h.out.String(), "digraph datawarden") {
+		t.Errorf("dot to stdout: exit %d\n%s", code, h.out)
+	}
+	if code := h.run("graph", "--format", "mermaid"); code != ExitClean || !strings.HasPrefix(h.file("datawarden-graph.mmd"), "flowchart LR") {
+		t.Errorf("mermaid: exit %d\n%s", code, h.errb)
+	}
+	for _, args := range [][]string{{"--function", "Nothing"}, {"--data-type", "email"}} {
+		if code := h.run(append([]string{"graph", "-o", "-", "--format", "dot"}, args...)...); code != ExitClean || strings.Contains(h.out.String(), "Repo.save") {
+			t.Errorf("%v: exit %d\n%s", args, code, h.out)
+		}
+	}
+	if code := h.run("graph", "-o", "-", "--format", "dot", "--function", "Repo\\.save$"); code != ExitClean || !strings.Contains(h.out.String(), "Repo.save") {
+		t.Errorf("--function match: exit %d\n%s", code, h.out)
+	}
+	for _, bad := range [][]string{{"--format", "png"}, {"--function", "("}} {
+		if code := h.run(append([]string{"graph"}, bad...)...); code != ExitError {
+			t.Errorf("%v: exit %d", bad, code)
+		}
 	}
 }
 

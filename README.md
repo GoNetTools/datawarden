@@ -93,6 +93,7 @@ datawarden map --format dpia > docs/data-map.md
 | `datawarden scan --literals-only` | Only the committed-value detector (personal data and secrets). `--staged` reads the git index (pre-commit). |
 | `datawarden baseline` | Full scan; writes the current violations to the baseline. |
 | `datawarden map --format dpia\|json\|csv\|mermaid` | Personal-data inventory. |
+| `datawarden graph [--format svg\|dot\|mermaid] [-o FILE]` | Draws the call graph behind the violations as an image: sources, the functions the data goes through, their callers, and the sinks colored by destination. The SVG (default `datawarden-graph.svg`) is laid out by datawarden and opens in any browser; DOT renders with Graphviz (`dot -Tpng datawarden-graph.dot -o graph.png`); Mermaid renders on GitHub. `--all` adds accepted flows, `--function REGEXP` and `--data-type T` narrow it down. |
 | `datawarden rules [--kind sink] [--lang kotlin]` | Effective rules (built-in + repository overrides). |
 | `datawarden rules test DIR` | Checks annotated example code in `DIR` against the effective rules (see [Sink rules](#sink-rules)). |
 | `datawarden ir [paths...]` | Prints the IR the analysis reads for the given files ([docs/IR.md](docs/IR.md)): `--func REGEXP` to pick functions, `--format json`, `--classes` for the class table, `--verify` to check it (exit 1 when invalid). For rule and frontend authors. |
@@ -468,6 +469,7 @@ internal/baseline/      fingerprints and baseline encoding
 internal/policy/        violations and severity (Evaluator)
 internal/report/        text, JSON, SARIF, Markdown, GitLab SAST
 internal/datamap/       DPIA/JSON/CSV/Mermaid data map
+internal/flowgraph/     call graph of the flows as SVG, DOT or Mermaid (datawarden graph)
 internal/cicomment/     PR/MR comment upsert (HTTP client injected)
 internal/eval/          labelled-corpus scoring: precision, recall, F1, confidence sweep
 internal/ruletest/      ruleid/ok annotations in example code, checked against scan results

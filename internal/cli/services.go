@@ -66,6 +66,12 @@ type Reporter interface {
 	Write(w io.Writer, format string, r *report.Report) error
 }
 
+// FlowGrapher draws the call graph of flows as an image or a graph
+// description (flowgraph.Renderer).
+type FlowGrapher interface {
+	Render(w io.Writer, format string, flows []*finding.Flow) error
+}
+
 // DataMapper builds and renders the personal-data map (datamap.Mapper).
 type DataMapper interface {
 	Build(in datamap.Input) *datamap.Map

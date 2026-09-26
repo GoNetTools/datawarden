@@ -84,6 +84,7 @@ flowchart TB
         BASEL["baseline"]
         REP["report"]
         DMAP["datamap"]
+        FGRAPH["flowgraph"]
         CACHEP["cache"]
         INGEST["ingest"]
         CONF["config"]
@@ -116,7 +117,7 @@ flowchart TB
 | Entry points | `cmd/datawarden`, `cmd/datawarden-bench` | `main`: build the app with `app.New` and run it. |
 | Composition root | `internal/app` | The only place that chooses concrete implementations and connects them. |
 | Orchestration | `internal/cli`, `internal/scan` | Commands, flags and exit codes; the scan pipeline. They know *what* happens, not *how*. |
-| Components | `frontend/*`, `analysis`, `detect`, `rules`, `policy`, `baseline`, `report`, `datamap`, `cache`, `ingest`, `config`, `cicomment`, `ruletest`, `eval` | One job each, behind interfaces their consumers declare. |
+| Components | `frontend/*`, `analysis`, `detect`, `rules`, `policy`, `baseline`, `report`, `datamap`, `flowgraph`, `cache`, `ingest`, `config`, `cicomment`, `ruletest`, `eval` | One job each, behind interfaces their consumers declare. |
 | Operating system | `internal/platform` | The only package that touches disk, processes (`git`) and the cache file. |
 | Vocabulary | `internal/ir`, `internal/finding`, `internal/lang` | Types every component exchanges: the IR, findings, the language table. |
 
@@ -134,6 +135,7 @@ What each component does:
 | `baseline` | Line-independent fingerprints and the baseline document. |
 | `report` | Text, JSON, SARIF, Markdown and GitLab output. |
 | `datamap` | The personal-data inventory (DPIA, JSON, CSV, Mermaid). |
+| `flowgraph` | The call graph behind the flows (sources, functions, callers, sinks) as an SVG image laid out in Go (layered: cycles broken, longest-path layers, barycenter ordering), Graphviz DOT or Mermaid; `datawarden graph`. |
 | `cache` | Function summaries, call graph and schema between runs, keyed by file content. |
 | `ingest` | File walking, ignore patterns, file selection, git queries. |
 | `config` | `.datawarden.yaml`: parsing, defaults, validation. |
