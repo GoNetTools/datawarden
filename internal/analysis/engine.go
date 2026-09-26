@@ -577,6 +577,7 @@ func Analyze(ctx context.Context, funcs []*ir.Func, opts Options) (*Result, erro
 	for _, k := range keys {
 		res.Flows = append(res.Flows, a.flows[k])
 	}
+	a.callChains(res.Flows, cg)
 	return res, nil
 }
 

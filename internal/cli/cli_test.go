@@ -280,6 +280,16 @@ func TestIRPrintsLoweredFunctions(t *testing.T) {
 
 type runOnly struct{ Scanner }
 
+func TestCallGraphFlag(t *testing.T) {
+	h := newHarness(nil)
+	if code := h.run("scan", "--no-fail"); code != ExitClean || strings.Contains(h.out.String(), "calls ") {
+		t.Fatalf("default: exit %d\n%s", code, h.out)
+	}
+	if code := h.run("scan", "--no-fail", "--call-graph"); code != ExitClean || !strings.Contains(h.out.String(), "calls   com.acme.Repo.save  app/Repo.kt:9") {
+		t.Errorf("--call-graph: exit %d\n%s", code, h.out)
+	}
+}
+
 func TestReportWriteFailureExits2(t *testing.T) {
 	h := newHarness(nil)
 	h.ws.writeErr = errors.New("disk full")

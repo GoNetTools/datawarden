@@ -9,6 +9,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/GoNetTools/datawarden/internal/finding"
 	"github.com/GoNetTools/datawarden/internal/ir"
 )
 
@@ -60,6 +61,9 @@ func Text(w io.Writer, r *Report) error {
 		if len(f.Path) > 2 {
 			fmt.Fprintf(&b, "         path    %s\n", shortPath(f.Path))
 		}
+		if r.ShowCalls {
+			writeCalls(&b, f)
+		}
 		extra := fmt.Sprintf("confidence %.2f", f.Confidence)
 		if len(f.Transforms) > 0 {
 			extra += " · transforms " + strings.Join(f.Transforms, ",")
@@ -99,6 +103,38 @@ func Text(w io.Writer, r *Report) error {
 	b.WriteString("\n")
 	_, err := io.WriteString(w, b.String())
 	return err
+}
+
+// writeCalls prints a flow's call graph as a tree: each function the data
+// goes through, indented by its call depth.
+func writeCalls(b *strings.Builder, f *finding.Flow) {
+	calls := f.Calls
+	if len(calls) == 0 {
+		calls = []finding.CallStep{{Function: f.Function, Pos: f.Sink}}
+	}
+	for i, c := range calls {
+		label := "         calls   "
+		if i > 0 {
+			label = "                 "
+		}
+		branch := ""
+		if c.Depth > 0 {
+			branch = strings.Repeat("   ", c.Depth-1) + "└─ "
+		}
+		note := ""
+		switch {
+		case len(calls) == 1:
+			note = "  (source and sink)"
+		case i == 0:
+			note = "  (source)"
+		case i == len(calls)-1:
+			note = "  (sink)"
+		}
+		fmt.Fprintf(b, "%s%s%s  %s%s\n", label, branch, c.Function, c.Pos, note)
+	}
+	if len(f.CalledBy) > 0 {
+		fmt.Fprintf(b, "         called by  %s\n", strings.Join(f.CalledBy, ", "))
+	}
 }
 
 func shortPath(p []ir.Pos) string {

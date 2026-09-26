@@ -5,6 +5,7 @@ package analysis
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -735,5 +736,64 @@ func TestDispatchStaysInLanguage(t *testing.T) {
 	}
 	if got := h.targets(c, ""); len(got) != 2 {
 		t.Errorf("any language: %v", got)
+	}
+}
+
+// A flow's call chain: the functions its path goes through, deeper for a
+// call and shallower for a return, and who calls the first of them.
+func TestCallChains(t *testing.T) {
+	file := func(f *ir.Func) *ir.Func { f.File = "a.kt"; return f }
+	// fun helper(v) = log(v)                      lines 10-11
+	helper := file(newFunc("p.helper"))
+	helper.Pos = pos(10)
+	logTo(helper, helper.AddParam("v", "", pos(10)), 11)
+	// fun caller(email) = helper(email)           lines 20-21
+	caller := file(newFunc("p.caller"))
+	caller.Pos = pos(20)
+	email := caller.AddParam("email", "String", pos(20))
+	caller.Emit(ir.Instr{Op: ir.OpCall, Dst: caller.Temp(pos(21)), Args: []ir.VarID{email}, Call: &ir.Call{Name: "helper", Target: "p.helper"}, Pos: pos(21)})
+	// fun top() = caller(x)                       lines 30-31
+	top := file(newFunc("p.top"))
+	top.Pos = pos(30)
+	top.Emit(ir.Instr{Op: ir.OpCall, Dst: top.Temp(pos(31)), Args: []ir.VarID{top.Temp(pos(31))}, Call: &ir.Call{Name: "caller", Target: "p.caller"}, Pos: pos(31)})
+	// fun src(): String { val phone = read(); return phone }   lines 40-41
+	src := file(newFunc("p.src"))
+	src.Pos = pos(40)
+	phone := src.Named("phone", "String", pos(40))
+	src.Emit(ir.Instr{Op: ir.OpCall, Dst: phone, Call: &ir.Call{Name: "read"}, Pos: pos(40)})
+	src.Return(pos(41), phone)
+	// fun use() { log(src()) }                    lines 50-51
+	use := file(newFunc("p.use"))
+	use.Pos = pos(50)
+	r := use.Temp(pos(50))
+	use.Emit(ir.Instr{Op: ir.OpCall, Dst: r, Call: &ir.Call{Name: "src", Target: "p.src"}, Pos: pos(50)})
+	logTo(use, r, 51)
+
+	res := analyze(t, nil, helper, caller, top, src, use)
+	chain := func(fl *finding.Flow) string {
+		var parts []string
+		for _, c := range fl.Calls {
+			parts = append(parts, fmt.Sprintf("%s@%d", c.Function, c.Depth))
+		}
+		return strings.Join(parts, " ")
+	}
+	var down, up *finding.Flow
+	for _, fl := range res.Flows {
+		switch {
+		case fl.Sink.Line == 11 && fl.Source.Line == 20:
+			down = fl
+		case fl.Sink.Line == 51:
+			up = fl
+		}
+	}
+	if down == nil || chain(down) != "p.caller@0 p.helper@1" || len(down.CalledBy) != 1 || down.CalledBy[0] != "p.top" {
+		t.Errorf("call into a helper: %+v", down)
+	}
+	if up == nil || chain(up) != "p.src@1 p.use@0" {
+		t.Errorf("value returned by a callee: %+v", up)
+	}
+	idx := newSpanIndex(map[string]*ir.Func{"p.caller": caller, "p.helper": helper})
+	if idx.at(pos(21)) != "p.caller" || idx.at(pos(99)) != "" {
+		t.Error("span index")
 	}
 }
