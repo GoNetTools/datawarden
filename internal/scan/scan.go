@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math"
 	"path"
 	"sort"
 	"strings"
@@ -345,6 +346,14 @@ func (s *Scanner) selectTargets(ctx context.Context, req Request, all []ingest.F
 // contacts (a code of conduct, the maintainers), not personal data that
 // leaked into the repository.
 func contactDoc(rel string) bool {
+	// Translation catalogs: an address in them is the placeholder of an
+	// input field ("nombre@example.com") or the project's own contact.
+	p := "/" + strings.ToLower(rel)
+	for _, d := range []string{"/i18n/", "/l10n/", "/locales/", "/locale/", "/translations/"} {
+		if strings.Contains(p, d) {
+			return true
+		}
+	}
 	base := strings.ToUpper(path.Base(rel))
 	for _, p := range []string{"CODE_OF_CONDUCT", "CODE-OF-CONDUCT", "CONTRIBUTING", "AUTHORS", "MAINTAINERS", "SECURITY", "CODEOWNERS", "CONTRIBUTORS", "GOVERNANCE", "SUPPORT"} {
 		if strings.HasPrefix(base, p) {
@@ -353,6 +362,10 @@ func contactDoc(rel string) bool {
 	}
 	return false
 }
+
+// testDataFactor scales the confidence of personal data values found in
+// test files.
+const testDataFactor = 0.6
 
 func (s *Scanner) scanLiterals(ctx context.Context, req Request, files []ingest.File) ([]*finding.Literal, error) {
 	var out []*finding.Literal
@@ -376,6 +389,12 @@ func (s *Scanner) scanLiterals(ctx context.Context, req Request, files []ingest.
 		}
 		contacts := contactDoc(f.Rel)
 		for _, h := range s.Literals.Scan(b) {
+			if f.Test && h.Class != "credential" {
+				// Personal data in tests is almost always
+				// made up (user@yourapp.io); a key or token committed
+				// there is as usable as anywhere else.
+				h.Conf = math.Round(h.Conf*testDataFactor*100) / 100
+			}
 			if h.Conf < minConf || contacts && h.DataType == "email" {
 				continue
 			}

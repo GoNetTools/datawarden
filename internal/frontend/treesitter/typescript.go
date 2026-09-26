@@ -883,28 +883,33 @@ func (tb *tsBuilder) expr(n *sitter.Node) ir.VarID {
 		tb.assign(dst, n, a, b)
 		return dst
 	case "object":
+		// A property with a static key is a field of the new object
+		// ({url: u, key: k}.url is u only); spreads, computed keys and
+		// methods are merged into it.
 		var parts []ir.VarID
+		var fields []literalField
 		for _, c := range named(n) {
 			switch c.Type() {
 			case "pair":
 				key := c.ChildByFieldName("key")
 				v := tb.expr(c.ChildByFieldName("value"))
 				if key != nil && (key.Type() == "property_identifier" || key.Type() == "string") {
-					nv := tb.fn.Named(stringValue(tb.f, key), "", tb.pos(key))
+					name := stringValue(tb.f, key)
+					nv := tb.fn.Named(name, "", tb.pos(key))
 					tb.assign(nv, c, v)
-					parts = append(parts, nv)
+					fields = append(fields, literalField{name, nv, c})
 				} else {
 					parts = append(parts, v)
 				}
+			case "shorthand_property_identifier":
+				fields = append(fields, literalField{tb.text(c), tb.expr(c), c})
 			case "method_definition":
 				parts = append(parts, tb.lambdaFn(c))
 			default:
 				parts = append(parts, tb.expr(c))
 			}
 		}
-		dst := tb.temp(n)
-		tb.assign(dst, n, parts...)
-		return dst
+		return tb.objectLiteral(n, parts, fields)
 	case "arrow_function", "function_expression", "function", "generator_function":
 		return tb.lambdaFn(n)
 	case "sequence_expression":

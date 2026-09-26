@@ -29,7 +29,9 @@ import (
 	"net/url"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/GoNetTools/datawarden/internal/detect"
 	"github.com/GoNetTools/datawarden/internal/finding"
@@ -134,17 +136,31 @@ type fact struct {
 }
 
 func (f *fact) key() string {
-	k := fmt.Sprintf("#%d.%s|%s", f.param, f.field, xfKey(f.xf))
+	var b strings.Builder
 	if f.dt != "" {
-		k = f.dt + "|" + xfKey(f.xf)
+		b.WriteString(f.dt)
+	} else {
+		b.WriteByte('#')
+		b.WriteString(strconv.Itoa(f.param))
+		b.WriteByte('.')
+		b.WriteString(f.field)
+	}
+	b.WriteByte('|')
+	for i, x := range f.xf {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteString(x)
 	}
 	if f.at > 0 {
-		k += fmt.Sprintf("@%d", f.at)
+		b.WriteByte('@')
+		b.WriteString(strconv.Itoa(f.at))
 	}
 	if f.stored != "" {
-		k += "^" + f.stored
+		b.WriteByte('^')
+		b.WriteString(f.stored)
 	}
-	return k
+	return b.String()
 }
 
 type state struct {
@@ -427,6 +443,12 @@ func appendPath(p []ir.Pos, extra ...ir.Pos) []ir.Pos {
 			continue
 		}
 		if n := len(out); n > 0 && out[n-1].File == e.File && out[n-1].Line == e.Line {
+			continue
+		}
+		if j := slices.Index(out, e); j >= 0 {
+			// Back where the path already was: drop the loop (a value
+			// going round a recursive call or a callback).
+			out = out[:j+1]
 			continue
 		}
 		out = append(out, e)
@@ -712,7 +734,7 @@ func (a *analyzer) seed(st *state, fn *ir.Func) {
 			continue
 		}
 		vid := ir.VarID(id)
-		if v.Name != "" && !isBoolOrFunc(v.Type) && !redef[vid] {
+		if v.Name != "" && !isBoolOrFunc(v.Type) && !redef[vid] && !errorValue(fn, defs, vid) {
 			if m, ok := a.opts.Names.Ident(v.Name); ok {
 				f := &fact{dt: m.DataType, param: -1, src: v.Pos, desc: fmt.Sprintf("identifier %q", v.Name), path: []ir.Pos{v.Pos}, conf: m.Conf, seed: true}
 				f.xf = mergeXf(nil, append(definedBy(vid), m.Transform)...)
@@ -914,6 +936,9 @@ func (a *analyzer) analyzeFunc(fn *ir.Func) *Summary {
 				}
 			}
 			for _, f := range st.of(arg) {
+				if f.stored != "" && !throw {
+					continue // one field's value, returned in that field above
+				}
 				t := Transfer{Xf: f.xf, Conf: f.conf, Path: appendPath(f.path, in.Pos), Field: f.field}
 				rf := RealFact{DataType: f.dt, Desc: f.desc, Src: f.src, Path: appendPath(f.path, in.Pos), Xf: f.xf, Conf: f.conf}
 				switch {
@@ -980,7 +1005,7 @@ func (a *analyzer) fieldFacts(st *state, fn *ir.Func, obj ir.VarID, owner, field
 		name, owner = field[i+1:], "?"
 	}
 	if owner == "" && obj >= 0 && int(obj) < len(fn.Vars) {
-		owner = fn.Vars[obj].Type
+		owner = copiedType(fn, st.defs, obj)
 	}
 	ctxName := owner
 	if ctxName == "" && obj >= 0 && int(obj) < len(fn.Vars) {
@@ -1030,16 +1055,17 @@ func (a *analyzer) fieldFacts(st *state, fn *ir.Func, obj ir.VarID, owner, field
 		case f.stored != "" && !wholeValueFields[name]:
 			// Held by one of the object's fields: read from st.stores
 			// above when it is this one.
-		case !known:
-			out = append(out, derive(f, pos, 0.8))
 		case f.dt == "" && f.at == 0:
 			// obj is (an alias of) a parameter or a field of one: this
-			// field of it.
+			// field of it. Callers answer with what they hold there, or
+			// with the whole argument when its type is unknown to them.
 			d := derive(f, pos, 1)
 			for _, part := range strings.Split(field, ".") {
 				d.field = joinField(d.field, part)
 			}
 			out = append(out, d)
+		case !known:
+			out = append(out, derive(f, pos, 0.8))
 		}
 	}
 	return out
@@ -1133,8 +1159,10 @@ func (a *analyzer) step(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 		// A store without a declared owner type is a map or object literal
 		// ({"email": v}): the key names the value, whatever other types say
 		// about fields of the same name. For typed owners the schema decides.
+		// An error keyed by the field it is about ({"email":
+		// ValidationError("Email is required")}) does not hold that data.
 		untyped := in.Owner == ""
-		if _, fs := a.opts.Schema.Field(in.Owner, in.Field); untyped || (fs == detect.FieldUnknown && !a.opts.Schema.KnownType(in.Owner)) {
+		if _, fs := a.opts.Schema.Field(in.Owner, in.Field); !errorValue(fn, st.defs, val) && (untyped || (fs == detect.FieldUnknown && !a.opts.Schema.KnownType(in.Owner))) {
 			if m, ok := a.opts.Names.Key(in.Field); ok {
 				f := st.mutation(&fact{dt: m.DataType, param: -1, src: in.Pos, desc: fmt.Sprintf("key %q", in.Field), path: []ir.Pos{in.Pos}, conf: m.Conf, stored: in.Field})
 				for _, w := range st.pt.mutated(obj) {
@@ -1348,7 +1376,18 @@ func (a *analyzer) call(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 			if i < recvOff && !(c.HasRecv && r.Arg.Selects(-1)) || !r.Arg.Selects(i-recvOff) {
 				continue
 			}
+			if i < recvOff && a.chainedSink(fn, st.defs, in.Args[i], r.ID) {
+				// log.Info().Str("ip", ip).Msg("x"): the receiver is what
+				// the previous call of the chain returned, and that call
+				// reported what it carries.
+				continue
+			}
 			for _, f := range factsOf(i) {
+				if i < recvOff && f.at > 0 && a.sinkCall(fn, f.at-1, r.ID) {
+					// evt.Str("ip", ip); evt.Msg(""): put on the receiver
+					// by a call that already reported it.
+					continue
+				}
 				if f.dt == "" {
 					sum.addParamSink(f.param, SinkHit{Rule: r.ID, Dest: dest, Sink: in.Pos, Func: a.reportFunc(fn), Call: label, Lang: fn.Lang,
 						Path: appendPath(f.path, in.Pos), Xf: f.xf, Conf: f.conf * hit.Conf, Field: f.field, Guards: guards})
@@ -1431,12 +1470,19 @@ func (a *analyzer) call(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 				others = append(others, in.Args[j])
 			}
 		}
+		outs := others
+		if !now {
+			// A kept callback (a handler, a middleware) is later given
+			// arguments of the caller's choosing: what it writes into
+			// its parameters does not go into this call's arguments.
+			outs = nil
+		}
 		for _, cl := range cls {
 			captured := st.all
 			if now {
 				captured = st.of
 			}
-			_, ch := a.runClosure(st, fn, in, cl, others, func(int) []*fact { return inputs }, captured, sum)
+			_, ch := a.runClosure(st, fn, in, cl, outs, func(int) []*fact { return inputs }, captured, sum)
 			changed = changed || ch
 		}
 	}
@@ -1505,6 +1551,24 @@ func (a *analyzer) call(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 			}
 		}
 	}
+	// A keyed put (ctx.Set("user", u), map.put("email", e)) stores the
+	// value under its key: reading another key, or another part of the
+	// object, does not give it.
+	putKey := ""
+	if c.HasRecv && recvOff == 1 && !isNew && nonRecv == 2 && isMutator(c.Name) {
+		if k, ok := constOf(fn, st.defs, in.Args[1]); ok && k != "" && !strings.ContainsAny(k, " \t\n") {
+			putKey = k
+		}
+	}
+	// A request through an HTTP client the rules do not know
+	// (HTTPClient.send_request, session.post) answers with the remote's
+	// response, like a network sink's; a length, count or type check
+	// is a number or a flag.
+	lname := strings.ToLower(c.Name)
+	remote = remote || (c.HasRecv || c.RecvText != "") && requestMethods[lname]
+	if dataFreeCalls[lname] {
+		return changed
+	}
 	for i := range in.Args {
 		if skipRecv && i == 0 {
 			continue
@@ -1516,12 +1580,28 @@ func (a *analyzer) call(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 				// request's reply is not the password.
 				continue
 			}
+			if i == 0 && recvOff == 1 && f.stored != "" && !readsPart(fn, st.defs, in, f.stored) {
+				continue
+			}
 			changed = st.add(in.Dst, derive(f, in.Pos, 0.95, nameXf)) || changed
+			if putKey != "" && i == 2 {
+				changed = st.mutate(in.Args[0], putKey, st.mutation(derive(f, in.Pos, 0.9))) || changed
+				continue
+			}
+			if putKey != "" && i == 1 {
+				continue
+			}
 			if i >= recvOff && c.HasRecv && recvOff == 1 && !isNew && isMutator(c.Name) {
 				// The receiver, and the object it came from when it is a
 				// builder call's result (sb.append(a).append(email)).
 				r := in.Args[0]
 				for depth := 0; r >= 0 && depth < 8; depth++ {
+					if handleType(fn.Vars[r].Type) {
+						// A connection or client is not changed by the data
+						// a query or request is given: db.Where(q, email)
+						// does not put the email into db.
+						break
+					}
 					changed = st.mutate(r, "", st.mutation(derive(f, in.Pos, 0.9))) || changed
 					next, ok := st.fluent[r]
 					if !ok {
@@ -1605,7 +1685,22 @@ func (a *analyzer) apply(st *state, fn *ir.Func, in *ir.Instr, s *Summary, args 
 		case field == "":
 			return factsAt(i)
 		case args[i] < 0:
-			return nil
+			// Values with no variable (what a callback is given): the
+			// field of each.
+			var out []*fact
+			for _, f := range factsAt(i) {
+				if f.stored != "" && f.stored != field && !strings.HasPrefix(field, f.stored+".") {
+					continue
+				}
+				d := derive(f, in.Pos, 1)
+				if f.dt == "" {
+					for _, part := range strings.Split(field, ".") {
+						d.field = joinField(d.field, part)
+					}
+				}
+				out = append(out, d)
+			}
+			return out
 		}
 		return a.fieldFacts(st, fn, args[i], "", field, in.Pos)
 	}
@@ -1622,6 +1717,10 @@ func (a *analyzer) apply(st *state, fn *ir.Func, in *ir.Instr, s *Summary, args 
 				d.path = appendPath(d.path, t.Path...)
 				if t.DstField != "" && dst >= 0 {
 					changed = st.addStore(dst, t.DstField, d) || changed
+					// On the object too, as held by that field only.
+					g := *d
+					g.stored = t.DstField
+					d = &g
 				}
 				changed = st.add(dst, d) || changed
 			}
@@ -1672,6 +1771,9 @@ func (a *analyzer) apply(st *state, fn *ir.Func, in *ir.Instr, s *Summary, args 
 		f.xf = mergeXf(f.xf, nameXf)
 		if rf.DstField != "" && dst >= 0 {
 			changed = st.addStore(dst, rf.DstField, f) || changed
+			g := *f
+			g.stored = rf.DstField
+			f = &g
 		}
 		changed = st.add(dst, f) || changed
 	}
@@ -1816,6 +1918,160 @@ func round2(f float64) float64 {
 		f = 1
 	}
 	return float64(int(f*100+0.5)) / 100
+}
+
+// requestMethods send a request through an HTTP client and return its
+// response.
+var requestMethods = map[string]bool{
+	"send_request": true, "sendrequest": true, "request": true, "urlopen": true, "fetch": true,
+	"post": true, "patch": true, "post_json": true, "postjson": true,
+}
+
+// dataFreeCalls return a size, a count, a flag or a type, not the data
+// they are given.
+var dataFreeCalls = map[string]bool{
+	"len": true, "count": true, "size": true, "length": true, "isempty": true, "isnotempty": true,
+	"isinstance": true, "issubclass": true, "hasattr": true, "callable": true, "type": true, "typeof": true,
+	"bool": true, "exists": true, "contains": true, "containskey": true, "startswith": true, "endswith": true,
+	"hasprefix": true, "hassuffix": true, "isvalid": true, "is_valid": true, "equals": true, "equal": true,
+}
+
+// errorValue reports whether v is an exception or error constructed in fn
+// ({"email": ValidationError("Email is required")}): its name says what
+// the error is about, not what it holds.
+func errorValue(fn *ir.Func, defs []int, v ir.VarID) bool {
+	for depth := 0; depth < 4; depth++ {
+		if v < 0 || int(v) >= len(defs) || defs[v] < 0 {
+			return false
+		}
+		in := &fn.Instrs[defs[v]]
+		switch {
+		case in.Op == ir.OpAssign && len(in.Args) == 1:
+			v = in.Args[0]
+			continue
+		case (in.Op == ir.OpNew || in.Op == ir.OpCall) && in.Call != nil:
+			n := in.Call.Name
+			return strings.HasSuffix(n, "Error") || strings.HasSuffix(n, "Exception")
+		}
+		return false
+	}
+	return false
+}
+
+// handleTypes are library types of connections, clients, loggers and
+// routers: shared handles that calls pass data through, not hold.
+var handleTypes = map[string]bool{
+	"gorm.io/gorm.DB": true, "database/sql.DB": true, "database/sql.Tx": true, "database/sql.Conn": true,
+	"database/sql.Stmt": true, "github.com/jmoiron/sqlx.DB": true, "github.com/jmoiron/sqlx.Tx": true,
+	"github.com/jackc/pgx/v5/pgxpool.Pool": true, "github.com/jackc/pgx/v5.Conn": true, "github.com/jackc/pgx/v4/pgxpool.Pool": true,
+	"go.mongodb.org/mongo-driver/mongo.Client": true, "go.mongodb.org/mongo-driver/mongo.Database": true,
+	"go.mongodb.org/mongo-driver/mongo.Collection": true, "github.com/redis/go-redis/v9.Client": true,
+	"github.com/go-redis/redis/v8.Client": true, "net/http.Client": true, "net/http.ServeMux": true,
+	"github.com/gin-gonic/gin.Engine": true, "github.com/gin-gonic/gin.RouterGroup": true,
+	"github.com/labstack/echo/v4.Echo": true, "github.com/labstack/echo/v4.Group": true, "github.com/gorilla/mux.Router": true,
+	"github.com/go-chi/chi/v5.Mux": true, "github.com/rs/zerolog.Logger": true, "go.uber.org/zap.Logger": true,
+	"go.uber.org/zap.SugaredLogger": true, "log/slog.Logger": true, "github.com/sirupsen/logrus.Logger": true,
+	"google.golang.org/grpc.ClientConn": true,
+}
+
+func handleType(t string) bool {
+	return t != "" && handleTypes[strings.TrimLeft(t, "*&")]
+}
+
+// copiedType is the declared type of v, or of the value it is a copy of
+// (found = find_profile(p) has the type find_profile returns).
+func copiedType(fn *ir.Func, defs []int, v ir.VarID) string {
+	for depth := 0; depth < 4 && v >= 0 && int(v) < len(fn.Vars); depth++ {
+		if t := fn.Vars[v].Type; t != "" {
+			return t
+		}
+		if int(v) >= len(defs) || defs[v] < 0 {
+			return ""
+		}
+		in := &fn.Instrs[defs[v]]
+		if in.Op != ir.OpAssign || len(in.Args) != 1 {
+			return ""
+		}
+		v = in.Args[0]
+	}
+	return ""
+}
+
+// sinkCall reports whether instruction i of fn is a call matching sink
+// rule id.
+func (a *analyzer) sinkCall(fn *ir.Func, i int, id string) bool {
+	if i < 0 || i >= len(fn.Instrs) || fn.Instrs[i].Op != ir.OpCall || fn.Instrs[i].Call == nil {
+		return false
+	}
+	for _, h := range a.opts.Rules.Match(fn.Lang, rules.KindSink, fn.Instrs[i].Call) {
+		if h.Rule.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+// chainedSink reports whether v is the result of a call matching sink rule
+// id, directly or through copies.
+func (a *analyzer) chainedSink(fn *ir.Func, defs []int, v ir.VarID, id string) bool {
+	for depth := 0; depth < 4 && v >= 0 && int(v) < len(defs); depth++ {
+		d := defs[v]
+		if d < 0 {
+			return false
+		}
+		in := &fn.Instrs[d]
+		switch {
+		case in.Op == ir.OpAssign && len(in.Args) == 1:
+			v = in.Args[0]
+			continue
+		case in.Op == ir.OpCall:
+			return a.sinkCall(fn, d, id)
+		}
+		return false
+	}
+	return false
+}
+
+// wholeValueMethods render or copy a whole object: what any of its fields
+// holds is in the result.
+var wholeValueMethods = map[string]bool{
+	"tostring": true, "string": true, "description": true, "json": true, "tojson": true, "dump": true, "dumps": true,
+	"serialize": true, "encode": true, "marshal": true, "copy": true, "clone": true, "build": true, "get": true,
+	"values": true, "entries": true, "items": true, "iterator": true, "asdict": true, "dict": true, "todict": true,
+	"tomap": true, "model_dump": true, "stringify": true, "format": true, "unwrap": true, "orelse": true, "await": true,
+}
+
+// readsPart reports whether an unresolved method call on an object may
+// return what the object's part (field or key) holds: a read with that
+// constant key (ctx.Get("user")), a read with a key not known here, a
+// method named after the part (getEmail() for email), or one rendering
+// the whole object (toString()). ctx.ClientIP() does not return the user
+// put under "user".
+func readsPart(fn *ir.Func, defs []int, in *ir.Instr, part string) bool {
+	name := strings.ToLower(in.Call.Name)
+	if !isGetterName(name) && isMutator(name) {
+		return true // a builder call returns its receiver
+	}
+	if len(in.Args) > 1 {
+		k, ok := constOf(fn, defs, in.Args[1])
+		return !ok || k == part || normName(k) == normName(part)
+	}
+	if wholeValueMethods[name] {
+		return true
+	}
+	p := normName(part)
+	return p != "" && strings.Contains(normName(name), p)
+}
+
+// normName lowercases a name and drops its separators: first_name and
+// firstName are the same.
+func normName(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '_' || r == '-' {
+			return -1
+		}
+		return unicode.ToLower(r)
+	}, s)
 }
 
 // getterField maps getEmail/isVerified/email() style accessors to the

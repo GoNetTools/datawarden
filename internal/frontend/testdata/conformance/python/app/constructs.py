@@ -1,6 +1,7 @@
 # Language constructs the Python frontend must lower. Unlike the shared
 # scenarios in conformance.py, these are specific to Python.
 import logging
+from typing import Optional
 
 from . import conformance
 from .conformance import Profile
@@ -353,3 +354,50 @@ def nested_assignment_is_local(email: str, items: list):
         remember(item)
     # ok: log.py.print
     print(found)
+
+
+class ValidationError(Exception):
+    pass
+
+
+def dict_fields(api_key: str):
+    # An entry of a dict literal holds only its own value.
+    d = {"url": "https://api.example.com", "key": api_key}
+    # ok: log.py.print
+    print(d["url"])
+    # ruleid: log.py.print
+    print(d["key"])
+
+
+def send_token(url: str, token: str):
+    # The response of a request through an HTTP client is the server's
+    # answer, not what was sent.
+    response = http_client.send_request("POST", url, json={"auth_token": token})
+    # ok: log.py.print
+    print(response)
+
+
+def count_emails(emails: list):
+    # A length is a number.
+    # ok: log.py.print
+    print(len(emails))
+
+
+def errors_by_field():
+    # An error keyed by the field it is about does not hold that data.
+    errors = {"email": ValidationError("Email is required")}
+    # ok: log.py.print
+    print(errors)
+
+
+def find_profile(p: "Profile") -> Optional["Profile"]:
+    return p
+
+
+def optional_forward_reference(p: Profile):
+    # Optional["Profile"] is a Profile: its other fields are not the email.
+    found = find_profile(p)
+    # ok: log.py.print
+    print(found.nickname)
+    # ruleid: log.py.print
+    print(found.email)

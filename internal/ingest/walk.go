@@ -36,7 +36,8 @@ func IsTestPath(rel string) bool {
 		return true
 	}
 	p := "/" + rel
-	for _, d := range []string{"/src/test/", "/src/androidTest/", "/src/testDebug/", "/__tests__/", "/__mocks__/", "/testdata/", "/e2e/", "/cypress/"} {
+	for _, d := range []string{"/src/test/", "/src/androidTest/", "/src/testDebug/", "/__tests__/", "/__mocks__/", "/testdata/", "/e2e/", "/cypress/",
+		"/tests/", "/test/", "/spec/", "/specs/"} {
 		if strings.Contains(p, d) {
 			return true
 		}

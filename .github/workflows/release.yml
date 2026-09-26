@@ -188,7 +188,7 @@ jobs:
           flags=(--verify-tag --title "$TAG" --generate-notes)
           case "$TAG" in *-*) flags+=(--prerelease --latest=false) ;; esac
           gh release create "$TAG" --repo "$REPO" "${flags[@]}" dist/*
-      # `uses: GoNetTools/pii-scanner@v0` resolves to this tag. GITHUB_TOKEN may
+      # `uses: GoNetTools/datawarden@v0` resolves to this tag. GITHUB_TOKEN may
       # not move a tag across commits that change workflow files; set a
       # RELEASE_TAG_TOKEN secret (contents + workflows write) to avoid that.
       - name: Move the major version tag

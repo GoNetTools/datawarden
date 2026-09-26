@@ -52,7 +52,7 @@ scripts/check-headers.sh                                        # SPDX header on
 
 ### Report a false positive or a missed leak
 
-Use the issue templates. The most useful report is a **minimal snippet** (synthetic data) plus the datawarden output line, which names the rule (`[sdk.ts.sentry.set_user]`), data type and confidence.
+Use the issue templates. The most useful report is a **minimal snippet** (synthetic data) plus the datawarden output line, which names the rule (`[sdk.ts.sentry.set_user]`), data type and confidence. [docs/FINDINGS.md](docs/FINDINGS.md) helps tell an analysis false positive (worth a report) from one that naming or policy settles.
 
 ### Add or fix a rule
 

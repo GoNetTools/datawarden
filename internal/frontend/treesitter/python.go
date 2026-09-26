@@ -32,10 +32,19 @@ func (fe *pyFrontend) Lang() string { return lang.Python }
 type pyProgram struct {
 	*program
 	static map[string]bool // static and class methods: called without self
+	// rets are the return annotations of functions and methods, resolved
+	// to type names once every class is known.
+	rets    map[string]string
+	retDefs map[string]pyAnnotation
+}
+
+type pyAnnotation struct {
+	f *srcFile
+	n *sitter.Node
 }
 
 func (fe *pyFrontend) Lower(ctx context.Context, files []string) (*ir.Module, error) {
-	pp := &pyProgram{program: newProgram(lang.Python, fe.opts), static: map[string]bool{}}
+	pp := &pyProgram{program: newProgram(lang.Python, fe.opts), static: map[string]bool{}, rets: map[string]string{}, retDefs: map[string]pyAnnotation{}}
 	pp.parse(ctx, files, python.GetLanguage())
 	for _, f := range pp.files {
 		f.pkg = pyModuleID(f.rel)
@@ -46,6 +55,11 @@ func (fe *pyFrontend) Lower(ctx context.Context, files []string) (*ir.Module, er
 	}
 	for _, f := range pp.files {
 		pp.collect(f)
+	}
+	for id, a := range pp.retDefs {
+		if t := pp.resolveType(a.f, pyTypeName(a.f, a.n)); t != "" {
+			pp.rets[id] = t
+		}
 	}
 	for _, c := range pp.classes {
 		for k, t := range c.fields {
@@ -194,7 +208,7 @@ func pyDecorators(f *srcFile, def *sitter.Node) []string {
 }
 
 // pyTypeName reduces an annotation to the type it holds: Optional[User],
-// User | None and "User" are User; list[User] is list.
+// Optional["User"], User | None and "User" are User; list[User] is list.
 func pyTypeName(f *srcFile, n *sitter.Node) string {
 	if n == nil {
 		return ""
@@ -213,7 +227,8 @@ func pyTypeName(f *srcFile, n *sitter.Node) string {
 	if i := strings.IndexByte(t, '['); i > 0 {
 		t = t[:i]
 	}
-	return strings.TrimSpace(t)
+	// Optional["User"]: a forward reference inside the wrapper.
+	return strings.Trim(strings.TrimSpace(t), `"'`)
 }
 
 var pyEntityBases = map[string]bool{"Model": true, "Base": true, "DeclarativeBase": true, "Document": true, "SQLModel": true, "Entity": true}
@@ -227,6 +242,9 @@ func (pp *pyProgram) collect(f *srcFile) {
 			id := f.pkg + ":" + name
 			pp.funcs[id] = true
 			pp.top[f.pkg+"."+name] = id
+			if r := d.ChildByFieldName("return_type"); r != nil {
+				pp.retDefs[id] = pyAnnotation{f, r}
+			}
 		case "class_definition":
 			pp.collectClass(f, d)
 		}
@@ -290,6 +308,9 @@ func (pp *pyProgram) collectClass(f *srcFile, d *sitter.Node) {
 			id := f.pkg + ":" + short + "." + mn
 			pp.funcs[id] = true
 			ci.methods[mn] = id
+			if r := st.ChildByFieldName("return_type"); r != nil {
+				pp.retDefs[id] = pyAnnotation{f, r}
+			}
 			for _, dn := range pyDecorators(f, st) {
 				switch dn {
 				case "staticmethod", "classmethod":
@@ -489,6 +510,15 @@ func pyParamName(f *srcFile, p *sitter.Node) string {
 type pyBuilder struct {
 	*builder
 	pp *pyProgram
+}
+
+// emitCall types the result of a call of a function of the program by
+// its return annotation.
+func (pb *pyBuilder) emitCall(n *sitter.Node, c *ir.Call, args []ir.VarID, resultType string) ir.VarID {
+	if resultType == "" && c.Target != "" {
+		resultType = pb.pp.rets[c.Target]
+	}
+	return pb.builder.emitCall(n, c, args, resultType)
 }
 
 func (pb *pyBuilder) stmt(n *sitter.Node) ir.VarID {
@@ -845,15 +875,20 @@ func (pb *pyBuilder) expr(n *sitter.Node) ir.VarID {
 		pb.assign(dst, n, parts...)
 		return dst
 	case "dictionary":
+		// An entry with a constant key is a field of the dict
+		// ({"url": u, "key": k}["url"] is u only); other entries and
+		// ** spreads are merged into it.
 		var parts []ir.VarID
+		var fields []literalField
 		for _, c := range named(n) {
 			if c.Type() == "pair" {
 				key := c.ChildByFieldName("key")
 				v := pb.expr(c.ChildByFieldName("value"))
 				if key != nil && key.Type() == "string" {
-					nv := pb.fn.Named(pyString(pb.f, key), "", pb.pos(key))
+					name := pyString(pb.f, key)
+					nv := pb.fn.Named(name, "", pb.pos(key))
 					pb.assign(nv, c, v)
-					parts = append(parts, nv)
+					fields = append(fields, literalField{name, nv, c})
 					continue
 				}
 				parts = append(parts, v)
@@ -861,9 +896,7 @@ func (pb *pyBuilder) expr(n *sitter.Node) ir.VarID {
 			}
 			parts = append(parts, pb.expr(c))
 		}
-		dst := pb.temp(n)
-		pb.assign(dst, n, parts...)
-		return dst
+		return pb.objectLiteral(n, parts, fields)
 	case "list_comprehension", "set_comprehension", "generator_expression", "dictionary_comprehension":
 		for _, c := range named(n) {
 			if c.Type() == "for_in_clause" {

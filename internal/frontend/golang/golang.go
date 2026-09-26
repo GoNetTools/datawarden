@@ -164,6 +164,7 @@ func (f *Frontend) lowerModule(ctx context.Context, modRel string, rels []string
 		mod.Warnings = append(mod.Warnings[:20], fmt.Sprintf("go: ... %d more package errors", n-20))
 	}
 
+	recoverListErrors(pkgs)
 	prog, ssaPkgs := ssautil.Packages(pkgs, ssa.GlobalDebug)
 	prog.Build()
 
@@ -471,6 +472,16 @@ func (l *lowerer) opaqueErrorCall(c *ssa.Call) bool {
 
 // libraryCall reports whether c calls code outside the module that is not
 // an error constructor.
+// resultField names result i of a function returning several.
+func resultField(i int) string { return fmt.Sprintf("$%d", i) }
+
+// programCall reports whether c calls a function of this program
+// statically, whose multiple results are lowered as a tuple.
+func (l *lowerer) programCall(c *ssa.Call) bool {
+	fn := c.Call.StaticCallee()
+	return fn != nil && l.internal(fn) && fn.Signature.Results().Len() > 1
+}
+
 func (l *lowerer) libraryCall(c *ssa.Call) bool {
 	fn := c.Call.StaticCallee()
 	if fn == nil {
@@ -869,6 +880,12 @@ func (l *lowerer) instr(ins ssa.Instruction) {
 			F.Emit(ir.Instr{Op: ir.OpCall, Dst: l.v(x), Call: &ir.Call{Name: "error"}, Pos: pos})
 			return
 		}
+		if c, ok := x.Tuple.(*ssa.Call); ok && l.programCall(c) {
+			// One result of a function of this program: the field of the
+			// tuple it returns (see *ssa.Return), not what the others hold.
+			F.Emit(ir.Instr{Op: ir.OpLoad, Dst: l.v(x), Args: []ir.VarID{l.v(x.Tuple)}, Field: resultField(x.Index), Pos: pos})
+			return
+		}
 		F.Assign(l.v(x), pos, l.v(x.Tuple))
 	case *ssa.Phi:
 		// One argument per live predecessor.
@@ -922,6 +939,18 @@ func (l *lowerer) instr(ins ssa.Instruction) {
 	case *ssa.MakeMap, *ssa.MakeSlice, *ssa.MakeChan:
 		l.v(x.(ssa.Value))
 	case *ssa.Return:
+		if len(x.Results) > 1 {
+			// Several results are a tuple with a field per result: a
+			// caller reading the error does not get the value returned
+			// beside it.
+			t := F.Temp(pos)
+			F.Emit(ir.Instr{Op: ir.OpNew, Dst: t, Call: &ir.Call{Name: "tuple"}, Pos: pos})
+			for i, r := range x.Results {
+				F.Emit(ir.Instr{Op: ir.OpStore, Dst: ir.NoVar, Args: []ir.VarID{t, l.v(r)}, Field: resultField(i), Pos: pos})
+			}
+			F.Return(pos, t)
+			return
+		}
 		args := make([]ir.VarID, 0, len(x.Results))
 		for _, r := range x.Results {
 			args = append(args, l.v(r))
@@ -1028,4 +1057,28 @@ func (l *lowerer) call(c *ssa.CallCommon, dst ir.VarID, pos ir.Pos) {
 		args = append(args, l.v(a))
 	}
 	F.Emit(ir.Instr{Op: ir.OpCall, Dst: dst, Args: args, Call: call, Pos: pos})
+}
+
+// recoverListErrors keeps packages whose only errors come from listing,
+// not type checking: a //go:embed pattern matching no files (a UI build
+// directory that is not committed) marks the package, and every package
+// importing it, as ill-typed although their types are complete. Such
+// packages, and those importing only well-typed packages, are analyzed.
+func recoverListErrors(pkgs []*packages.Package) {
+	packages.Visit(pkgs, nil, func(p *packages.Package) {
+		if !p.IllTyped || p.Types == nil || p.TypesInfo == nil || len(p.TypeErrors) > 0 {
+			return
+		}
+		for _, e := range p.Errors {
+			if e.Kind != packages.ListError {
+				return
+			}
+		}
+		for _, imp := range p.Imports {
+			if imp.IllTyped {
+				return
+			}
+		}
+		p.IllTyped = false
+	})
 }

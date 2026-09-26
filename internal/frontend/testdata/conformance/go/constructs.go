@@ -167,3 +167,24 @@ func libraryErrors(password, email string) {
 	// ruleid: log.go.stdlib
 	log.Println(fmt.Errorf("bad address %s", email))
 }
+
+// lookupAddress returns the address it is given, or an error that does
+// not hold it.
+func lookupAddress(email string) (string, error) {
+	if email == "" {
+		return "", errors.New("no address")
+	}
+	return email, nil
+}
+
+func tupleResults(email string) {
+	// Each result of a function returning several carries only what
+	// that result holds.
+	addr, err := lookupAddress(email)
+	if err != nil {
+		// ok: log.go.stdlib
+		log.Println(err)
+	}
+	// ruleid: log.go.stdlib
+	log.Println(addr)
+}

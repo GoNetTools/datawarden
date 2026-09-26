@@ -32,6 +32,12 @@ NEW      high   phone → Sentry / sentry.io (third-party)  [sdk.ts.sentry.set_u
 1 new violation(s): 1 flow(s), 0 literal(s) · 9 baselined
 ```
 
+`datawarden graph` draws the same findings as a picture, here for the web checkout of the [demo shop](testdata/vulnshop): where each piece of data is read, the functions it goes through, and where it ends up.
+
+![Sources on the left, the functions they go through in the middle, and sinks on the right colored by destination: browser storage, console, a partner API, Sentry, PostHog and an ad tracker](docs/images/datawarden-graph.svg)
+
+> **Status: pre-1.0.** The commands, flags, exit codes and configuration keys are meant to stay stable; until 1.0, a minor release may still add report fields or change finding fingerprints, and the [changelog](CHANGELOG.md) calls out any change that affects a baseline. On real applications roughly half of the flow findings are leaks worth fixing ([measured here](#results-on-real-applications)), so start with a [baseline](#baseline) and use [docs/FINDINGS.md](docs/FINDINGS.md) to triage the rest.
+
 ## Contents
 
 - [Install](#install)
@@ -47,6 +53,8 @@ NEW      high   phone → Sentry / sentry.io (third-party)  [sdk.ts.sentry.set_u
 - [Pre-commit](#pre-commit)
 - [Data map (DPIA)](#data-map-dpia)
 - [Accuracy and limits](#accuracy-and-limits)
+- [Reading and triaging findings](docs/FINDINGS.md)
+- [Getting help](#getting-help)
 - [Development](#development)
 - [Contributing](#contributing)
 - [License](#license)
@@ -71,7 +79,7 @@ grep " datawarden_${os}_${arch}.tar.gz$" checksums.txt | shasum -a 256 -c -
 tar -xzf "datawarden_${os}_${arch}.tar.gz" datawarden && sudo install datawarden /usr/local/bin/
 ```
 
-The Go frontend loads packages with `go/packages`, so scanning Go code needs the Go toolchain and the module's dependencies (as for `go build`).
+The Go frontend loads packages with `go/packages`, so scanning Go code needs the Go toolchain and the module's dependencies (as for `go build`). The first scan of a Go module can take a minute while the toolchain downloads and compiles them; later scans reuse the Go build cache and datawarden's own summary cache. A package the toolchain cannot type-check is skipped with a warning (a missing `//go:embed` directory is not a type error: those packages are analyzed).
 
 ## Quick start
 
@@ -209,11 +217,13 @@ A value whose type is a data class/entity with sensitive fields (a `Customer`) c
 
 | Detector | Validation |
 |---|---|
-| Email | skips `example.com`, role accounts (`noreply@`, `support@`), author/copyright lines, npm scopes, Kotlin `this@label` |
+| Email | skips `example.com`, role accounts (`noreply@`, `support@`), author/copyright lines, npm scopes, Kotlin `this@label`, contact files (`CODE_OF_CONDUCT`, `SECURITY`, ...) and translation catalogs (`i18n/`, `locales/`) |
 | Payment card | Luhn + issuer prefix (Visa, Mastercard, Amex, JCB, Discover, UnionPay); well-known test cards skipped |
 | IBAN | mod-97; documentation IBANs skipped |
 | US SSN | area/group/serial rules; advertising SSNs skipped |
 | Secrets | the taxonomy's value patterns: AWS access key ids, Stripe, Google, SendGrid, Anthropic and OpenAI API keys, GitHub, GitLab and Slack tokens, JWTs, private key blocks. Documentation values (`AKIAIOSFODNN7EXAMPLE`, the jwt.io sample), `xxxx` and `${VAR}` templates, and low-entropy strings are skipped |
+
+Test files (`_test.go`, `*.spec.ts`, `test_*.py`, `tests/`, `src/test/`, `e2e/`, ...) are scanned too, but personal data found in them scores 0.6 times its usual confidence, below the default `literals.min_confidence`, since test users are almost always made up. Credentials in test files keep their score, and fixtures and seed data (`fixtures/`, `seed.sql`) are not test files: that is where production exports get committed.
 
 Reports never print the value, only a masked form (`555*****12`; secrets keep only their first four characters, `AKIA********`) and, in the baseline, a hash.
 
@@ -363,15 +373,54 @@ Without the framework: `cp scripts/pre-commit .git/hooks/pre-commit` (runs `data
 
 datawarden favours explainable, low-noise results over completeness. Every finding has a confidence score and a source description; `policy.min_confidence` and `min_confidence` tune the trade-off.
 
-- The IR is a small code property graph: SSA variables (each assignment to a local is its own version, merged after `if`/`else`, `switch`/`when`/`match`, loops and `try`/`catch`) plus a control-flow graph. A value that is overwritten (`x = "anonymous"`, `email = mask(email)`) no longer reaches later sinks, a path that returns does not reach the code after it, and an object logged before personal data is added to it (`log(items); items.add(email)`, `log(user); user.note = email`) is not reported. `break` and `continue` go to their loop (labels included), `switch` cases in Java and JavaScript fall through until a `break`, and Python's `for`/`while ... else` runs only when the loop did not break. A field overwritten with other data no longer holds the old value (`user.name = email; user.name = "anonymous"`) when the object is known to be one object (a parameter, or created outside any loop), and an overwrite on one branch only keeps the data on the other path. A field stored through one variable is seen through every variable that may refer to the same object (`b = a; b.name = email; log(a.name)`, or through either arm of an `if`), and a value stored in one field of an object of unknown type does not show up in its other fields. A string built from an object (`"items=" + items`, `f"{items}"`) is a snapshot: data added to the object later does not reach it. Conditions that are constant in the source are folded: `if false`, `while true`, and booleans declared as constants (`static final boolean DEBUG = false`, `const val`, `const`, Swift `let`, Python `UPPER_CASE = False`, Go `const`), so code under a false constant is not analysed. Conditions that depend on data are not evaluated: both arms of such an `if` are assumed possible. Loops branch on their condition and `switch`/`when` cases on their tests, so a `when { consents.hasConsent() -> … }` arm is guarded like an `if`. A branch on a check about a value refines it where the check passed: after `if (isMasked(v))` or `if (isRedacted(v))` the value counts as masked or redacted, after `if (!containsPii(msg))` as `pii-checked` (a safe transform by default), and after `if (isValidEmail(input))` as an email address, a source even when its name says nothing. Lambdas and closures are analysed as functions of their own where they run: called through a variable, with the call's arguments; passed to other code, with what that call is given. A callee known to run the closure before it returns (`forEach`, `map`, `filter`, `apply`, `let`, `sort.Slice`, … in `internal/analysis/callbacks.go`) runs it at the call, so `items.forEach { log(xs) }; xs.add(email)` is not reported; any other callee may keep the closure and run it later, so it sees its captured variables as they are at any time. Closures are followed where they go: kept in a field and called by another method (`this.onSend(v)`), added to a list and called in a loop (an event bus), or returned by a factory and called by the caller; a closure a function receives as a parameter runs where it is passed, not inside that function, so what different callers pass is not mixed up. A closure that assigns a captured variable (`items.forEach { found = it.email }`) updates it for the code after the call; in Python only when the nested function declares the name `nonlocal` or `global`, since otherwise the assignment binds a local of its own. Inside a `try`, a handler sees the state at each call or `throw` that can raise the exception, and what a callee throws reaches the handler or the caller's caller.
-- A sink that runs only after a consent check (`if (!consents.hasConsent()) return`, `guard user.optedIn else { return }`, `if analytics_enabled:`) is reported with the check as a guard (`guards` in JSON, "guarded by" in text, "only after" in SARIF messages). The check can be a helper that returns one (`fun mayContact() = consents.hasConsent()`), part of a condition (`&&`, Python `and`), or in the callers: a function only ever called after a check (every call of it in the analysed code is guarded) reports its flows with that check. In PR mode a function with a caller outside the scanned files inherits nothing. It is still a finding, shown so a reviewer can confirm the check covers the flow, unless `policy.consent_guarded` accepts guarded flows to that destination.
-- Objects keep their structure three fields deep: `user.profile.note = email` followed by `log(user.profile.note)`, or a helper that stores into `u.profile.note`, is followed; deeper paths are merged into their first three fields.
-- Objects are tracked field by field through function summaries, not a heap model: a value a constructor stores in `this.addr` and another method logs is followed, and so is a factory's `&T{addr: email}`. Fields are tracked one level deep; deeper paths (`a.b.c`) collapse to the first field.
-- Calls through an interface, protocol, abstract class or overridable method run every override and implementation in the scanned code (class hierarchy analysis), in all six languages. Implementations in dependencies are not enumerated; rules can still target the interface method (`io.Writer.Write`).
-- Exceptions are followed from `throw`/`raise` to the `catch` that handles them, also across calls. Lambdas stored in a variable and called later, computed properties (`@property`, Kotlin `get()`, Swift computed properties), generators (`yield`), keyword and named arguments, builder chains (`sb.append(a).append(b)`) and Java method references are followed.
-- JVM reflection is resolved when its names are constants: `Class.forName("…")`, `X.class`/`X::class`, `getDeclaredField`/`getMethod` with a literal name, then `field.get`/`set`, `method.invoke` and `newInstance`, Kotlin callable references (`User::email`, `sender::send`), and `Proxy.newProxyInstance` handlers. Names built at run time are not resolved, and those calls stay conservative. Serializers (Jackson, Gson, `toString`) see the whole object and report it when its type holds personal data.
-- Python/Java/Kotlin/Swift/TypeScript resolution is syntactic: no type inference across generics, overloads share an ID, and DI-provided instances resolve through declared types (then class hierarchy analysis) or receiver-name rules.
-- Syntax a tree-sitter grammar cannot parse is reported as a warning with its line, and the code inside it is still analysed as far as it could be recovered.
+### Results on real applications
+
+Accuracy on fixtures written to be found says little about your code, so datawarden is also run on real open-source applications. Every flow finding is read and judged by hand (a real leak, or not), and each false-positive pattern found is fixed in the engine with a regression test. The latest run, without cache, on a 4-core Linux machine:
+
+| Application | Languages | Files analyzed | Time | Flow findings | Real leaks | Committed values |
+|---|---|---|---|---|---|---|
+| [gotify/server](https://github.com/gotify/server) `d02796b` | Go, TypeScript | 141 | 5.3 s | 15 | 9 | 1 (test key) |
+| [android/nowinandroid](https://github.com/android/nowinandroid) `a49ed25` | Kotlin | 280 | 1.0 s | 0 | 0 | 0 |
+| [immich-app/immich](https://github.com/immich-app/immich) `f8f4051` | TypeScript, Kotlin, Swift, Python, Java | 823 | 8.5 s | 12 | 7 | 11 |
+| [saleor/saleor](https://github.com/saleor/saleor) `5ff5648` | Python | 2,607 | 14.5 s | 4 | 0 | 3 |
+
+About half of the flow findings are real: identity-token claims, user names and client IPs written to logs (gotify), and passwords, emails and secrets printed by admin commands (immich). The other half come from over-approximation the engine does not yet refine: data put into a framework object (a request context, a DB-backed service) seen again by code that reads a different part of it, and results of library calls the engine cannot see into. A first scan that was never tuned should be triaged once and then baselined; [docs/FINDINGS.md](docs/FINDINGS.md) shows how.
+
+### How precise the analysis is
+
+**Values and control flow.** The IR is a small code property graph: SSA variables plus a control-flow graph.
+
+- A value that is overwritten (`x = "anonymous"`, `email = mask(email)`) no longer reaches later sinks, and a path that returns does not reach the code after it.
+- `break` and `continue` go to their loop (labels included), `switch` cases in Java and JavaScript fall through until a `break`, and Python's `for`/`while ... else` runs only when the loop did not break.
+- Conditions that are constant in the source are folded: `if false`, `while true`, and booleans declared as constants (`static final boolean DEBUG = false`, `const val`, `const`, Swift `let`, Python `UPPER_CASE = False`, Go `const`). Conditions that depend on data are not evaluated: both arms of such an `if` are assumed possible.
+- A branch on a check about a value refines it where the check passed: after `if (isMasked(v))` or `if (isRedacted(v))` the value counts as masked or redacted, after `if (!containsPii(msg))` as `pii-checked` (a safe transform by default), and after `if (isValidEmail(input))` as an email address, even when its name says nothing.
+
+**Objects.** Objects are tracked field by field, with a points-to analysis for aliasing.
+
+- Access paths are kept three fields deep (`user.profile.note = email`, then `log(user.profile.note)`); deeper paths are merged into their first three fields.
+- A field stored through one variable is seen through every variable that may refer to the same object (`b = a; b.name = email; log(a.name)`). A field overwritten with other data no longer holds the old value when the object is known to be one object.
+- Object and map literals (`{url: u, key: apiKey}`, `{"email": e}`) keep one field per key, also when a function returns them; a value put under a constant key (`ctx.Set("user", u)`, `map.put("email", e)`) is found by a read of that key, a method named after it or one that renders the whole object, not by other reads of the object. Each result of a Go function returning several is its own value: the `error` next to a returned email does not carry it.
+- An object logged before personal data is added to it (`log(items); items.add(email)`) is not reported. A string built from an object (`"items=" + items`) is a snapshot: data added to the object later does not reach it.
+- A query builder, connection, client, logger or router of a known library (`*gorm.DB`, `*sql.DB`, `*http.Client`, `*gin.Engine`, `zap.Logger`, ...) is a shared handle: passing data through it does not make the handle personal data.
+
+**Calls.** Every function is summarized once (per strongly connected component of the call graph), and summaries are cached between runs.
+
+- Calls through an interface, protocol, abstract class or overridable method run every override and implementation in the scanned code (class hierarchy analysis), in all six languages, never across languages. Implementations in dependencies are not enumerated; rules can still target the interface method (`io.Writer.Write`).
+- Calls into code that is neither scanned nor covered by a rule are conservative: the result carries what the arguments carry. The exceptions are known shapes: a length, count or type check is a number or a flag, and the response of a request through an HTTP client (`client.post(...)`, `send_request(...)`) is the server's answer, not what was sent.
+- Exceptions are followed from `throw`/`raise` to the `catch` that handles them, also across calls. Generators, keyword and named arguments, builder chains (`sb.append(a).append(b)`), computed properties and Java method references are followed.
+
+**Closures.** Lambdas and closures are analysed as functions of their own, where they run.
+
+- Called through a variable, they get the call's arguments; passed to other code, they get what that call is given. A callee known to run the closure before it returns (`forEach`, `map`, `apply`, `sort.Slice`, ... in `internal/analysis/callbacks.go`) runs it at the call; any other callee may keep it and run it later, so it sees its captures as they are at any time, and what it writes into its own parameters does not flow back into the registering call.
+- Closures are followed where they go: kept in a field and called by another method, added to a list and called in a loop, or returned by a factory. A function-valued property of an object literal is called only through that object.
+
+**Consent.** A sink that runs only after a consent check (`if (!consents.hasConsent()) return`, `guard user.optedIn else { return }`, `if analytics_enabled:`) is reported with the check as a guard. The check can be a helper that returns one, part of a condition (`&&`, Python `and`), or in the callers: a function only ever called after a check reports its flows with that check. It is still a finding, shown so a reviewer can confirm the check covers the flow, unless `policy.consent_guarded` accepts guarded flows to that destination.
+
+**Known limits.**
+
+- Python, Java, Kotlin, Swift and TypeScript resolution is syntactic: no type inference across generics, overloads share an ID, and DI-provided instances resolve through declared types (then class hierarchy analysis) or receiver-name rules.
+- JVM reflection is resolved only when its names are constants (`Class.forName("...")`, `getDeclaredField("email")`, `method.invoke`, Kotlin callable references, `Proxy.newProxyInstance`). Serializers (Jackson, Gson, `toString`) see the whole object.
+- Syntax a tree-sitter grammar cannot parse is reported as a warning with its line; the code around it is still analysed as far as it could be recovered.
 - Dynamic destinations (URLs built at runtime) show up as `network (unknown host)`.
 - Phone and national ID numbers are found through names and schema hints, not as committed values: the literal detector does not report them (US SSNs excepted).
 - Secret *values* are recognised only for the providers in the taxonomy's value patterns; a generic `password = "..."` assignment is not reported as a literal, because it is almost always a test or placeholder value.
@@ -407,6 +456,12 @@ datawarden scan . --no-cache --cpuprofile cpu.out --memprofile mem.out
 go tool pprof -http=:8080 cpu.out
 go tool pprof -sample_index=alloc_space mem.out
 ```
+
+## Getting help
+
+- **Questions and ideas:** [GitHub Discussions](https://github.com/GoNetTools/datawarden/discussions).
+- **A false positive or a missed leak:** open an issue with the *false positive* or *missed leak* template. A few lines of made-up code that reproduce it are the most useful thing you can send; `datawarden ir --func <name> file` shows what the analysis read. **Never paste real personal data or secrets.**
+- **A security problem in datawarden itself:** report it privately, as described in [SECURITY.md](SECURITY.md).
 
 ## Development
 
@@ -487,10 +542,12 @@ make check         # what CI runs: gofmt, vet, staticcheck, license headers, bot
 make eval          # precision/recall/F1 and timings on testdata/eval.yaml
 make bench         # Go benchmarks
 make release-local # release archives for this machine in dist/
-go test -coverpkg=./internal/... ./...   # ~87% of statements; CI fails below 85%
+go test -coverpkg=./internal/... ./...   # ~90% of statements; CI fails below 85%
 ```
 
 The version is set with `-ldflags "-X github.com/GoNetTools/datawarden/internal/app.Version=v1.2.3"` (`scripts/release/build.sh` does this).
+
+Releases are cut by pushing a version tag; [docs/RELEASING.md](docs/RELEASING.md) is the maintainer checklist.
 
 Adding a language or a rule is a checklist in [CONTRIBUTING.md](CONTRIBUTING.md#add-a-language), and tests enforce each step: `TestEveryLanguageIsWired` (language table, frontends and rules agree), `TestFrontendConformance` (the frontend lowers every scenario), `TestLoweredIRVerifies` (its IR is valid, [docs/IR.md](docs/IR.md)), `TestRuleExamples` (every rule has an example that passes) and `TestBuiltinRuleConventions` (ids, categories, data types).
 

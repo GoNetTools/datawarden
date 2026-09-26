@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -102,7 +103,10 @@ func (fakeLiterals) Scan(b []byte) []detect.LiteralHit {
 	var out []detect.LiteralHit
 	for i, line := range bytes.Split(b, []byte("\n")) {
 		if bytes.Contains(line, []byte("PII")) {
-			out = append(out, detect.LiteralHit{DataType: "email", Line: i + 1, Conf: 0.9, Masked: "***"})
+			out = append(out, detect.LiteralHit{DataType: "email", Class: "pii", Line: i + 1, Conf: 0.9, Masked: "***"})
+		}
+		if bytes.Contains(line, []byte("KEY")) {
+			out = append(out, detect.LiteralHit{DataType: "private_key", Class: "credential", Line: i + 1, Conf: 0.9, Masked: "***"})
 		}
 	}
 	return out
@@ -159,7 +163,7 @@ func TestFullScanRoutesFilesToFrontends(t *testing.T) {
 		"app/src/B.kt":      "class B",
 		"app/src/C.java":    "class C",
 		"web/app.ts":        "export {}",
-		"web/app.test.ts":   "PII",
+		"web/app.test.ts":   "PII\nKEY",
 		"api/user.proto":    "message U {}",
 		"fixtures/seed.sql": "insert PII",
 	}, fakeVCS{})
@@ -179,8 +183,16 @@ func TestFullScanRoutesFilesToFrontends(t *testing.T) {
 	if !strings.Contains(strings.Join(res.Warnings, "\n"), "java: 1 files skipped: built without cgo") {
 		t.Errorf("unavailable frontend not reported: %v", res.Warnings)
 	}
-	if len(res.Literals) != 2 { // test files and fixtures are scanned for literals
-		t.Errorf("literals: %+v", res.Literals)
+	// Test files and fixtures are scanned for literals. Personal data in a
+	// test file is scored lower (0.9 * 0.6, under the 0.6 threshold); a
+	// credential there is not.
+	var got []string
+	for _, l := range res.Literals {
+		got = append(got, l.Pos.File+":"+l.DataType)
+	}
+	sort.Strings(got)
+	if want := []string{"fixtures/seed.sql:email", "web/app.test.ts:private_key"}; !slices.Equal(got, want) {
+		t.Errorf("literals = %v, want %v", got, want)
 	}
 	if fx.frontends.opts.FS == nil || fx.frontends.opts.Root != "/repo" || fx.frontends.opts.KnownFunc == nil {
 		t.Errorf("frontend options not wired: %+v", fx.frontends.opts)
@@ -301,5 +313,16 @@ func TestContactEmailsInCommunityDocsAreNotLiterals(t *testing.T) {
 	}
 	if len(res.Literals) != 1 || res.Literals[0].Pos.File != "notes.txt" {
 		t.Errorf("literals: %+v", res.Literals)
+	}
+}
+
+func TestContactDoc(t *testing.T) {
+	for p, want := range map[string]bool{
+		"CODE_OF_CONDUCT.md": true, "i18n/es.json": true, "web/src/locales/de/common.json": true,
+		"app/src/main/res/values/strings.xml": false, "fixtures/users.json": false, "docs/FAQ.md": false,
+	} {
+		if got := contactDoc(p); got != want {
+			t.Errorf("contactDoc(%s) = %v, want %v", p, got, want)
+		}
 	}
 }

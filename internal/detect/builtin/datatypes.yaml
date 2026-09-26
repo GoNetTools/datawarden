@@ -46,7 +46,7 @@ data_types:
     class: pii
     patterns: [phone, phone number, phone no, phonenumber, mobile, mobile number, mobile no, msisdn, telephone, cellphone, cell phone]
     weak: [tel]
-    exclude: [app, os, platform, frame, layout, screen, device, sdk, version, notch, portrait, landscape, web, tablet]
+    exclude: [app, os, platform, frame, layout, screen, device, sdk, version, notch, portrait, landscape, web, tablet, redirect, uri, url, link, deeplink, scheme, client, build, view, menu, nav, navigation, breakpoint, style, theme, width, viewport, only, first]
 
   - id: person_name
     label: Person name
