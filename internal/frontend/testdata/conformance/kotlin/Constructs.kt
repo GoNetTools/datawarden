@@ -98,9 +98,8 @@ fun destructuring(profile: Profile) {
 
 fun lambdaValue(email: String) {
     val printer: (String) -> Unit = {
-        // Known gap: calling a lambda through a variable does not connect
-        // the argument to the lambda's parameter.
-        // todoruleid: log.jvm.stdout
+        // Called through the printer variable below.
+        // ruleid: log.jvm.stdout
         println(it)
     }
     printer(email)

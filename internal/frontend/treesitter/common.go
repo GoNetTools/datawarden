@@ -945,6 +945,16 @@ func (b *builder) ident(name string, n *sitter.Node) ir.VarID {
 
 func (b *builder) assign(dst ir.VarID, n *sitter.Node, args ...ir.VarID) {
 	b.fn.Assign(dst, b.pos(n), args...)
+	// A variable holding a lambda (show = { log(it) }) is one: calling it
+	// feeds the lambda's parameters.
+	if _, has := b.lambdas[dst]; !has {
+		for _, a := range args {
+			if cb, ok := b.lambdas[a]; ok && dst >= 0 {
+				b.lambdas[dst] = cb
+				break
+			}
+		}
+	}
 }
 
 // compute is assign for a new value built from the arguments' current
@@ -1034,6 +1044,21 @@ func (b *builder) emitCall(n *sitter.Node, c *ir.Call, args []ir.VarID, resultTy
 		c.Ctor = b.p.ctorID(c.Callee)
 	}
 	c.Catch = []ir.VarID{b.thrown()}
+	// Calling a lambda held in a variable: show(email), show.invoke(email),
+	// show.accept(email), show.call(email). Its arguments reach the
+	// lambda's parameters.
+	if c.Target == "" && !c.Construct {
+		if v, ok := b.scope[c.Name]; ok && !c.HasRecv {
+			if cb, ok := b.lambdas[v]; ok {
+				c.Callbacks = append(c.Callbacks, cb)
+			}
+		}
+		if c.HasRecv && len(args) > 0 {
+			if cb, ok := b.lambdas[args[0]]; ok {
+				c.Callbacks = append(c.Callbacks, cb)
+			}
+		}
+	}
 	if !c.Construct && c.RecvType != "" && c.Targets == nil {
 		c.Targets = b.p.overrides(c.RecvType, c.Name, c.Target)
 	}
