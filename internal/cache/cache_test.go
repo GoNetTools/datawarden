@@ -27,7 +27,7 @@ func TestRoundTripAndInvalidation(t *testing.T) {
 		Summaries: map[string]*analysis.Summary{"p.A": {ParamReturn: map[int][]analysis.Transfer{0: {{Conf: 1}}}}},
 	}
 	s.Update(funcs, res, []string{"a.go", "b.go"}, true)
-	s.SetSchema("a.go", []*ir.TypeDecl{{Name: "User"}})
+	s.SetSchema("a.go", []*ir.TypeDecl{{Name: "User"}}, []*ir.Class{{Name: "p.Sms", File: "a.go", Supers: []string{"p.Channel"}}})
 	if err := s.Save(); err != nil {
 		t.Fatal(err)
 	}
@@ -42,10 +42,13 @@ func TestRoundTripAndInvalidation(t *testing.T) {
 	if len(s2.SchemaTypes(nil)) != 1 || len(s2.SchemaTypes(map[string]bool{"a.go": true})) != 0 {
 		t.Error("schema types")
 	}
+	if c := s2.Classes(nil); len(c) != 1 || c[0].Name != "p.Sms" || len(s2.Classes(map[string]bool{"a.go": true})) != 0 {
+		t.Errorf("classes = %+v", c)
+	}
 
 	// Editing the defining file invalidates its summary.
 	hashes["a.go"] = "h1-edited"
-	if s2.Lookup("p.A") != nil || len(s2.SchemaTypes(nil)) != 0 {
+	if s2.Lookup("p.A") != nil || len(s2.SchemaTypes(nil)) != 0 || len(s2.Classes(nil)) != 0 {
 		t.Error("stale entries returned after the file changed")
 	}
 

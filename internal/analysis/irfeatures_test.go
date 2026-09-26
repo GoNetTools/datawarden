@@ -74,7 +74,7 @@ func TestClassTableDispatch(t *testing.T) {
 
 	classes := []*ir.Class{
 		{Name: "p.Channel"},
-		{Name: "p.Sms", Supers: []string{"Channel"}, Methods: map[string]string{"deliver": "p.Sms.deliver"}},
+		{Name: "p.Sms", Supers: []string{"p.Channel"}, Methods: map[string]string{"deliver": "p.Sms.deliver"}},
 	}
 	res := analyze(t, classes, caller, impl)
 	if f := flowAt(res, 2); f == nil || f.Function != "p.Sms.deliver" {
@@ -85,6 +85,11 @@ func TestClassTableDispatch(t *testing.T) {
 	}
 	if analyze(t, nil, caller, impl).Flows != nil {
 		t.Error("without the class table the call has no target")
+	}
+	// The interface itself may be missing from the table (declared in a
+	// file not scanned this run): its implementations are still found.
+	if res := analyze(t, classes[1:], caller, impl); flowAt(res, 2) == nil {
+		t.Errorf("implementation of an interface missing from the table: %+v", res.Flows)
 	}
 }
 

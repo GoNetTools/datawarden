@@ -1532,6 +1532,9 @@ func (p *program) classTable() []*ir.Class {
 	for _, name := range slices.Sorted(maps.Keys(p.classes)) {
 		c := p.classes[name]
 		k := &ir.Class{Name: c.name, Lang: p.lang, Methods: maps.Clone(c.methods)}
+		if c.file != nil {
+			k.File = c.file.rel
+		}
 		for _, s := range c.supers {
 			if sc := p.class(s); sc != nil {
 				s = sc.name

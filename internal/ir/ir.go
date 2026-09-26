@@ -553,8 +553,10 @@ type TypeDecl struct {
 // implemented interfaces and protocols; for Go, the interfaces of the
 // program the type implements) and its methods.
 type Class struct {
-	Name    string            `json:"name"` // qualified when possible
-	Lang    string            `json:"lang"`
+	Name string `json:"name"` // qualified when possible
+	Lang string `json:"lang"`
+	// File declares the class; the cache keeps the class table per file.
+	File    string            `json:"file,omitempty"`
 	Supers  []string          `json:"supers,omitempty"`
 	Methods map[string]string `json:"methods,omitempty"` // method name -> Func ID
 }

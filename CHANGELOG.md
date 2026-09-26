@@ -58,6 +58,8 @@ All notable changes to datawarden are documented here. The format follows [Keep 
 
 ### Fixed
 
+- PR (`--diff`) and path scans resolve calls through an interface or overridable method to implementations in files that were not re-analysed: the class table is cached per file with the schema. The cache format changes.
+
 - `sdk.onesignal` now matches the OneSignal v5 API (`OneSignal.User.addEmail`, `addSms`, `addTag`).
 - A network call's response no longer inherits the taint of its request (a login reply was reported as the password it was sent with).
 - A map or object literal key labels its value (`map[string]any{"email": v}`) even when some type in the repository has a field of the same name.

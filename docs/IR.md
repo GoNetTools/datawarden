@@ -20,7 +20,7 @@ A frontend returns an `ir.Module`:
 |---|---|
 | `Funcs` | Every function, method, closure and synthetic initializer. |
 | `Types` | Record-like declarations (structs, classes, entities, protobuf messages, SQL tables) with their fields and tags. The engine gets schema hints from them. |
-| `Classes` | The class table: each class, interface, protocol or named type with its direct supertypes and its methods (name → function ID). For Go, the supertypes of a type are the interfaces of the module, or that its code calls methods on, that the type or a pointer to it implements. |
+| `Classes` | The class table: each class, interface, protocol or named type with its direct supertypes and its methods (name → function ID). For Go, the supertypes of a type are the interfaces of the module, or that its code calls methods on, that the type or a pointer to it implements. `File` is the declaring file, by which the cache stores the table for PR scans. |
 | `Warnings` | What the frontend could not read. |
 
 ## Functions

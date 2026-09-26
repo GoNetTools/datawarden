@@ -44,9 +44,16 @@ func newHierarchy(classes []*ir.Class) *hierarchy {
 	for _, n := range names {
 		c := h.classes[n]
 		for _, s := range c.Supers {
-			if sc := h.class(s); sc != nil && sc != c {
-				h.subs[sc.Name] = append(h.subs[sc.Name], c)
+			// A supertype missing from the table (declared in a file not
+			// scanned this run) is indexed by its name as written.
+			key := strings.TrimLeft(s, "*&")
+			if sc := h.class(s); sc != nil {
+				if sc == c {
+					continue
+				}
+				key = sc.Name
 			}
+			h.subs[key] = append(h.subs[key], c)
 		}
 	}
 	return h
@@ -83,12 +90,13 @@ func (h *hierarchy) targets(c *ir.Call) []string {
 	if c.Indirect || c.RecvType == "" || c.Name == "" {
 		return out
 	}
-	root := h.class(c.RecvType)
-	if root == nil {
-		return out
+	rootName := strings.TrimSuffix(strings.TrimLeft(c.RecvType, "*&"), "?")
+	seen := map[*ir.Class]bool{}
+	if root := h.class(c.RecvType); root != nil {
+		rootName = root.Name
+		seen[root] = true
 	}
-	seen := map[*ir.Class]bool{root: true}
-	work := append([]*ir.Class(nil), h.subs[root.Name]...)
+	work := append([]*ir.Class(nil), h.subs[rootName]...)
 	for len(work) > 0 && len(out) < maxTargets {
 		k := work[0]
 		work = work[1:]
