@@ -55,6 +55,7 @@ NEW      high   phone → Sentry / sentry.io (third-party)  [sdk.ts.sentry.set_u
 - [Accuracy and limits](#accuracy-and-limits)
 - [Reading and triaging findings](docs/FINDINGS.md)
 - [Getting help](#getting-help)
+- [Roadmap](docs/ROADMAP.md)
 - [Development](#development)
 - [Contributing](#contributing)
 - [License](#license)
@@ -462,6 +463,7 @@ go tool pprof -sample_index=alloc_space mem.out
 - **Questions and ideas:** [GitHub Discussions](https://github.com/GoNetTools/datawarden/discussions).
 - **A false positive or a missed leak:** open an issue with the *false positive* or *missed leak* template. A few lines of made-up code that reproduce it are the most useful thing you can send; `datawarden ir --func <name> file` shows what the analysis read. **Never paste real personal data or secrets.**
 - **A security problem in datawarden itself:** report it privately, as described in [SECURITY.md](SECURITY.md).
+- **Where the project is going:** [docs/ROADMAP.md](docs/ROADMAP.md), tracked in [the Roadmap issue](https://github.com/GoNetTools/datawarden/issues/21).
 
 ## Development
 
