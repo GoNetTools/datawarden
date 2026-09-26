@@ -8,8 +8,10 @@
 // variable) order values, and the control-flow graph orders mutations of
 // objects. A fact an instruction puts on an object (a field store,
 // list.add, a callee writing into an argument) carries that instruction,
-// and only instructions it can run before (order.go) see it; copies keep
-// the mark, so an alias sees the object's later mutations. A variable
+// and only the instructions it reaches without a strong update of the
+// same field in between see it (order.go, reaching definitions); every
+// variable that may refer to the object gets it (pointsto.go), and copies
+// keep the mark, so an alias sees the object's later mutations. A variable
 // named after personal data is a source unless it is a new version of a
 // same-named value (email = sha256(email)). Parameters
 // carry symbolic labels so that the same pass produces both concrete flows
@@ -171,6 +173,11 @@ type state struct {
 	// pt is the points-to result: which variables may refer to the same
 	// object (pointsto.go).
 	pt *pointsTo
+	// kills lists, per field store, the strong updates that overwrite
+	// what it stored: later stores into the same field of the same
+	// single object. reached caches reachesAvoiding.
+	kills   map[int][]int
+	reached map[[2]int]bool
 	// last is the index of each block's last instruction, or -1.
 	last []int
 }
@@ -234,9 +241,86 @@ func (s *state) guardsAt(fn *ir.Func) []string {
 	return s.guards[b]
 }
 
-// visible reports whether f can be seen by the current instruction.
+// visible reports whether f can be seen by the current instruction: the
+// mutation that put it there can run before it, on a path where no strong
+// update overwrites what it stored (a reaching-definitions question over
+// the control-flow graph).
 func (s *state) visible(f *fact) bool {
-	return f.at == 0 || s.order.before(f.at-1, s.cur)
+	if f.at == 0 {
+		return true
+	}
+	q := f.at - 1
+	ks := s.kills[q]
+	if len(ks) == 0 {
+		return s.order.before(q, s.cur)
+	}
+	k := [2]int{q, s.cur}
+	if r, ok := s.reached[k]; ok {
+		return r
+	}
+	r := s.order.reachesAvoiding(q, s.cur, func(i int) bool { return slices.Contains(ks, i) })
+	if s.reached == nil {
+		s.reached = map[[2]int]bool{}
+	}
+	s.reached[k] = r
+	return r
+}
+
+// atExit keeps the facts that are still there when the function returns:
+// those no strong update overwrites on some path to an exit.
+func (s *state) atExit(fn *ir.Func, fs []*fact) []*fact {
+	var out []*fact
+	for _, f := range fs {
+		ks := s.kills[f.at-1]
+		if f.at == 0 || len(ks) == 0 {
+			out = append(out, f)
+			continue
+		}
+		for b := range fn.Blocks {
+			if len(fn.Blocks[b].Succs) == 0 && s.order.reachesEnd(f.at-1, int32(b), func(i int) bool { return slices.Contains(ks, i) }) {
+				out = append(out, f)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// strongUpdates finds, for each field store, the later stores that
+// overwrite it: stores into the same field of the same object, through
+// variables that refer to that single object only.
+func strongUpdates(fn *ir.Func, pt *pointsTo) map[int][]int {
+	type key struct {
+		o     objectID
+		field string
+	}
+	byKey := map[key][]int{}
+	for i := range fn.Instrs {
+		in := &fn.Instrs[i]
+		if in.Op != ir.OpStore || len(in.Args) != 2 || in.Field == "" {
+			continue
+		}
+		if o, ok := pt.only(in.Args[0]); ok {
+			byKey[key{o, in.Field}] = append(byKey[key{o, in.Field}], i)
+		}
+	}
+	var out map[int][]int
+	for _, stores := range byKey {
+		if len(stores) < 2 {
+			continue
+		}
+		if out == nil {
+			out = map[int][]int{}
+		}
+		for _, i := range stores {
+			for _, j := range stores {
+				if j != i {
+					out[i] = append(out[i], j)
+				}
+			}
+		}
+	}
+	return out
 }
 
 // mutate puts f on the object v refers to, in field when it is set, as a
@@ -744,7 +828,8 @@ func (a *analyzer) analyzeFunc(fn *ir.Func) *Summary {
 	st := &state{facts: make([]map[string]*fact, len(fn.Vars)), stores: map[ir.VarID]map[string]map[string]*fact{}, minC: a.opts.MinConf,
 		order: newOrder(fn), multi: multiDefined(fn), fluent: fluentResults(fn), loads: loadsOf(fn), guards: a.guards[fn.ID], last: lastInstrs(fn),
 		closures: a.flow.local(fn.ID), checks: a.checks[fn.ID]}
-	st.pt = newPointsTo(fn, st.fluent, st.checks)
+	st.pt = newPointsTo(fn, st.fluent, st.checks, st.order)
+	st.kills = strongUpdates(fn, st.pt)
 	a.seed(st, fn)
 	sum := &Summary{}
 	for iter := 0; iter < 40; iter++ {
@@ -817,7 +902,7 @@ func (a *analyzer) analyzeFunc(fn *ir.Func) *Summary {
 		}
 	}
 	for i, pid := range fn.Params {
-		for _, f := range st.all(pid) {
+		for _, f := range st.atExit(fn, st.all(pid)) {
 			switch {
 			case f.dt == "" && (f.param != i || f.at > 0):
 				if f.param == i && f.field == "" {
@@ -832,7 +917,7 @@ func (a *analyzer) analyzeFunc(fn *ir.Func) *Summary {
 		// (this.addr = email): callers put it in the same field.
 		fm := st.stores[pid]
 		for _, field := range slices.Sorted(maps.Keys(fm)) {
-			for _, f := range fm[field] {
+			for _, f := range st.atExit(fn, slices.Collect(maps.Values(fm[field]))) {
 				switch {
 				case f.dt == "":
 					if f.param == i && f.field == field {

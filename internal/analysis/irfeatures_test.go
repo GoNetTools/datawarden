@@ -598,11 +598,69 @@ func TestPointsTo(t *testing.T) {
 			t.Errorf("line %d: %+v", line, fl)
 		}
 	}
-	pt := newPointsTo(f, nil, nil)
+	pt := newPointsTo(f, nil, nil, newOrder(f))
 	if !slices.Contains(pt.mutated(x), a) || slices.Contains(pt.mutated(a), b) || !slices.Contains(pt.mutated(y), other) {
 		t.Errorf("aliases: x %v, a %v, y %v", pt.mutated(x), pt.mutated(a), pt.mutated(y))
 	}
 	if got := (*pointsTo)(nil).mutated(a); len(got) != 1 {
 		t.Errorf("nil points-to: %v", got)
+	}
+}
+
+// A store into the same field of the same single object overwrites what
+// was stored before (a strong update); summaries see only what is left
+// when the function returns.
+func TestStrongUpdates(t *testing.T) {
+	// fun f(u, email) { u.name = email; u.name = "x" }
+	f := newFunc("p.f")
+	u := f.AddParam("u", "", pos(1))
+	email := f.AddParam("email", "String", pos(1))
+	x := f.ConstVar("x", pos(3))
+	f.Emit(ir.Instr{Op: ir.OpStore, Dst: ir.NoVar, Args: []ir.VarID{u, email}, Field: "name", Pos: pos(2)})
+	f.Emit(ir.Instr{Op: ir.OpStore, Dst: ir.NoVar, Args: []ir.VarID{u, x}, Field: "name", Pos: pos(3)})
+	f.Return(pos(3))
+
+	// fun g(email, c) {
+	//   val a = Box(); a.f = email; a.f = "x"; log(a.f)          // 12: overwritten
+	//   val b = Box(); b.f = email; if (c) b.f = "x"; log(b.f)    // 16: not on every path
+	// }
+	g := newFunc("p.g")
+	ge := g.AddParam("email", "String", pos(10))
+	c := g.AddParam("c", "Boolean", pos(10))
+	gx := g.ConstVar("x", pos(10))
+	box := func(line int) ir.VarID {
+		v := g.Temp(pos(line))
+		g.Emit(ir.Instr{Op: ir.OpNew, Dst: v, Call: &ir.Call{Callee: "p.Box", Name: "Box"}, Pos: pos(line)})
+		return v
+	}
+	read := func(obj ir.VarID, line int) {
+		v := g.Temp(pos(line))
+		g.Emit(ir.Instr{Op: ir.OpLoad, Dst: v, Args: []ir.VarID{obj}, Field: "f", Pos: pos(line)})
+		logTo(g, v, line)
+	}
+	store := func(obj, v ir.VarID, line int) {
+		g.Emit(ir.Instr{Op: ir.OpStore, Dst: ir.NoVar, Args: []ir.VarID{obj, v}, Field: "f", Pos: pos(line)})
+	}
+	a := box(11)
+	store(a, ge, 11)
+	store(a, gx, 11)
+	read(a, 12)
+	b := box(13)
+	store(b, ge, 13)
+	then := g.NewBlock(0)
+	store(b, gx, 14)
+	join := g.NewBlock(0, then)
+	g.Branch(0, c, then, join)
+	read(b, 16)
+
+	res := analyze(t, nil, f, g)
+	if s := res.Summaries["p.f"]; s != nil && len(s.ParamParam[0]) > 0 {
+		t.Errorf("an overwritten field is in the summary: %+v", s.ParamParam)
+	}
+	if fl := flowAt(res, 12); fl != nil {
+		t.Errorf("overwritten field reported: %+v", fl)
+	}
+	if fl := flowAt(res, 16); fl == nil {
+		t.Errorf("a field overwritten on one path only is lost: %+v", res.Flows)
 	}
 }

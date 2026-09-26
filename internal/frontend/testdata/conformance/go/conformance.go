@@ -422,3 +422,12 @@ func aliasStore(email string) {
 	// ruleid: log.go.stdlib
 	log.Println(a.holder)
 }
+
+// scenario: overwritten-field
+func overwrittenField(email string) {
+	c := &card{}
+	c.holder = email
+	c.holder = "anonymous"
+	// ok: log.go.stdlib
+	log.Println(c.holder)
+}

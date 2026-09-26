@@ -30,6 +30,12 @@ type pointsTo struct {
 	// aliases lists, per variable, the other variables that may refer
 	// to one of its objects.
 	aliases map[ir.VarID][]ir.VarID
+	pts     [][]objectID
+	// single marks the objects that stand for one concrete object during
+	// a call: a parameter, or an allocation or call result outside any
+	// loop. A store into such an object through a variable that refers
+	// to it alone overwrites the field (a strong update).
+	single map[objectID]bool
 }
 
 // maxAliases bounds the aliases of one variable.
@@ -38,11 +44,12 @@ const maxAliases = 32
 // A checked version of a value (checks.go) is an object of its own, so
 // that what the check says about it is not undone by the facts of the
 // unchecked value.
-func newPointsTo(fn *ir.Func, fluent map[ir.VarID]ir.VarID, checked map[ir.VarID]check) *pointsTo {
+func newPointsTo(fn *ir.Func, fluent map[ir.VarID]ir.VarID, checked map[ir.VarID]check, ord *order) *pointsTo {
 	n := len(fn.Vars)
 	pts := make([][]objectID, n)
 	next := objectID(0)
 	fresh := func() objectID { next++; return next - 1 }
+	single := map[objectID]bool{}
 	add := func(v ir.VarID, os ...objectID) bool {
 		if v < 0 || int(v) >= n || fn.Vars[v].IsConst() {
 			return false
@@ -58,7 +65,9 @@ func newPointsTo(fn *ir.Func, fluent map[ir.VarID]ir.VarID, checked map[ir.VarID
 	}
 	// Parameters, and each allocation or call result: an object of its own.
 	for _, p := range fn.Params {
-		add(p, fresh())
+		o := fresh()
+		single[o] = true
+		add(p, o)
 	}
 	site := map[int]objectID{}
 	for i := range fn.Instrs {
@@ -70,6 +79,9 @@ func newPointsTo(fn *ir.Func, fluent map[ir.VarID]ir.VarID, checked map[ir.VarID
 			if _, ok := fluent[in.Dst]; !ok {
 				site[i] = fresh()
 			}
+		}
+		if o, ok := site[i]; ok && in.Op != ir.OpCatch && ord != nil && !ord.inCycle(in.Block) {
+			single[o] = true
 		}
 	}
 	// Field reads: one object per (object, field).
@@ -138,7 +150,7 @@ func newPointsTo(fn *ir.Func, fluent map[ir.VarID]ir.VarID, checked map[ir.VarID
 			byObj[o] = append(byObj[o], ir.VarID(v))
 		}
 	}
-	res := &pointsTo{aliases: map[ir.VarID][]ir.VarID{}}
+	res := &pointsTo{aliases: map[ir.VarID][]ir.VarID{}, pts: pts, single: single}
 	for v, os := range pts {
 		var al []ir.VarID
 		for _, o := range os {
@@ -163,4 +175,13 @@ func (p *pointsTo) mutated(v ir.VarID) []ir.VarID {
 		return []ir.VarID{v}
 	}
 	return append([]ir.VarID{v}, p.aliases[v]...)
+}
+
+// only returns the object v refers to when it refers to exactly one that
+// stands for one concrete object (see single).
+func (p *pointsTo) only(v ir.VarID) (objectID, bool) {
+	if p == nil || v < 0 || int(v) >= len(p.pts) || len(p.pts[v]) != 1 || !p.single[p.pts[v][0]] {
+		return 0, false
+	}
+	return p.pts[v][0], true
 }

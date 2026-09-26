@@ -65,6 +65,7 @@ var conformanceScenarios = map[string]string{
 	"consent-caller":           "a function only ever called after a consent check reports its flows with that check",
 	"validation-check":         "a value that passed a validation check (isValidEmail) is that kind of data where it passed",
 	"alias":                    "stored into a field through one variable, read through another that refers to the same object",
+	"overwritten-field":        "a field overwritten with a non-personal value no longer holds the data (ok)",
 	"sanitizer-check":          "a value checked to be masked (isMasked) is treated as masked where the check passed (ok)",
 }
 

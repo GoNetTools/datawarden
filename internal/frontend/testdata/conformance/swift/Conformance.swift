@@ -450,3 +450,12 @@ func aliasStore(email: String) {
     // ruleid: log.swift.print
     print(a.holder)
 }
+
+// scenario: overwritten-field
+func overwrittenField(email: String) {
+    let c = Card()
+    c.holder = email
+    c.holder = "anonymous"
+    // ok: log.swift.print
+    print(c.holder)
+}

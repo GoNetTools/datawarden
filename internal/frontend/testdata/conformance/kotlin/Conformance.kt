@@ -408,3 +408,12 @@ fun aliasStore(email: String) {
     // ruleid: log.jvm.stdout
     println(a.holder)
 }
+
+// scenario: overwritten-field
+fun overwrittenField(email: String) {
+    val c = Card()
+    c.holder = email
+    c.holder = "anonymous"
+    // ok: log.jvm.stdout
+    println(c.holder)
+}

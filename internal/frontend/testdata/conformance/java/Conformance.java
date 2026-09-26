@@ -426,4 +426,13 @@ class Conformance {
         // ruleid: log.jvm.stdout
         System.out.println(a.holder);
     }
+
+    // scenario: overwritten-field
+    void overwrittenField(String email) {
+        Card c = new Card();
+        c.holder = email;
+        c.holder = "anonymous";
+        // ok: log.jvm.stdout
+        System.out.println(c.holder);
+    }
 }

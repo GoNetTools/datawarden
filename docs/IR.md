@@ -136,8 +136,11 @@ dominates `P`. Dominance is computed over normal and exceptional edges
 - **Data flow**: the def-use edges of SSA variables, with phis and
   assigns as aliases and computes as snapshots.
 - **Order of mutations**: a fact put on an object by a store, a mutating
-  call or a callee is seen only by instructions that the mutating one can
-  run before, over normal and exceptional edges (`analysis/order.go`).
+  call or a callee is seen only by the instructions it reaches over
+  normal and exceptional edges without a strong update in between: a
+  store into the same field of the same single object (a parameter, or
+  an allocation outside any loop) through a variable that refers to it
+  alone (`analysis/order.go`, reaching definitions with kills).
 - **Control dependence**: a sink in a block dominated by the "consent
   given" successor of a branch on a consent check (`hasConsent()`,
   `user.optedIn`, `!consents.hasConsent()` with the successors swapped)

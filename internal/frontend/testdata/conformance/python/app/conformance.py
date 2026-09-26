@@ -428,3 +428,12 @@ def alias_store(email: str):
     b.holder = email
     # ruleid: log.py.print
     print(a.holder)
+
+
+# scenario: overwritten-field
+def overwritten_field(email: str):
+    c = Card()
+    c.holder = email
+    c.holder = "anonymous"
+    # ok: log.py.print
+    print(c.holder)

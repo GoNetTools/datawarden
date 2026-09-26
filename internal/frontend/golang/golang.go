@@ -723,7 +723,14 @@ func (l *lowerer) instr(ins ssa.Instruction) {
 			l.lastPos = p
 		}
 	case *ssa.Alloc:
+		// A new variable or object; stores through the pointer are weak
+		// updates of the cell, and field stores go to the object.
 		l.cell(l.v(x))
+		elem := x.Type()
+		if p, ok := elem.Underlying().(*types.Pointer); ok {
+			elem = p.Elem()
+		}
+		F.Emit(ir.Instr{Op: ir.OpNew, Dst: l.v(x), Call: &ir.Call{Callee: typeStr(elem), Name: "new"}, Pos: pos})
 	case *ssa.Store:
 		// A store through a pointer is a weak update of the location.
 		addr, val := l.v(x.Addr), l.v(x.Val)

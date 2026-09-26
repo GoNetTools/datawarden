@@ -436,3 +436,12 @@ export function aliasStore(email: string) {
   // ruleid: log.ts.console
   console.log(a.holder);
 }
+
+// scenario: overwritten-field
+export function overwrittenField(email: string) {
+  const c = new Card();
+  c.holder = email;
+  c.holder = "anonymous";
+  // ok: log.ts.console
+  console.log(c.holder);
+}
