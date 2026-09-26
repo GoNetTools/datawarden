@@ -307,4 +307,13 @@ class Conformance {
         // ruleid: log.jvm.stdout
         System.out.println(found[0]);
     }
+
+    // scenario: callback-before-mutation
+    void callbackBeforeMutation(String email, List<String> items) {
+        List<String> xs = new ArrayList<>();
+        // forEach runs the lambda before the add below.
+        // ok: log.jvm.stdout
+        items.forEach(item -> System.out.println(xs));
+        xs.add(email);
+    }
 }

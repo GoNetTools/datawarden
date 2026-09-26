@@ -102,7 +102,8 @@ func TestClosures(t *testing.T) {
 	v := show.AddParam("v", "", pos(2))
 	logTo(show, v, 3)
 
-	// items.forEach { Log.d(TAG, xs) }, xs captured; xs.add(email) after.
+	// listeners.add { Log.d(TAG, xs) } and items.forEach { Log.d(TAG, xs) },
+	// xs captured; xs.add(email) after both.
 	later := newFunc("p.f$2")
 	later.Parent = "p.f"
 	it := later.AddParam("it", "", pos(5))
@@ -120,15 +121,29 @@ func TestClosures(t *testing.T) {
 	f.Emit(ir.Instr{Op: ir.OpCall, Dst: list, Call: &ir.Call{Name: "mutableListOf"}, Pos: pos(5)})
 	cl2 := f.Temp(pos(5))
 	f.Emit(ir.Instr{Op: ir.OpClosure, Dst: cl2, Args: []ir.VarID{list}, Func: "p.f$2", Pos: pos(5)})
-	f.Emit(ir.Instr{Op: ir.OpCall, Dst: f.Temp(pos(7)), Args: []ir.VarID{items, cl2}, Call: &ir.Call{Name: "forEach", HasRecv: true}, Pos: pos(7)})
-	f.Emit(ir.Instr{Op: ir.OpCall, Dst: f.Temp(pos(8)), Args: []ir.VarID{list, email}, Call: &ir.Call{Name: "add", HasRecv: true}, Pos: pos(8)})
+	f.Emit(ir.Instr{Op: ir.OpCall, Dst: f.Temp(pos(7)), Args: []ir.VarID{items, cl2}, Call: &ir.Call{Name: "add", HasRecv: true}, Pos: pos(7)})
+	now := newFunc("p.f$3")
+	now.Parent = "p.f"
+	now.AddParam("it", "", pos(9))
+	nxs := now.AddCapture("xs", "", pos(9))
+	logTo(now, nxs, 10)
+	cl3 := f.Temp(pos(9))
+	f.Emit(ir.Instr{Op: ir.OpClosure, Dst: cl3, Args: []ir.VarID{list}, Func: "p.f$3", Pos: pos(9)})
+	f.Emit(ir.Instr{Op: ir.OpCall, Dst: f.Temp(pos(11)), Args: []ir.VarID{items, cl3}, Call: &ir.Call{Name: "forEach", HasRecv: true}, Pos: pos(11)})
+	f.Emit(ir.Instr{Op: ir.OpCall, Dst: f.Temp(pos(12)), Args: []ir.VarID{list, email}, Call: &ir.Call{Name: "add", HasRecv: true}, Pos: pos(12)})
 
-	res := analyze(t, nil, f, show, later)
+	res := analyze(t, nil, f, show, later, now)
 	if fl := flowAt(res, 3); fl == nil || fl.Function != "p.f" {
 		t.Errorf("closure called through a variable: %+v (reported in the enclosing function)", fl)
 	}
 	if fl := flowAt(res, 6); fl == nil {
-		t.Errorf("a callback sees what its capture is given after it is passed: %+v", res.Flows)
+		t.Errorf("a stored callback sees what its capture is given after it is passed: %+v", res.Flows)
+	}
+	if fl := flowAt(res, 10); fl != nil {
+		t.Errorf("forEach runs its callback before the capture is given data: %+v", fl)
+	}
+	if !runsCallbackNow(&ir.Call{Name: "ForEach"}) || runsCallbackNow(&ir.Call{Name: "addListener"}) || runsCallbackNow(nil) {
+		t.Error("runsCallbackNow")
 	}
 }
 

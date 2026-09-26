@@ -319,3 +319,14 @@ func closureAssign(email: String, items: [String]) {
     // ruleid: log.swift.print
     print(found)
 }
+
+// scenario: callback-before-mutation
+func callbackBeforeMutation(email: String, items: [String]) {
+    var xs: [String] = []
+    items.forEach { _ in
+        // forEach runs the closure before the append below.
+        // ok: log.swift.print
+        print(xs)
+    }
+    xs.append(email)
+}

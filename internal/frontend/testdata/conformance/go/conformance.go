@@ -5,6 +5,7 @@ package conformance
 import (
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 )
 
@@ -308,4 +309,16 @@ func each(items []string, fn func(string)) {
 	for _, it := range items {
 		fn(it)
 	}
+}
+
+// scenario: callback-before-mutation
+func callbackBeforeMutation(email string, items []string) {
+	xs := []string{}
+	sort.Slice(items, func(i, j int) bool {
+		// ok: log.go.stdlib
+		log.Println(xs)
+		return items[i] < items[j]
+	})
+	xs = append(xs, email)
+	_ = xs
 }

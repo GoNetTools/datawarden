@@ -315,3 +315,12 @@ export function closureAssign(email: string, items: string[]) {
   // ruleid: log.ts.console
   console.log(found);
 }
+
+// scenario: callback-before-mutation
+export function callbackBeforeMutation(email: string, items: string[]) {
+  const xs: string[] = [];
+  // forEach runs the callback before the push below.
+  // ok: log.ts.console
+  items.forEach(() => console.log(xs));
+  xs.push(email);
+}

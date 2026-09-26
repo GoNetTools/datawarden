@@ -650,8 +650,16 @@ func (pb *pyBuilder) stmt(n *sitter.Node) ir.VarID {
 			pb.expr(c)
 		}
 		return ir.NoVar
+	case "global_statement", "nonlocal_statement":
+		for _, id := range allOf(n, "identifier") {
+			if pb.declared == nil {
+				pb.declared = map[string]bool{}
+			}
+			pb.declared[pb.text(id)] = true
+		}
+		return ir.NoVar
 	case "class_definition", "comment", "pass_statement", "import_statement",
-		"import_from_statement", "global_statement", "nonlocal_statement", "delete_statement", "future_import_statement":
+		"import_from_statement", "delete_statement", "future_import_statement":
 		return ir.NoVar
 	}
 	return pb.expr(n)
@@ -664,9 +672,20 @@ func (pb *pyBuilder) bind(t *sitter.Node, v ir.VarID) {
 	}
 	switch t.Type() {
 	case "identifier":
+		// Inside a nested function, assigning a name binds a local of it
+		// unless the name is declared nonlocal or global: only then does
+		// it write the enclosing function's variable.
 		name := pb.text(t)
+		old, ok := pb.scope[name]
+		switch {
+		case ok && !pb.isCapture(old):
+		case pb.outer == nil || pb.declared[name]:
+			old, ok = pb.lookup(name)
+		default:
+			ok = false
+		}
 		var dst ir.VarID
-		if old, ok := pb.lookup(name); ok {
+		if ok {
 			dst = pb.redefine(name, old, "", t)
 		} else {
 			dst = pb.declare(name, "", t)

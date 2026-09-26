@@ -58,6 +58,9 @@ All notable changes to datawarden are documented here. The format follows [Keep 
 
 ### Fixed
 
+- A closure passed to a function that runs it before returning (`forEach`, `map`, `filter`, `apply`, `let`, `sort.Slice`, …) sees its captured variables as they are at the call: `items.forEach { log(xs) }; xs.add(email)` is no longer reported. Closures passed to other functions are still treated as possibly running later.
+- Python: assigning a name inside a nested function binds a local of that function unless it is declared `nonlocal` or `global`; it no longer taints the enclosing function's variable.
+
 - PR (`--diff`) and path scans resolve calls through an interface or overridable method to implementations in files that were not re-analysed: the class table is cached per file with the schema. The cache format changes.
 
 - `sdk.onesignal` now matches the OneSignal v5 API (`OneSignal.User.addEmail`, `addSms`, `addTag`).

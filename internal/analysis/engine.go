@@ -1126,11 +1126,14 @@ func (a *analyzer) call(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 		if len(cls) == 0 {
 			continue
 		}
-		// The callee may keep the closure and run it at any later time
-		// (a listener, a stored handler): its captures are read with
-		// every mutation, wherever it happens. The closure's parameters
-		// correspond to the call's other arguments (the receiver of
-		// apply or forEach first).
+		// A callee known to run the closure before it returns (forEach,
+		// map, apply, sort.Slice) runs it here: its captures are read as
+		// they are at the call. Any other callee may keep the closure and
+		// run it at any later time (a listener, a stored handler), so its
+		// captures are read with every mutation, wherever it happens. The
+		// closure's parameters correspond to the call's other arguments
+		// (the receiver of apply or forEach first).
+		now := runsCallbackNow(c)
 		inputs := append([]*fact(nil), sourced...)
 		var others []ir.VarID
 		for j := range in.Args {
@@ -1140,7 +1143,11 @@ func (a *analyzer) call(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 			}
 		}
 		for _, cl := range cls {
-			_, ch := a.invokeLater(st, fn, in, cl, others, inputs, sum)
+			captured := st.all
+			if now {
+				captured = st.of
+			}
+			_, ch := a.runClosure(st, fn, in, cl, others, func(int) []*fact { return inputs }, captured, sum)
 			changed = changed || ch
 		}
 	}
@@ -1259,13 +1266,6 @@ func (a *analyzer) call(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 		}
 	}
 	return changed
-}
-
-// invokeLater applies the summary of closure cl passed as a callback: every
-// input receives inputs, and the captures hold what their variables hold
-// at any point.
-func (a *analyzer) invokeLater(st *state, fn *ir.Func, in *ir.Instr, cl closure, argVars []ir.VarID, inputs []*fact, sum *Summary) (bool, bool) {
-	return a.runClosure(st, fn, in, cl, argVars, func(int) []*fact { return inputs }, st.all, sum)
 }
 
 // invoke applies the summary of closure cl at a call that runs it. The

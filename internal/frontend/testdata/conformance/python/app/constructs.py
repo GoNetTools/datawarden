@@ -339,3 +339,17 @@ class Ticket:
     def __init__(self, note: str, owner: str):
         self.note = note
         self.owner = owner
+
+
+def nested_assignment_is_local(email: str, items: list):
+    found = "none"
+
+    def remember(item):
+        # Without nonlocal, this binds a new local of remember.
+        found = email
+        return found
+
+    for item in items:
+        remember(item)
+    # ok: log.py.print
+    print(found)
