@@ -171,3 +171,44 @@ func TestBaselineDiffAndSARIF(t *testing.T) {
 		t.Errorf("sarif new results = %d, want 1", newCount)
 	}
 }
+
+// A PR that only changes a call through an interface: the implementation
+// lives in an unchanged file, so the class table entry for it comes from
+// the cache.
+func TestDiffResolvesOverridesFromCachedClasses(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	files := map[string]string{
+		"src/Channel.kt": "package app\n\ninterface Channel {\n    fun deliver(to: String)\n}\n",
+		"src/Sms.kt":     "package app\n\nclass Sms : Channel {\n    override fun deliver(to: String) {\n        println(\"sms \" + to)\n    }\n}\n",
+		"src/Send.kt":    "package app\n\nfun send(c: Channel, email: String) {\n    c.deliver(\"nobody\")\n}\n",
+	}
+	for rel, src := range files {
+		p := filepath.Join(dir, rel)
+		os.MkdirAll(filepath.Dir(p), 0o755)
+		os.WriteFile(p, []byte(src), 0o644)
+	}
+	git(t, dir, "init", "-q", "-b", "main")
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "-qm", "init")
+	if code, out, errs := run(t, "scan", "--root", dir); code == cli.ExitError {
+		t.Fatalf("full scan: %s\n%s", errs, out)
+	}
+
+	git(t, dir, "checkout", "-qb", "feature")
+	os.WriteFile(filepath.Join(dir, "src/Send.kt"), []byte(strings.Replace(files["src/Send.kt"], `"nobody"`, "email", 1)), 0o644)
+	git(t, dir, "commit", "-qam", "deliver email")
+	_, out, errs := run(t, "scan", "--root", dir, "--diff", "main", "--format", "json")
+	var r jsonReport
+	if err := json.Unmarshal([]byte(out), &r); err != nil {
+		t.Fatalf("%v: %s\n%s", err, errs, out)
+	}
+	if r.Mode != "diff" {
+		t.Fatalf("mode=%s warnings=%v", r.Mode, r.Warnings)
+	}
+	if findFlow(&r, want{"email", "log.jvm.stdout", "Sms.deliver", true}) == nil {
+		t.Errorf("the override in an unchanged file was not resolved: %+v", r.Flows)
+	}
+}

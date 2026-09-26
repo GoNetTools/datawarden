@@ -323,7 +323,7 @@ Everything downstream is policy, not analysis: `policy` turns flows into violati
 | diff (`--diff <ref>`) | files changed since the merge base, plus their callers from the cached call graph (`--caller-depth`) | pull requests |
 | literals only | committed values in the listed or staged files | pre-commit hooks |
 
-The cache stores function summaries, the call graph and schema declarations keyed by file content hash and by the rule-set hash. A PR scan lowers only the changed files and reuses the summaries of everything else, so it stays fast on large repositories.
+The cache stores function summaries, the call graph, schema declarations and the class table keyed by file content hash and by the rule-set hash. A PR scan lowers only the changed files and reuses the summaries of everything else, so it stays fast on large repositories; the cached class table lets a changed call through an interface still reach implementations in unchanged files.
 
 ## Extension points
 

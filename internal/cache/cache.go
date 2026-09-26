@@ -21,7 +21,7 @@ import (
 
 // FormatVersion changes whenever the on-disk format or the analysis
 // semantics change incompatibly, including every new ir.Version.
-const FormatVersion = 7
+const FormatVersion = 8
 
 // FileName is the cache file inside the cache directory.
 const FileName = "datawarden-cache.json"
@@ -47,10 +47,12 @@ type Func struct {
 	Summary  *analysis.Summary `json:"summary,omitempty"`
 }
 
-// SchemaFile holds the type declarations extracted from one file.
+// SchemaFile holds the type declarations and class table entries
+// extracted from one file.
 type SchemaFile struct {
-	Hash  string         `json:"hash"`
-	Types []*ir.TypeDecl `json:"types"`
+	Hash    string         `json:"hash"`
+	Types   []*ir.TypeDecl `json:"types"`
+	Classes []*ir.Class    `json:"classes,omitempty"`
 }
 
 type document struct {
@@ -191,27 +193,47 @@ func (s *Store) hash(rel string) string {
 // ResetSchema drops all cached schema declarations (full scans).
 func (s *Store) ResetSchema() { s.doc.Schema = map[string]*SchemaFile{} }
 
-// SetSchema stores the type declarations of one file.
-func (s *Store) SetSchema(file string, types []*ir.TypeDecl) {
-	s.doc.Schema[file] = &SchemaFile{Hash: s.hash(file), Types: types}
+// SetSchema stores the type declarations and class table entries of one
+// file.
+func (s *Store) SetSchema(file string, types []*ir.TypeDecl, classes []*ir.Class) {
+	s.doc.Schema[file] = &SchemaFile{Hash: s.hash(file), Types: types, Classes: classes}
 }
 
 // SchemaTypes returns cached declarations for files not in skip whose
 // content is unchanged.
 func (s *Store) SchemaTypes(skip map[string]bool) []*ir.TypeDecl {
+	var out []*ir.TypeDecl
+	for _, e := range s.unchanged(skip) {
+		out = append(out, e.Types...)
+	}
+	return out
+}
+
+// Classes returns the cached class table entries of files not in skip
+// whose content is unchanged.
+func (s *Store) Classes(skip map[string]bool) []*ir.Class {
+	var out []*ir.Class
+	for _, e := range s.unchanged(skip) {
+		out = append(out, e.Classes...)
+	}
+	return out
+}
+
+// unchanged lists, in file order, the schema entries of files not in skip
+// whose content still has the cached hash.
+func (s *Store) unchanged(skip map[string]bool) []*SchemaFile {
 	var files []string
 	for f := range s.doc.Schema {
 		files = append(files, f)
 	}
 	sort.Strings(files)
-	var out []*ir.TypeDecl
+	var out []*SchemaFile
 	for _, f := range files {
 		if skip[f] {
 			continue
 		}
-		e := s.doc.Schema[f]
-		if s.hash(f) == e.Hash {
-			out = append(out, e.Types...)
+		if e := s.doc.Schema[f]; s.hash(f) == e.Hash {
+			out = append(out, e)
 		}
 	}
 	return out

@@ -392,7 +392,7 @@ func (l *lowerer) classes() []*ir.Class {
 	}
 	sort.Slice(named, func(i, j int) bool { return typeStr(named[i]) < typeStr(named[j]) })
 	for _, n := range named {
-		c := &ir.Class{Name: typeStr(n), Lang: lang.Go, Methods: map[string]string{}}
+		c := &ir.Class{Name: typeStr(n), Lang: lang.Go, File: l.pos(n.Obj().Pos()).File, Methods: map[string]string{}}
 		ptr := types.NewPointer(n)
 		// Methods declared on T, then on *T (whose method set also holds
 		// T's, as wrappers).

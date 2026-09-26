@@ -59,8 +59,9 @@ type Cache interface {
 	Lookup(id string) *analysis.Summary
 	Callers(files []string, depth int) []string
 	SchemaTypes(skip map[string]bool) []*ir.TypeDecl
+	Classes(skip map[string]bool) []*ir.Class
 	ResetSchema()
-	SetSchema(file string, types []*ir.TypeDecl)
+	SetSchema(file string, types []*ir.TypeDecl, classes []*ir.Class)
 	Update(funcs []*ir.Func, res *analysis.Result, lowered []string, full bool)
 	Save() error
 }
@@ -200,11 +201,12 @@ func (s *Scanner) Run(ctx context.Context, req Request) (*Result, error) {
 
 	// Schema hints: declarations from lowered code, protobuf and SQL from
 	// the whole repository, and cached declarations of untouched files.
-	res.Schema = s.buildSchema(req, all, prog, lowered, res.Mode)
+	var classes []*ir.Class
+	res.Schema, classes = s.buildSchema(req, all, prog, lowered, res.Mode)
 
 	// Taint analysis.
 	ar, err := s.Analyzer.Analyze(ctx, prog.Funcs, analysis.Input{
-		Rules: req.Rules, Schema: res.Schema, Lookup: req.Cache.Lookup, FirstPartyDomains: cfg.FirstPartyDomains, Classes: prog.Classes,
+		Rules: req.Rules, Schema: res.Schema, Lookup: req.Cache.Lookup, FirstPartyDomains: cfg.FirstPartyDomains, Classes: classes,
 	})
 	if err != nil {
 		return nil, err
@@ -399,7 +401,10 @@ func (s *Scanner) lower(ctx context.Context, req Request, targets []ingest.File,
 	return prog, lowered
 }
 
-func (s *Scanner) buildSchema(req Request, all []ingest.File, prog *ir.Module, lowered []string, mode string) *detect.Schema {
+// buildSchema builds the schema and the class table: from the lowered
+// code, and in diff and path modes also from the cache for files that were
+// not lowered, so that types and overrides in unchanged files are known.
+func (s *Scanner) buildSchema(req Request, all []ingest.File, prog *ir.Module, lowered []string, mode string) (*detect.Schema, []*ir.Class) {
 	types := append([]*ir.TypeDecl{}, prog.Types...)
 	for _, f := range all {
 		if f.Lang != lang.Proto && f.Lang != lang.SQL {
@@ -419,8 +424,10 @@ func (s *Scanner) buildSchema(req Request, all []ingest.File, prog *ir.Module, l
 	for _, f := range lowered {
 		loweredSet[f] = true
 	}
+	classes := append([]*ir.Class{}, prog.Classes...)
 	if mode == ModeDiff || mode == ModePaths {
 		types = append(types, req.Cache.SchemaTypes(loweredSet)...)
+		classes = append(classes, req.Cache.Classes(loweredSet)...)
 	}
 	schema := s.Schemas.Build(types)
 
@@ -430,13 +437,19 @@ func (s *Scanner) buildSchema(req Request, all []ingest.File, prog *ir.Module, l
 			byFile[t.Pos.File] = append(byFile[t.Pos.File], t)
 		}
 	}
+	classesByFile := map[string][]*ir.Class{}
+	for _, c := range prog.Classes {
+		if c.File != "" && loweredSet[c.File] {
+			classesByFile[c.File] = append(classesByFile[c.File], c)
+		}
+	}
 	if mode == ModeFull {
 		req.Cache.ResetSchema()
 	}
 	for _, f := range lowered {
-		req.Cache.SetSchema(f, byFile[f])
+		req.Cache.SetSchema(f, byFile[f], classesByFile[f])
 	}
-	return schema
+	return schema, classes
 }
 
 func dedupeIDs(funcs []*ir.Func) {
