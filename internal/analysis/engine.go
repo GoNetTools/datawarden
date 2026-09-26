@@ -146,7 +146,8 @@ type state struct {
 	fluent map[ir.VarID]ir.VarID
 	// thrown holds, per call instruction, what the callee throws.
 	thrown map[int]map[string]*fact
-	// closures are the closures each variable may hold.
+	// closures are the closures each variable may hold (closureFlow),
+	// without those that came in through a parameter.
 	closures map[ir.VarID][]closure
 	// loads maps the result of a load to the object and field it was
 	// read from, so that a store into it is also a store into a longer
@@ -156,13 +157,6 @@ type state struct {
 	guards [][]string
 	// last is the index of each block's last instruction, or -1.
 	last []int
-}
-
-// closure is a closure value: its function and the variables it binds to
-// the function's capture parameters.
-type closure struct {
-	fn    string
-	binds []ir.VarID
 }
 
 type loadRef struct {
@@ -209,25 +203,6 @@ func (s *state) addThrown(i int, f *fact) bool {
 		return false
 	}
 	m[k] = f
-	return true
-}
-
-func (s *state) addClosure(v ir.VarID, c closure) bool {
-	if v < 0 {
-		return false
-	}
-	for _, o := range s.closures[v] {
-		if o.fn == c.fn && slices.Equal(o.binds, c.binds) {
-			return false
-		}
-	}
-	if len(s.closures[v]) >= maxTargets {
-		return false
-	}
-	if s.closures == nil {
-		s.closures = map[ir.VarID][]closure{}
-	}
-	s.closures[v] = append(s.closures[v], c)
 	return true
 }
 
@@ -375,6 +350,7 @@ func derive(f *fact, pos ir.Pos, decay float64, xf ...string) *fact {
 
 type analyzer struct {
 	cha       *hierarchy
+	flow      *closureFlow
 	opts      Options
 	summaries map[string]*Summary
 	digests   map[string]string
@@ -394,10 +370,12 @@ func Analyze(ctx context.Context, funcs []*ir.Func, opts Options) (*Result, erro
 	for _, f := range funcs {
 		a.funcs[f.ID] = f
 	}
+	a.flow = newClosureFlow(a, funcs)
 	cg := map[string][]string{}
 	for _, f := range funcs {
 		seen := map[string]bool{}
-		for _, in := range f.Instrs {
+		for i := range f.Instrs {
+			in := &f.Instrs[i]
 			// Every function the instruction may run: a call's static
 			// target, overrides and implementations, a constructor, and
 			// the closures it creates (which calls may run).
@@ -409,6 +387,14 @@ func Analyze(ctx context.Context, funcs []*ir.Func, opts Options) (*Result, erro
 				ts = []string{in.Call.Target}
 			case in.Op == ir.OpCall && in.Call != nil:
 				ts = a.cha.targets(in.Call)
+				// The closures it may call (held in a field, returned
+				// by a function).
+				cls, _ := a.flow.invoked(f, in, func(v ir.VarID) []closure { return a.flow.of(f.ID, v) })
+				for _, cl := range cls {
+					if !cl.param {
+						ts = append(ts, cl.fn)
+					}
+				}
 			}
 			for _, t := range ts {
 				if t != "" && !seen[t] {
@@ -649,7 +635,8 @@ func shortType(t string) string {
 
 func (a *analyzer) analyzeFunc(fn *ir.Func) *Summary {
 	st := &state{facts: make([]map[string]*fact, len(fn.Vars)), stores: map[ir.VarID]map[string]map[string]*fact{}, minC: a.opts.MinConf,
-		order: newOrder(fn), multi: multiDefined(fn), fluent: fluentResults(fn), loads: loadsOf(fn), guards: guards(fn), last: lastInstrs(fn)}
+		order: newOrder(fn), multi: multiDefined(fn), fluent: fluentResults(fn), loads: loadsOf(fn), guards: guards(fn), last: lastInstrs(fn),
+		closures: a.flow.local(fn.ID)}
 	a.seed(st, fn)
 	sum := &Summary{}
 	for iter := 0; iter < 40; iter++ {
@@ -850,9 +837,6 @@ func (a *analyzer) step(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 		}
 	case ir.OpAssign, ir.OpPhi:
 		for _, arg := range in.Args {
-			for _, c := range st.closures[arg] {
-				changed = st.addClosure(in.Dst, c) || changed
-			}
 			if in.Dst >= 0 && int(in.Dst) < len(st.multi) && st.multi[in.Dst] {
 				// One of several definitions of a cell (arr[i] = v, a
 				// closure assigning a captured variable): a mutation at
@@ -864,8 +848,6 @@ func (a *analyzer) step(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 			}
 			changed = a.alias(st, in, in.Dst, arg) || changed
 		}
-	case ir.OpClosure:
-		changed = st.addClosure(in.Dst, closure{fn: in.Func, binds: in.Args})
 	case ir.OpCatch:
 		changed = a.catch(st, fn, in)
 	case ir.OpLoad:
@@ -925,6 +907,31 @@ func (a *analyzer) step(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 		}
 	case ir.OpCall, ir.OpNew:
 		changed = a.call(st, fn, in, sum)
+	}
+	switch in.Op {
+	case ir.OpStore:
+		if len(in.Args) == 2 {
+			changed = a.escape(st, fn, in, in.Args[1], sum) || changed
+		}
+	case ir.OpReturn:
+		for _, arg := range in.Args {
+			changed = a.escape(st, fn, in, arg, sum) || changed
+		}
+	}
+	return changed
+}
+
+// escape runs the closures v holds that capture variables of fn, when they
+// leave it (stored in a field, returned): wherever they are called later,
+// they read their captures, with every mutation made to them.
+func (a *analyzer) escape(st *state, fn *ir.Func, in *ir.Instr, v ir.VarID, sum *Summary) bool {
+	changed := false
+	for _, cl := range st.closures[v] {
+		if cl.in != fn.ID || len(cl.binds) == 0 {
+			continue
+		}
+		_, ch := a.runClosure(st, fn, in, cl, nil, func(int) []*fact { return nil }, st.all, sum)
+		changed = changed || ch
 	}
 	return changed
 }
@@ -1051,10 +1058,17 @@ func (a *analyzer) call(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 	}
 	label := calleeLabel(c)
 	guards := st.guardsAt(fn)
+	run, first := a.flow.invoked(fn, in, func(v ir.VarID) []closure { return st.closures[v] })
+	match := a.opts.Rules.Match
+	if len(run) > 0 && c.Callee == "" {
+		// A local or field holding closures, called: rules for a function
+		// of that name do not apply.
+		match = func(string, string, *ir.Call) []rules.Hit { return nil }
+	}
 
 	// Sinks.
 	remote := false
-	for _, hit := range a.opts.Rules.Match(fn.Lang, rules.KindSink, c) {
+	for _, hit := range match(fn.Lang, rules.KindSink, c) {
 		r := hit.Rule
 		remote = remote || r.Category == "network"
 		dest := a.dest(r, fn, in, recvOff)
@@ -1076,7 +1090,7 @@ func (a *analyzer) call(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 	// Sources. A source that delivers its data to a callback (a location
 	// fix, an HTTP response) hands it to the closures it is given.
 	var sourced []*fact
-	for _, hit := range a.opts.Rules.Match(fn.Lang, rules.KindSource, c) {
+	for _, hit := range match(fn.Lang, rules.KindSource, c) {
 		f := &fact{dt: hit.Rule.DataType, param: -1, src: in.Pos, desc: "call " + label, path: []ir.Pos{in.Pos}, conf: 0.9 * hit.Conf}
 		changed = st.add(in.Dst, f) || changed
 		sourced = append(sourced, f)
@@ -1084,7 +1098,7 @@ func (a *analyzer) call(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 
 	// Transforms (sanitizers): the result carries the input's data types
 	// with the transform recorded; no default propagation.
-	if hits := a.opts.Rules.Match(fn.Lang, rules.KindTransform, c); len(hits) > 0 {
+	if hits := match(fn.Lang, rules.KindTransform, c); len(hits) > 0 {
 		x := hits[0].Rule.Transform
 		for i := range in.Args {
 			for _, f := range factsOf(i) {
@@ -1096,30 +1110,33 @@ func (a *analyzer) call(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 
 	nameXf := a.opts.Names.FuncTransform(c.Name)
 
-	// Closures. An indirect call runs the closures its function value
-	// holds with its arguments. A closure passed as an argument may be
-	// called back by the callee with anything else the call is given.
+	// Closures. A call runs the closures held in the variable it calls,
+	// in the receiver of an unresolved method or in the field the method
+	// is named after (closureFlow.invoked), with its arguments. A closure
+	// passed as an argument may be called back by the callee with
+	// anything else the call is given.
 	invoked := false
-	if c.Indirect && len(in.Args) > 0 {
-		for _, cl := range st.closures[in.Args[0]] {
-			// Arguments beyond the closure's last parameter reach that
-			// parameter (varargs, an implicit it standing for several).
-			last := len(in.Args) - 2
-			if cf := a.funcs[cl.fn]; cf != nil {
-				last = len(cf.Params) - cf.Captures - 1
-			}
-			ok, ch := a.invoke(st, fn, in, cl, in.Args[1:], func(i int) []*fact {
-				var out []*fact
-				for j := i + 1; j < len(in.Args) && (j == i+1 || i == last); j++ {
-					out = append(out, factsOf(j)...)
-				}
-				return out
-			}, sum)
-			invoked, changed = invoked || ok, changed || ch
+	for _, cl := range run {
+		if cl.param {
+			continue
 		}
+		// Arguments beyond the closure's last parameter reach that
+		// parameter (varargs, an implicit it standing for several).
+		last := len(in.Args) - first - 1
+		if cf := a.funcs[cl.fn]; cf != nil {
+			last = len(cf.Params) - cf.Captures - 1
+		}
+		ok, ch := a.invoke(st, fn, in, cl, in.Args[first:], func(i int) []*fact {
+			var out []*fact
+			for j := first + i; j < len(in.Args) && (j == first+i || i == last); j++ {
+				out = append(out, factsOf(j)...)
+			}
+			return out
+		}, sum)
+		invoked, changed = invoked || ok, changed || ch
 	}
 	for i, arg := range in.Args {
-		if c.Indirect && i == 0 {
+		if len(run) > 0 && i < first {
 			continue
 		}
 		cls := st.closures[arg]
@@ -1290,7 +1307,9 @@ func (a *analyzer) runClosure(st *state, fn *ir.Func, in *ir.Instr, cl closure, 
 		switch {
 		case i < nIn && i < len(argVars):
 			args[i] = argVars[i]
-		case i >= nIn && i-nIn < len(cl.binds):
+		case i >= nIn && i-nIn < len(cl.binds) && cl.in == fn.ID:
+			// Captures are bound where the closure was created; run
+			// anywhere else, it reads them as unknown.
 			args[i] = cl.binds[i-nIn]
 		}
 	}

@@ -324,3 +324,55 @@ export function callbackBeforeMutation(email: string, items: string[]) {
   items.forEach(() => console.log(xs));
   xs.push(email);
 }
+
+// scenario: closure-field
+class Notifier {
+  constructor(private onSend: (v: string) => void) {}
+
+  send(v: string) {
+    this.onSend(v);
+  }
+}
+
+export function closureField(email: string) {
+  const n = new Notifier((v) => {
+    // ruleid: log.ts.console
+    console.log(v);
+  });
+  n.send(email);
+}
+
+// scenario: closure-collection
+class EventBus {
+  private handlers: Array<(v: string) => void> = [];
+
+  subscribe(h: (v: string) => void) {
+    this.handlers.push(h);
+  }
+
+  publish(v: string) {
+    for (const h of this.handlers) h(v);
+  }
+}
+
+export function closureCollection(email: string) {
+  const bus = new EventBus();
+  bus.subscribe((v) => {
+    // ruleid: log.ts.console
+    console.log(v);
+  });
+  bus.publish(email);
+}
+
+// scenario: closure-return
+function makePrinter() {
+  return (v: string) => {
+    // ruleid: log.ts.console
+    console.log(v);
+  };
+}
+
+export function closureReturn(email: string) {
+  const printer = makePrinter();
+  printer(email);
+}

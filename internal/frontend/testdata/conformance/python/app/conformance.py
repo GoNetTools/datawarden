@@ -320,3 +320,52 @@ def callback_before_mutation(email: str, items: list):
     # ok: log.py.print
     list(map(lambda item: print(xs), items))
     xs.append(email)
+
+
+# scenario: closure-field
+class Notifier:
+    def __init__(self, on_send):
+        self.on_send = on_send
+
+    def send(self, v):
+        self.on_send(v)
+
+
+def closure_field(email: str):
+    # ruleid: log.py.print
+    n = Notifier(lambda v: print(v))
+    n.send(email)
+
+
+# scenario: closure-collection
+class EventBus:
+    def __init__(self):
+        self.handlers = []
+
+    def subscribe(self, h):
+        self.handlers.append(h)
+
+    def publish(self, v):
+        for h in self.handlers:
+            h(v)
+
+
+def closure_collection(email: str):
+    bus = EventBus()
+    # ruleid: log.py.print
+    bus.subscribe(lambda v: print(v))
+    bus.publish(email)
+
+
+# scenario: closure-return
+def make_printer():
+    def printer(v):
+        # ruleid: log.py.print
+        print(v)
+
+    return printer
+
+
+def closure_return(email: str):
+    printer = make_printer()
+    printer(email)

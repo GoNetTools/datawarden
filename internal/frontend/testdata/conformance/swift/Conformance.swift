@@ -330,3 +330,61 @@ func callbackBeforeMutation(email: String, items: [String]) {
     }
     xs.append(email)
 }
+
+// scenario: closure-field
+class Notifier {
+    let onSend: (String) -> Void
+
+    init(onSend: @escaping (String) -> Void) {
+        self.onSend = onSend
+    }
+
+    func send(_ v: String) {
+        onSend(v)
+    }
+}
+
+func closureField(email: String) {
+    let n = Notifier(onSend: { v in
+        // ruleid: log.swift.print
+        print(v)
+    })
+    n.send(email)
+}
+
+// scenario: closure-collection
+class EventBus {
+    var handlers: [(String) -> Void] = []
+
+    func subscribe(_ h: @escaping (String) -> Void) {
+        handlers.append(h)
+    }
+
+    func publish(_ v: String) {
+        for h in handlers {
+            h(v)
+        }
+    }
+}
+
+func closureCollection(email: String) {
+    let bus = EventBus()
+    bus.subscribe { v in
+        // ruleid: log.swift.print
+        print(v)
+    }
+    bus.publish(email)
+}
+
+// scenario: closure-return
+func makePrinter() -> (String) -> Void {
+    return { v in
+        // ruleid: log.swift.print
+        print(v)
+    }
+}
+
+func closureReturn(email: String) {
+    let printer = makePrinter()
+    printer(email)
+}

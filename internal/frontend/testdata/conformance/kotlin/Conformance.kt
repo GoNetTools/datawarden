@@ -306,3 +306,51 @@ fun callbackBeforeMutation(email: String, items: List<String>) {
     }
     xs.add(email)
 }
+
+// scenario: closure-field
+class Notifier(private val onSend: (String) -> Unit) {
+    fun send(v: String) {
+        onSend(v)
+    }
+}
+
+fun closureField(email: String) {
+    val n = Notifier { v ->
+        // ruleid: log.jvm.stdout
+        println(v)
+    }
+    n.send(email)
+}
+
+// scenario: closure-collection
+class EventBus {
+    private val handlers = mutableListOf<(String) -> Unit>()
+
+    fun subscribe(h: (String) -> Unit) {
+        handlers.add(h)
+    }
+
+    fun publish(v: String) {
+        for (h in handlers) h(v)
+    }
+}
+
+fun closureCollection(email: String) {
+    val bus = EventBus()
+    bus.subscribe { v ->
+        // ruleid: log.jvm.stdout
+        println(v)
+    }
+    bus.publish(email)
+}
+
+// scenario: closure-return
+fun makePrinter(): (String) -> Unit = { v ->
+    // ruleid: log.jvm.stdout
+    println(v)
+}
+
+fun closureReturn(email: String) {
+    val printer = makePrinter()
+    printer(email)
+}
