@@ -20,6 +20,12 @@ type Transfer struct {
 	Xf   []string `json:"xf,omitempty"`
 	Conf float64  `json:"c"`
 	Path []ir.Pos `json:"p,omitempty"`
+	// Field is set when only that field of the source parameter moves
+	// (return this.email), not the whole value.
+	Field string `json:"f,omitempty"`
+	// DstField is set when the value is stored into that field of the
+	// destination parameter (this.addr = email in a constructor).
+	DstField string `json:"df,omitempty"`
 }
 
 // SinkHit is a sink reached from a parameter.
@@ -33,6 +39,9 @@ type SinkHit struct {
 	Path []ir.Pos            `json:"p,omitempty"`
 	Xf   []string            `json:"xf,omitempty"`
 	Conf float64             `json:"c"`
+	// Field is set when a field of the parameter reaches the sink
+	// (log(this.addr)), not the parameter itself.
+	Field string `json:"f,omitempty"`
 }
 
 // RealFact is concrete PII produced inside a function.
@@ -43,6 +52,9 @@ type RealFact struct {
 	Path     []ir.Pos `json:"p,omitempty"`
 	Xf       []string `json:"xf,omitempty"`
 	Conf     float64  `json:"c"`
+	// DstField is set when the value is stored into that field of the
+	// parameter (ParamOut).
+	DstField string `json:"df,omitempty"`
 }
 
 // Summary is the externally visible taint behaviour of a function. It is
@@ -84,7 +96,7 @@ func (s *Summary) addParamParam(dst, src int, t Transfer) {
 
 func mergeTransfer(list []Transfer, t Transfer) []Transfer {
 	for i := range list {
-		if xfKey(list[i].Xf) == xfKey(t.Xf) {
+		if xfKey(list[i].Xf) == xfKey(t.Xf) && list[i].Field == t.Field && list[i].DstField == t.DstField {
 			if t.Conf > list[i].Conf {
 				list[i] = t
 			}
@@ -102,9 +114,9 @@ func (s *Summary) addParamSink(i int, h SinkHit) {
 		s.ParamSink = map[int][]SinkHit{}
 	}
 	list := s.ParamSink[i]
-	k := h.Rule + "|" + h.Sink.String() + "|" + xfKey(h.Xf)
+	k := h.Rule + "|" + h.Sink.String() + "|" + xfKey(h.Xf) + "|" + h.Field
 	for j := range list {
-		if list[j].Rule+"|"+list[j].Sink.String()+"|"+xfKey(list[j].Xf) == k {
+		if list[j].Rule+"|"+list[j].Sink.String()+"|"+xfKey(list[j].Xf)+"|"+list[j].Field == k {
 			if h.Conf > list[j].Conf {
 				list[j] = h
 			}
@@ -117,9 +129,9 @@ func (s *Summary) addParamSink(i int, h SinkHit) {
 }
 
 func mergeReal(list []RealFact, f RealFact) []RealFact {
-	k := f.DataType + "|" + xfKey(f.Xf)
+	k := f.DataType + "|" + xfKey(f.Xf) + "|" + f.DstField
 	for i := range list {
-		if list[i].DataType+"|"+xfKey(list[i].Xf) == k {
+		if list[i].DataType+"|"+xfKey(list[i].Xf)+"|"+list[i].DstField == k {
 			if f.Conf > list[i].Conf {
 				list[i] = f
 			}
@@ -152,14 +164,32 @@ func (s *Summary) normalize() {
 			if l[a].Rule != l[b].Rule {
 				return l[a].Rule < l[b].Rule
 			}
-			return l[a].Sink.String() < l[b].Sink.String()
+			if l[a].Sink.String() != l[b].Sink.String() {
+				return l[a].Sink.String() < l[b].Sink.String()
+			}
+			return l[a].Field < l[b].Field
 		})
+	}
+	byKey := func(l []Transfer) {
+		sort.Slice(l, func(a, b int) bool {
+			return xfKey(l[a].Xf)+"|"+l[a].Field+"|"+l[a].DstField < xfKey(l[b].Xf)+"|"+l[b].Field+"|"+l[b].DstField
+		})
+	}
+	for _, l := range s.ParamReturn {
+		byKey(l)
+	}
+	for _, m := range s.ParamParam {
+		for _, l := range m {
+			byKey(l)
+		}
 	}
 	sort.Slice(s.ReturnFacts, func(a, b int) bool {
 		return s.ReturnFacts[a].DataType+xfKey(s.ReturnFacts[a].Xf) < s.ReturnFacts[b].DataType+xfKey(s.ReturnFacts[b].Xf)
 	})
 	for _, l := range s.ParamOut {
-		sort.Slice(l, func(a, b int) bool { return l[a].DataType+xfKey(l[a].Xf) < l[b].DataType+xfKey(l[b].Xf) })
+		sort.Slice(l, func(a, b int) bool {
+			return l[a].DataType+xfKey(l[a].Xf)+"|"+l[a].DstField < l[b].DataType+xfKey(l[b].Xf)+"|"+l[b].DstField
+		})
 	}
 }
 

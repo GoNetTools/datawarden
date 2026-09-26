@@ -270,6 +270,35 @@ func (p *program) methodID(cls, name string, depth int) string {
 	return ""
 }
 
+// ctorID is the constructor function of class cls when it is lowered: its
+// own or an inherited one (Java/Kotlin <init>, Python __init__, TypeScript
+// constructor, Swift init).
+func (p *program) ctorID(cls string) string {
+	if p.class(cls) == nil {
+		return ""
+	}
+	for _, name := range []string{"<init>", "__init__", "constructor", "init"} {
+		if id := p.methodID(cls, name, 0); id != "" {
+			return id
+		}
+	}
+	for c, depth := p.class(cls), 0; c != nil && depth < 5; depth++ {
+		if id := c.name + ".<init>"; p.funcs[id] {
+			return id
+		}
+		if c.file != nil {
+			if id := c.file.pkg + ":" + c.short + ".constructor"; p.funcs[id] {
+				return id // TypeScript
+			}
+		}
+		if len(c.supers) == 0 {
+			break
+		}
+		c = p.class(c.supers[0])
+	}
+	return ""
+}
+
 func (p *program) fieldType(cls, field string) string {
 	c := p.class(cls)
 	for depth := 0; c != nil && depth < 5; depth++ {
@@ -311,7 +340,8 @@ type builder struct {
 	this    ir.VarID
 	names   map[string]ir.VarID // unresolved identifiers read as values
 	lambdas map[ir.VarID]ir.VarID
-	assigns [][]ir.VarID // stack of variables assigned inside lambdas
+	assigns [][]ir.VarID        // stack of variables assigned inside lambdas
+	kwargs  map[ir.VarID]string // keyword-argument variables -> parameter name
 
 	// Control flow. floating counts the enclosing lambdas: their blocks
 	// have no fixed place in the function's order. terminated is set once
@@ -825,6 +855,18 @@ func (b *builder) noteAssign(v ir.VarID) {
 	}
 }
 
+// kwarg makes a variable for a keyword or named argument (f(to=x)): the
+// call records its name, so the value reaches the parameter of that name.
+func (b *builder) kwarg(name string, v ir.VarID, n *sitter.Node) ir.VarID {
+	nv := b.fn.Named(name, "", b.pos(n))
+	b.assign(nv, n, v)
+	if b.kwargs == nil {
+		b.kwargs = map[ir.VarID]string{}
+	}
+	b.kwargs[nv] = name
+	return nv
+}
+
 // ident reads an identifier used as a value: a local, a field of this, or
 // an unresolved name (kept as a named variable so name detectors see it).
 func (b *builder) ident(name string, n *sitter.Node) ir.VarID {
@@ -908,6 +950,17 @@ func (b *builder) floatingRegion(body func()) {
 // emitCall emits a call and returns its result variable.
 func (b *builder) emitCall(n *sitter.Node, c *ir.Call, args []ir.VarID, resultType string) ir.VarID {
 	dst := b.fn.Named("", resultType, b.pos(n))
+	if c.Construct && c.Ctor == "" {
+		c.Ctor = b.p.ctorID(c.Callee)
+	}
+	for i, a := range args {
+		if name, ok := b.kwargs[a]; ok {
+			if c.ArgNames == nil {
+				c.ArgNames = make([]string, len(args))
+			}
+			c.ArgNames[i] = name
+		}
+	}
 	for _, a := range args {
 		if cb, ok := b.lambdas[a]; ok {
 			c.Callbacks = append(c.Callbacks, cb)

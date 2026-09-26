@@ -237,6 +237,7 @@ func (kp *ktProgram) collectClass(f *srcFile, n *sitter.Node, scope string, isOb
 	mods := firstOf(n, "modifiers")
 	_, annNames := ktAnnotations(f, mods)
 	td := &ir.TypeDecl{Name: qual, Kind: "class", Lang: lang.Kotlin, Annotations: annNames, Pos: posOf(f, n)}
+	kp.funcs[qual+".<init>"] = true // every class gets an initializer function
 	if isEntityAnnotation(annNames) {
 		td.Kind = "entity"
 	}
@@ -1142,14 +1143,14 @@ func (kb *ktBuilder) args(suffix *sitter.Node) []ir.VarID {
 			for _, va := range allOf(c, "value_argument") {
 				kids := named(va)
 				if len(kids) == 0 {
+					// A keyword literal (null) has no named node; it
+					// still takes its position.
+					out = append(out, kb.constVar(kb.text(va), va))
 					continue
 				}
 				if len(kids) >= 2 && kids[0].Type() == "simple_identifier" && hasChildToken(va, kb.f.src, "=") {
 					// Named argument: User(email = x) — keep the name.
-					v := kb.expr(kids[len(kids)-1])
-					nv := kb.fn.Named(kb.text(kids[0]), "", kb.pos(kids[0]))
-					kb.assign(nv, va, v)
-					out = append(out, nv)
+					out = append(out, kb.kwarg(kb.text(kids[0]), kb.expr(kids[len(kids)-1]), va))
 					continue
 				}
 				out = append(out, kb.expr(kids[len(kids)-1]))

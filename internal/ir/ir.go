@@ -154,6 +154,17 @@ type Call struct {
 	Target string `json:"target,omitempty"`
 	// Construct marks object construction (new Foo(...), Foo(...), &T{...}).
 	Construct bool `json:"construct,omitempty"`
+	// Ctor is the ID of the constructor a Construct call runs, when it is
+	// code under analysis. Its first parameter is the new object (Dst).
+	Ctor string `json:"ctor,omitempty"`
+	// ArgNames gives, per argument, the parameter name of a keyword or
+	// named argument (Python f(to=x), Kotlin f(to = x)); "" for a
+	// positional one. Nil when every argument is positional.
+	ArgNames []string `json:"arg_names,omitempty"`
+	// Targets are further functions a dynamically dispatched call may run:
+	// the overrides and implementations of Target in the program (class
+	// hierarchy analysis). Target may be empty for an interface method.
+	Targets []string `json:"targets,omitempty"`
 	// Callbacks are the input variables of lambda arguments: values the
 	// callee hands to a callback (collection elements, a location fix, an
 	// HTTP response) flow into these.

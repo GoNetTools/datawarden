@@ -878,9 +878,7 @@ func (pb *pyBuilder) args(n *sitter.Node) []ir.VarID {
 		case "comment":
 		case "keyword_argument":
 			v := pb.expr(a.ChildByFieldName("value"))
-			nv := pb.fn.Named(pb.text(a.ChildByFieldName("name")), "", pb.pos(a))
-			pb.assign(nv, a, v)
-			kw = append(kw, nv)
+			kw = append(kw, pb.kwarg(pb.text(a.ChildByFieldName("name")), v, a))
 		default:
 			out = append(out, pb.expr(a))
 		}
