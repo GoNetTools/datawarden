@@ -277,3 +277,41 @@ export function lambdaVariable(email: string) {
   };
   show(email);
 }
+
+// scenario: consent-guard
+interface Consents {
+  hasConsent(): boolean;
+}
+
+export function consentGuard(email: string, consents: Consents) {
+  if (!consents.hasConsent()) return;
+  // Reported with the consent check that guards it.
+  // ruleid: log.ts.console
+  console.log(email);
+}
+
+// scenario: nested-field
+class Note {
+  text = "";
+}
+
+class Folder {
+  note = new Note();
+}
+
+export function nestedField(email: string) {
+  const f = new Folder();
+  f.note.text = email;
+  // ruleid: log.ts.console
+  console.log(f.note.text);
+}
+
+// scenario: closure-assign
+export function closureAssign(email: string, items: string[]) {
+  let found = "";
+  items.forEach(() => {
+    found = email;
+  });
+  // ruleid: log.ts.console
+  console.log(found);
+}

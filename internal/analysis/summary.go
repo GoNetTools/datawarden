@@ -42,6 +42,8 @@ type SinkHit struct {
 	// Field is set when a field of the parameter reaches the sink
 	// (log(this.addr)), not the parameter itself.
 	Field string `json:"f,omitempty"`
+	// Guards are the consent checks that must pass for the sink to run.
+	Guards []string `json:"g,omitempty"`
 }
 
 // RealFact is concrete PII produced inside a function.
@@ -122,7 +124,9 @@ func (s *Summary) addParamSink(i int, h SinkHit) {
 	k := h.Rule + "|" + h.Sink.String() + "|" + xfKey(h.Xf) + "|" + h.Field
 	for j := range list {
 		if list[j].Rule+"|"+list[j].Sink.String()+"|"+xfKey(list[j].Xf)+"|"+list[j].Field == k {
-			if h.Conf > list[j].Conf {
+			// An unguarded path outweighs a guarded one.
+			og, ng := len(list[j].Guards) > 0, len(h.Guards) > 0
+			if (og && !ng) || (og == ng && h.Conf > list[j].Conf) {
 				list[j] = h
 			}
 			return
@@ -182,7 +186,10 @@ func (s *Summary) normalize() {
 			if l[a].Sink.String() != l[b].Sink.String() {
 				return l[a].Sink.String() < l[b].Sink.String()
 			}
-			return l[a].Field < l[b].Field
+			if l[a].Field != l[b].Field {
+				return l[a].Field < l[b].Field
+			}
+			return xfKey(l[a].Guards) < xfKey(l[b].Guards)
 		})
 	}
 	byKey := func(l []Transfer) {

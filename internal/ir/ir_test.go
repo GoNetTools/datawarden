@@ -18,7 +18,8 @@ func TestPosAndOps(t *testing.T) {
 	if got := (Pos{File: "a.go", Line: 3}).String(); got != "a.go:3" {
 		t.Errorf("without column: %s", got)
 	}
-	for op, want := range map[Op]string{OpAssign: "assign", OpLoad: "load", OpStore: "store", OpCall: "call", OpReturn: "return", Op(99): "op?"} {
+	for op, want := range map[Op]string{OpAssign: "assign", OpLoad: "load", OpStore: "store", OpCall: "call", OpReturn: "return", OpPhi: "phi",
+		OpCompute: "compute", OpNew: "new", OpThrow: "throw", OpCatch: "catch", OpClosure: "closure", OpYield: "yield", Op(99): "op?"} {
 		if got := op.String(); got != want {
 			t.Errorf("Op(%d) = %q, want %q", op, got, want)
 		}
@@ -41,11 +42,19 @@ func TestFuncBuilders(t *testing.T) {
 }
 
 func TestModuleMergeAndSort(t *testing.T) {
-	m := &Module{Funcs: []*Func{{ID: "b"}}, Types: []*TypeDecl{{Name: "Z"}}}
-	m.Merge(&Module{Funcs: []*Func{{ID: "a"}}, Types: []*TypeDecl{{Name: "A"}}, Warnings: []string{"w"}})
+	m := &Module{Funcs: []*Func{{ID: "b"}}, Types: []*TypeDecl{{Name: "Z"}}, Classes: []*Class{{Name: "Y"}}}
+	m.Merge(&Module{Funcs: []*Func{{ID: "a"}}, Types: []*TypeDecl{{Name: "A"}}, Classes: []*Class{{Name: "B"}}, Warnings: []string{"w"}})
 	m.Merge(nil)
 	m.SortStable()
-	if m.Funcs[0].ID != "a" || m.Types[0].Name != "A" || len(m.Warnings) != 1 {
+	if m.Funcs[0].ID != "a" || m.Types[0].Name != "A" || m.Classes[0].Name != "B" || len(m.Warnings) != 1 {
 		t.Errorf("module: %+v", m)
+	}
+	for _, tm := range []Term{TermJump, TermIf, TermReturn, TermThrow} {
+		if tm.String() == "term?" {
+			t.Errorf("Term(%d) has no name", tm)
+		}
+	}
+	if Term(9).String() != "term?" || !Logical("!") || !Logical("==") || Logical("+") || Logical("") {
+		t.Error("Term names and Logical")
 	}
 }

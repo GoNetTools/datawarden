@@ -9,24 +9,25 @@ import (
 	"github.com/GoNetTools/datawarden/internal/ir"
 )
 
-// entry(0) -> loop header(1) <-> body(2); header -> exit(3); lambda(4) floating.
+// entry(0) -> loop header(1) <-> body(2); header -> exit(3); body -exc-> handler(4).
 func TestOrder(t *testing.T) {
 	f := &ir.Func{}
 	emit := func() int {
 		f.Emit(ir.Instr{Op: ir.OpAssign, Dst: ir.NoVar})
 		return len(f.Instrs) - 1
 	}
-	f.NewBlock(false)
+	f.NewBlock()
 	e0, e1 := emit(), emit()
-	f.NewBlock(false, 0)
+	f.NewBlock(0)
 	h := emit()
-	f.NewBlock(false, 1)
+	f.NewBlock(1)
 	body := emit()
 	f.Edge(2, 1)
-	f.NewBlock(false, 1)
+	f.NewBlock(1)
 	exit := emit()
-	f.NewBlock(true)
-	lam := emit()
+	f.NewBlock()
+	f.ExcEdge(2, 4)
+	handler := emit()
 
 	o := newOrder(f)
 	cases := []struct {
@@ -37,7 +38,8 @@ func TestOrder(t *testing.T) {
 		{e0, exit, true}, {exit, e0, false},
 		{body, h, true}, {body, body, true}, // around the loop
 		{exit, body, false},
-		{lam, e0, true}, {exit, lam, true}, // lambdas are unordered
+		{body, handler, true}, {e0, handler, true}, // exceptional edges
+		{handler, e0, false}, {exit, handler, false},
 	}
 	for _, c := range cases {
 		if got := o.before(c.q, c.p); got != c.want {

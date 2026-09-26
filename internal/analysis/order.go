@@ -26,7 +26,7 @@ func newOrder(fn *ir.Func) *order {
 	o := &order{fn: fn, reach: make([][]uint64, n)}
 	for b := range fn.Blocks {
 		seen := make([]uint64, words)
-		work := append([]int32(nil), fn.Blocks[b].Succs...)
+		work := append(append([]int32(nil), fn.Blocks[b].Succs...), fn.Blocks[b].Exc...)
 		for len(work) > 0 {
 			s := work[len(work)-1]
 			work = work[:len(work)-1]
@@ -35,6 +35,7 @@ func newOrder(fn *ir.Func) *order {
 			}
 			seen[s/64] |= 1 << (s % 64)
 			work = append(work, fn.Blocks[s].Succs...)
+			work = append(work, fn.Blocks[s].Exc...)
 		}
 		o.reach[b] = seen
 	}
@@ -42,17 +43,14 @@ func newOrder(fn *ir.Func) *order {
 }
 
 // before reports whether instruction q can run before instruction p, that
-// is, whether some path leads from q to p. Floating blocks (lambda bodies)
-// are unordered, so anything in them runs before and after everything.
+// is, whether some path leads from q to p, over normal and exceptional
+// edges.
 func (o *order) before(q, p int) bool {
 	if o == nil || q < 0 || p < 0 || q >= len(o.fn.Instrs) || p >= len(o.fn.Instrs) {
 		return true
 	}
 	bq, bp := o.fn.Instrs[q].Block, o.fn.Instrs[p].Block
 	if int(bq) >= len(o.reach) || int(bp) >= len(o.reach) || bq < 0 || bp < 0 {
-		return true
-	}
-	if o.fn.Blocks[bq].Floating || o.fn.Blocks[bp].Floating {
 		return true
 	}
 	if bq == bp && q < p {

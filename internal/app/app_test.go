@@ -82,7 +82,7 @@ func TestScanGo(t *testing.T) {
 		t.Errorf("exit = %d, want %d", code, cli.ExitViolation)
 	}
 	expectFlows(t, r, []want{
-		{"email", "sdk.go.sentry.scope", "service.Register$1", true},
+		{"email", "sdk.go.sentry.scope", "service.Register", true},
 		{"national_id", "net.go.http_body", "service.sendSMS", true},
 		{"phone", "log.go.stdlib", "service.Register", true},
 		{"phone", "log.go.slog", "service.Handler", true},

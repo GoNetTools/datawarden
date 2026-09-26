@@ -31,7 +31,7 @@ cases:
     min_recall: 0.75
     flows:
       - {data_type: phone, sink_rule: log.go.stdlib, function: service.Register, note: "Contact is the phone_number column"}
-      - {data_type: email, sink_rule: sdk.go.sentry.scope, function: service.Register$1}
+      - {data_type: email, sink_rule: sdk.go.sentry.scope, function: service.Register}
       - {data_type: national_id, sink_rule: net.go.http_body, function: service.sendSMS, note: "c.NationalID in Register, two calls deep through notify()"}
       - {data_type: phone, sink_rule: log.go.slog, function: service.Handler, note: "request form value named mobileNo"}
       - {data_type: ip_address, sink_rule: log.go.fmt_print, function: service.Handler}
@@ -91,7 +91,7 @@ cases:
     flows:
       # Go API
       - {data_type: email, sink_rule: log.go.stdlib, function: api.Server.Signup}
-      - {data_type: email, sink_rule: sdk.go.sentry.scope, function: api.Server.Signup$1}
+      - {data_type: email, sink_rule: sdk.go.sentry.scope, function: api.Server.Signup}
       - {data_type: dob, sink_rule: sdk.go.sentry.scope, function: api.Server.Signup}
       - {data_type: phone, sink_rule: net.go.http_form, function: api.sendOTP, note: "Contact is the phone_number column"}
       - {data_type: national_id, sink_rule: log.go.fmt_print, function: api.writeAudit, note: "three calls deep: audit → record → writeAudit"}
@@ -103,7 +103,7 @@ cases:
       - {data_type: email, sink_rule: log.go.fmt_print, function: api.Server.Support}
       - {data_type: phone, sink_rule: log.go.fmt_print, function: api.Server.Support}
       - {data_type: phone, sink_rule: log.go.stdlib, function: api.Server.Support, note: "SHA-256 of a phone number is reversible"}
-      - {data_type: person_name, sink_rule: log.go.stdlib, function: api.Server.Welcome$1, note: "from a goroutine"}
+      - {data_type: person_name, sink_rule: log.go.stdlib, function: api.Server.Welcome, note: "from a goroutine"}
       - {data_type: password, sink_rule: log.go.stdlib, function: api.Server.Login}
       - {data_type: medical_record_number, sink_rule: sdk.go.sentry.scope, function: api.Server.Refill}
       # TypeScript checkout

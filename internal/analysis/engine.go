@@ -47,6 +47,9 @@ type Options struct {
 	FirstPartyDomains []string
 	// MinConf drops facts and flows below this confidence.
 	MinConf float64
+	// Classes is the class table that dynamically dispatched calls are
+	// resolved against.
+	Classes []*ir.Class
 }
 
 // RuleMatcher finds sink, source and transform rules for a call
@@ -77,6 +80,7 @@ type Input struct {
 	Schema            SchemaIndex
 	Lookup            func(id string) *Summary
 	FirstPartyDomains []string
+	Classes           []*ir.Class
 }
 
 // Engine is the analysis service. Its name classifier and threshold are
@@ -88,7 +92,7 @@ type Engine struct {
 
 // Analyze runs the analysis for one scan.
 func (e Engine) Analyze(ctx context.Context, funcs []*ir.Func, in Input) (*Result, error) {
-	return Analyze(ctx, funcs, Options{Rules: in.Rules, Schema: in.Schema, Names: e.Names, Lookup: in.Lookup, FirstPartyDomains: in.FirstPartyDomains, MinConf: e.MinConf})
+	return Analyze(ctx, funcs, Options{Rules: in.Rules, Schema: in.Schema, Names: e.Names, Lookup: in.Lookup, FirstPartyDomains: in.FirstPartyDomains, MinConf: e.MinConf, Classes: in.Classes})
 }
 
 // Result is the output of Analyze.
@@ -140,6 +144,103 @@ type state struct {
 	// fluent maps the result of a mutating call to its receiver:
 	// sb.append(a).append(b) mutates sb through the first call's result.
 	fluent map[ir.VarID]ir.VarID
+	// thrown holds, per call instruction, what the callee throws.
+	thrown map[int]map[string]*fact
+	// closures are the closures each variable may hold.
+	closures map[ir.VarID][]closure
+	// loads maps the result of a load to the object and field it was
+	// read from, so that a store into it is also a store into a longer
+	// access path of that object (user.addr.city = email).
+	loads map[ir.VarID]loadRef
+	// guards lists, per block, the consent checks guarding it.
+	guards [][]string
+	// last is the index of each block's last instruction, or -1.
+	last []int
+}
+
+// closure is a closure value: its function and the variables it binds to
+// the function's capture parameters.
+type closure struct {
+	fn    string
+	binds []ir.VarID
+}
+
+type loadRef struct {
+	obj   ir.VarID
+	field string
+}
+
+// maxFieldDepth bounds access paths: a.b.c is tracked, a.b.c.d is
+// collapsed to a.b.c.
+const maxFieldDepth = 3
+
+func fieldDepth(path string) int {
+	if path == "" {
+		return 0
+	}
+	return strings.Count(path, ".") + 1
+}
+
+// joinField appends field to an access path, keeping the path bounded.
+func joinField(path, field string) string {
+	switch {
+	case path == "":
+		return field
+	case fieldDepth(path) >= maxFieldDepth:
+		return path
+	}
+	return path + "." + field
+}
+
+func (s *state) addThrown(i int, f *fact) bool {
+	if f == nil || f.conf < s.minC {
+		return false
+	}
+	if s.thrown == nil {
+		s.thrown = map[int]map[string]*fact{}
+	}
+	m := s.thrown[i]
+	if m == nil {
+		m = map[string]*fact{}
+		s.thrown[i] = m
+	}
+	k := f.key()
+	if old, ok := m[k]; ok && old.conf >= f.conf {
+		return false
+	}
+	m[k] = f
+	return true
+}
+
+func (s *state) addClosure(v ir.VarID, c closure) bool {
+	if v < 0 {
+		return false
+	}
+	for _, o := range s.closures[v] {
+		if o.fn == c.fn && slices.Equal(o.binds, c.binds) {
+			return false
+		}
+	}
+	if len(s.closures[v]) >= maxTargets {
+		return false
+	}
+	if s.closures == nil {
+		s.closures = map[ir.VarID][]closure{}
+	}
+	s.closures[v] = append(s.closures[v], c)
+	return true
+}
+
+// guardsAt lists the consent checks guarding the current instruction.
+func (s *state) guardsAt(fn *ir.Func) []string {
+	if s.guards == nil || s.cur < 0 || s.cur >= len(fn.Instrs) {
+		return nil
+	}
+	b := fn.Instrs[s.cur].Block
+	if b < 0 || int(b) >= len(s.guards) {
+		return nil
+	}
+	return s.guards[b]
 }
 
 // visible reports whether f can be seen by the current instruction.
@@ -273,6 +374,7 @@ func derive(f *fact, pos ir.Pos, decay float64, xf ...string) *fact {
 }
 
 type analyzer struct {
+	cha       *hierarchy
 	opts      Options
 	summaries map[string]*Summary
 	digests   map[string]string
@@ -288,7 +390,7 @@ func Analyze(ctx context.Context, funcs []*ir.Func, opts Options) (*Result, erro
 	if opts.Rules == nil || opts.Schema == nil || opts.Names == nil {
 		return nil, errors.New("analysis: Rules, Schema and Names are required")
 	}
-	a := &analyzer{opts: opts, summaries: map[string]*Summary{}, digests: map[string]string{}, funcs: map[string]*ir.Func{}, flows: map[string]*finding.Flow{}}
+	a := &analyzer{cha: newHierarchy(opts.Classes), opts: opts, summaries: map[string]*Summary{}, digests: map[string]string{}, funcs: map[string]*ir.Func{}, flows: map[string]*finding.Flow{}}
 	for _, f := range funcs {
 		a.funcs[f.ID] = f
 	}
@@ -296,12 +398,19 @@ func Analyze(ctx context.Context, funcs []*ir.Func, opts Options) (*Result, erro
 	for _, f := range funcs {
 		seen := map[string]bool{}
 		for _, in := range f.Instrs {
-			if in.Op != ir.OpCall || in.Call == nil {
-				continue
+			// Every function the instruction may run: a call's static
+			// target, overrides and implementations, a constructor, and
+			// the closures it creates (which calls may run).
+			var ts []string
+			switch {
+			case in.Op == ir.OpClosure:
+				ts = []string{in.Func}
+			case in.Op == ir.OpNew && in.Call != nil:
+				ts = []string{in.Call.Target}
+			case in.Op == ir.OpCall && in.Call != nil:
+				ts = a.cha.targets(in.Call)
 			}
-			// Every function the call may run: its static target, the
-			// overrides and implementations, and a constructor.
-			for _, t := range append([]string{in.Call.Target, in.Call.Ctor}, in.Call.Targets...) {
+			for _, t := range ts {
 				if t != "" && !seen[t] {
 					seen[t] = true
 					cg[f.ID] = append(cg[f.ID], t)
@@ -348,6 +457,20 @@ func Analyze(ctx context.Context, funcs []*ir.Func, opts Options) (*Result, erro
 		res.Flows = append(res.Flows, a.flows[k])
 	}
 	return res, nil
+}
+
+// reportFunc is the function a flow is reported in: for a closure, the
+// named function it is written in, so that findings and their baseline
+// fingerprints name the code a reader looks for.
+func (a *analyzer) reportFunc(fn *ir.Func) string {
+	for depth := 0; fn.Parent != "" && depth < 16; depth++ {
+		p, ok := a.funcs[fn.Parent]
+		if !ok {
+			return fn.Parent
+		}
+		fn = p
+	}
+	return fn.ID
 }
 
 func (a *analyzer) summaryFor(id string) *Summary {
@@ -420,7 +543,7 @@ func redefinitions(fn *ir.Func) []bool {
 			continue
 		}
 		switch in.Op {
-		case ir.OpAssign, ir.OpCall:
+		case ir.OpAssign, ir.OpCall, ir.OpPhi, ir.OpCompute, ir.OpNew:
 			defs[in.Dst] = append(defs[in.Dst], in.Args...)
 		case ir.OpLoad:
 			if len(in.Args) > 0 {
@@ -453,10 +576,11 @@ func redefinitions(fn *ir.Func) []bool {
 	return out
 }
 
-// multiDefined marks variables with more than one definition: several
-// instructions write them, or a parameter is also assigned. Writes to them
-// are weak updates (arr[i] = v, a Go store through a pointer), which the
-// analysis orders like other mutations.
+// multiDefined marks cells and variables with more than one definition:
+// several instructions write them, or a parameter is also assigned. Writes
+// to them are weak updates (arr[i] = v, a Go store through a pointer, a
+// closure assigning a captured variable), which the analysis orders like
+// other mutations.
 func multiDefined(fn *ir.Func) []bool {
 	n := make([]int, len(fn.Vars))
 	for _, p := range fn.Params {
@@ -471,7 +595,33 @@ func multiDefined(fn *ir.Func) []bool {
 	}
 	out := make([]bool, len(n))
 	for v, c := range n {
-		out[v] = c > 1
+		out[v] = c > 1 || fn.Vars[v].Cell
+	}
+	return out
+}
+
+// lastInstrs returns the index of each block's last instruction.
+func lastInstrs(fn *ir.Func) []int {
+	out := make([]int, len(fn.Blocks))
+	for b := range out {
+		out[b] = -1
+	}
+	for i := range fn.Instrs {
+		if b := fn.Instrs[i].Block; b >= 0 && int(b) < len(out) {
+			out[b] = i
+		}
+	}
+	return out
+}
+
+// loadsOf maps each load's result to the object and field it reads.
+func loadsOf(fn *ir.Func) map[ir.VarID]loadRef {
+	out := map[ir.VarID]loadRef{}
+	for i := range fn.Instrs {
+		in := &fn.Instrs[i]
+		if in.Op == ir.OpLoad && len(in.Args) == 1 && in.Dst >= 0 && in.Field != "" {
+			out[in.Dst] = loadRef{in.Args[0], in.Field}
+		}
 	}
 	return out
 }
@@ -499,7 +649,7 @@ func shortType(t string) string {
 
 func (a *analyzer) analyzeFunc(fn *ir.Func) *Summary {
 	st := &state{facts: make([]map[string]*fact, len(fn.Vars)), stores: map[ir.VarID]map[string]map[string]*fact{}, minC: a.opts.MinConf,
-		order: newOrder(fn), multi: multiDefined(fn), fluent: fluentResults(fn)}
+		order: newOrder(fn), multi: multiDefined(fn), fluent: fluentResults(fn), loads: loadsOf(fn), guards: guards(fn), last: lastInstrs(fn)}
 	a.seed(st, fn)
 	sum := &Summary{}
 	for iter := 0; iter < 40; iter++ {
@@ -514,18 +664,33 @@ func (a *analyzer) analyzeFunc(fn *ir.Func) *Summary {
 			break
 		}
 	}
-	// Returns and parameter side effects, read off the final state.
+	// Returns, escaping exceptions and parameter side effects, read off
+	// the final state.
 	for i := range fn.Instrs {
 		in := &fn.Instrs[i]
-		if in.Op != ir.OpReturn {
+		st.cur = i
+		escapes := !handled(fn, in)
+		if in.Op == ir.OpCall && escapes {
+			// What a callee throws outside any handler leaves this function.
+			for _, f := range st.thrown[i] {
+				t := Transfer{Xf: f.xf, Conf: f.conf, Path: appendPath(f.path, in.Pos), Field: f.field}
+				if f.dt == "" {
+					sum.addParamThrow(f.param, t)
+				} else {
+					sum.addThrowFact(RealFact{DataType: f.dt, Desc: f.desc, Src: f.src, Path: t.Path, Xf: f.xf, Conf: f.conf})
+				}
+			}
 			continue
 		}
-		st.cur = i
+		throw := in.Op == ir.OpThrow
+		if !(in.Op == ir.OpReturn || in.Op == ir.OpYield || throw && escapes) {
+			continue
+		}
 		for _, arg := range in.Args {
 			// What the returned object holds in its fields (a factory
 			// returning &mailbox{addr: email}): callers get it in the
 			// same fields of the result.
-			if !in.Throw {
+			if !throw {
 				fm := st.stores[arg]
 				for _, field := range slices.Sorted(maps.Keys(fm)) {
 					for _, f := range fm[field] {
@@ -544,9 +709,9 @@ func (a *analyzer) analyzeFunc(fn *ir.Func) *Summary {
 				t := Transfer{Xf: f.xf, Conf: f.conf, Path: appendPath(f.path, in.Pos), Field: f.field}
 				rf := RealFact{DataType: f.dt, Desc: f.desc, Src: f.src, Path: appendPath(f.path, in.Pos), Xf: f.xf, Conf: f.conf}
 				switch {
-				case in.Throw && f.dt == "":
+				case throw && f.dt == "":
 					sum.addParamThrow(f.param, t)
-				case in.Throw:
+				case throw:
 					sum.addThrowFact(rf)
 				case f.dt == "":
 					sum.addParamReturn(f.param, t)
@@ -588,12 +753,24 @@ func (a *analyzer) analyzeFunc(fn *ir.Func) *Summary {
 	return sum
 }
 
+// handled reports whether an exception raised by in goes to a handler in
+// the function: in ends a block with exceptional successors.
+func handled(fn *ir.Func, in *ir.Instr) bool {
+	b := in.Block
+	return b >= 0 && int(b) < len(fn.Blocks) && len(fn.Blocks[b].Exc) > 0
+}
+
 // fieldFacts returns what reading field of obj yields at the current
 // instruction: a schema or name hint for the field, what was stored there,
 // the whole object's facts when its type is unknown, and, when obj is a
 // parameter of a known type, a symbolic fact for that field of it, so
-// callers answer with what they put in the field.
+// callers answer with what they put in the field. field may be an access
+// path (addr.city); hints then come from its last field.
 func (a *analyzer) fieldFacts(st *state, fn *ir.Func, obj ir.VarID, owner, field string, pos ir.Pos) []*fact {
+	name := field
+	if i := strings.LastIndexByte(field, '.'); i >= 0 {
+		name, owner = field[i+1:], "?"
+	}
 	if owner == "" && obj >= 0 && int(obj) < len(fn.Vars) {
 		owner = fn.Vars[obj].Type
 	}
@@ -601,8 +778,11 @@ func (a *analyzer) fieldFacts(st *state, fn *ir.Func, obj ir.VarID, owner, field
 	if ctxName == "" && obj >= 0 && int(obj) < len(fn.Vars) {
 		ctxName = fn.Vars[obj].Name
 	}
+	if owner == "?" {
+		owner, ctxName = "", ""
+	}
 	var out []*fact
-	h, fs := a.opts.Schema.Field(owner, field)
+	h, fs := a.opts.Schema.Field(owner, name)
 	switch fs {
 	case detect.FieldPII:
 		f := &fact{dt: h.DataType, param: -1, src: pos, desc: fmt.Sprintf("field %s (%s)", fieldLabel(owner, field), h.Via), path: []ir.Pos{pos}, conf: h.Conf}
@@ -611,7 +791,7 @@ func (a *analyzer) fieldFacts(st *state, fn *ir.Func, obj ir.VarID, owner, field
 		}
 		out = append(out, f)
 	case detect.FieldUnknown:
-		if m, ok := a.opts.Names.Field(ctxName, field); ok {
+		if m, ok := a.opts.Names.Field(ctxName, name); ok {
 			f := &fact{dt: m.DataType, param: -1, src: pos, desc: fmt.Sprintf("field %s", fieldLabel(owner, field)), path: []ir.Pos{pos}, conf: m.Conf}
 			if m.Transform != "" {
 				f.xf = []string{m.Transform}
@@ -620,9 +800,16 @@ func (a *analyzer) fieldFacts(st *state, fn *ir.Func, obj ir.VarID, owner, field
 		}
 	}
 	if fm := st.stores[obj]; fm != nil {
-		for _, f := range fm[field] {
-			if st.visible(f) {
-				out = append(out, derive(f, pos, 1))
+		// What was stored in the field, and in fields of the object it
+		// holds (user.addr holds what user.addr.city was given).
+		for key, m := range fm {
+			if key != field && !strings.HasPrefix(key, field+".") {
+				continue
+			}
+			for _, f := range m {
+				if st.visible(f) {
+					out = append(out, derive(f, pos, 1))
+				}
 			}
 		}
 	}
@@ -635,10 +822,11 @@ func (a *analyzer) fieldFacts(st *state, fn *ir.Func, obj ir.VarID, owner, field
 		case !known:
 			out = append(out, derive(f, pos, 0.8))
 		case f.dt == "" && f.at == 0:
-			// obj is (an alias of) a parameter: this field of it.
+			// obj is (an alias of) a parameter or a field of one: this
+			// field of it.
 			d := derive(f, pos, 1)
-			if d.field == "" {
-				d.field = field
+			for _, part := range strings.Split(field, ".") {
+				d.field = joinField(d.field, part)
 			}
 			out = append(out, d)
 		}
@@ -649,45 +837,59 @@ func (a *analyzer) fieldFacts(st *state, fn *ir.Func, obj ir.VarID, owner, field
 func (a *analyzer) step(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool {
 	changed := false
 	switch in.Op {
-	case ir.OpAssign:
+	case ir.OpCompute:
+		// A new value built from what the arguments hold now; a boolean
+		// operation carries no data.
+		if ir.Logical(in.Operator) {
+			return false
+		}
 		for _, arg := range in.Args {
-			if in.Snapshot {
-				// A new value built from what the argument holds now.
-				for _, f := range st.of(arg) {
-					changed = st.add(in.Dst, derive(f, in.Pos, 1)) || changed
-				}
-				continue
+			for _, f := range st.of(arg) {
+				changed = st.add(in.Dst, derive(f, in.Pos, 1)) || changed
+			}
+		}
+	case ir.OpAssign, ir.OpPhi:
+		for _, arg := range in.Args {
+			for _, c := range st.closures[arg] {
+				changed = st.addClosure(in.Dst, c) || changed
 			}
 			if in.Dst >= 0 && int(in.Dst) < len(st.multi) && st.multi[in.Dst] {
-				// One of several definitions (arr[i] = v, an assignment
-				// inside a lambda): a mutation at this point.
+				// One of several definitions of a cell (arr[i] = v, a
+				// closure assigning a captured variable): a mutation at
+				// this point.
 				for _, f := range st.of(arg) {
 					changed = st.add(in.Dst, st.mutation(derive(f, in.Pos, 1))) || changed
 				}
 				continue
 			}
-			// A copy or merge aliases its arguments: the object's
-			// mutations stay ordered where they happen, and what was
-			// stored in its fields is in the alias's fields too.
-			for _, f := range st.all(arg) {
-				d := derive(f, in.Pos, 1)
-				d.at = f.at
-				changed = st.add(in.Dst, d) || changed
-			}
-			for field, m := range st.stores[arg] {
-				for _, f := range m {
-					d := derive(f, in.Pos, 1)
-					d.at = f.at
-					changed = st.addStore(in.Dst, field, d) || changed
-				}
-			}
+			changed = a.alias(st, in, in.Dst, arg) || changed
 		}
+	case ir.OpClosure:
+		changed = st.addClosure(in.Dst, closure{fn: in.Func, binds: in.Args})
+	case ir.OpCatch:
+		changed = a.catch(st, fn, in)
 	case ir.OpLoad:
 		if len(in.Args) == 0 {
 			return false
 		}
-		for _, f := range a.fieldFacts(st, fn, in.Args[0], in.Owner, in.Field, in.Pos) {
+		obj := in.Args[0]
+		for _, f := range a.fieldFacts(st, fn, obj, in.Owner, in.Field, in.Pos) {
 			changed = st.add(in.Dst, f) || changed
+		}
+		// The loaded object's own fields: what was stored under
+		// obj.field.x is in x of the result.
+		for key, m := range st.stores[obj] {
+			rest, ok := strings.CutPrefix(key, in.Field+".")
+			if !ok {
+				continue
+			}
+			for _, f := range m {
+				if st.visible(f) {
+					d := derive(f, in.Pos, 1)
+					d.at = f.at
+					changed = st.addStore(in.Dst, rest, d) || changed
+				}
+			}
 		}
 	case ir.OpStore:
 		if len(in.Args) < 2 {
@@ -698,6 +900,19 @@ func (a *analyzer) step(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 			d := st.mutation(derive(f, in.Pos, 1))
 			changed = st.addStore(obj, in.Field, d) || changed
 			changed = st.add(obj, d) || changed
+			// A store into an object read from another one's field is a
+			// store into a longer access path of that one: t = user.addr;
+			// t.city = email stores user.addr.city.
+			path, base := in.Field, obj
+			for depth := 0; depth < maxFieldDepth; depth++ {
+				ref, ok := st.loads[base]
+				if !ok || fieldDepth(path) >= maxFieldDepth {
+					break
+				}
+				path, base = ref.field+"."+path, ref.obj
+				changed = st.addStore(base, path, d) || changed
+				changed = st.add(base, d) || changed
+			}
 		}
 		// A store without a declared owner type is a map or object literal
 		// ({"email": v}): the key names the value, whatever other types say
@@ -708,8 +923,57 @@ func (a *analyzer) step(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 				changed = st.add(obj, st.mutation(&fact{dt: m.DataType, param: -1, src: in.Pos, desc: fmt.Sprintf("key %q", in.Field), path: []ir.Pos{in.Pos}, conf: m.Conf})) || changed
 			}
 		}
-	case ir.OpCall:
+	case ir.OpCall, ir.OpNew:
 		changed = a.call(st, fn, in, sum)
+	}
+	return changed
+}
+
+// alias makes dst an alias of src: a copy or merge of references. The
+// object's mutations stay ordered where they happen, and what was stored
+// in its fields is in the alias's fields too.
+func (a *analyzer) alias(st *state, in *ir.Instr, dst, src ir.VarID) bool {
+	changed := false
+	for _, f := range st.all(src) {
+		d := derive(f, in.Pos, 1)
+		d.at = f.at
+		changed = st.add(dst, d) || changed
+	}
+	for field, m := range st.stores[src] {
+		for _, f := range m {
+			d := derive(f, in.Pos, 1)
+			d.at = f.at
+			changed = st.addStore(dst, field, d) || changed
+		}
+	}
+	return changed
+}
+
+// catch gives a handler's caught exception what reaches it: the value of
+// each throw, and what each call throws, in the blocks whose exceptional
+// edges lead to the handler.
+func (a *analyzer) catch(st *state, fn *ir.Func, in *ir.Instr) bool {
+	changed := false
+	for b := range fn.Blocks {
+		if !slices.Contains(fn.Blocks[b].Exc, in.Block) {
+			continue
+		}
+		last := st.last[b]
+		if last < 0 {
+			continue
+		}
+		switch t := &fn.Instrs[last]; t.Op {
+		case ir.OpThrow:
+			for _, arg := range t.Args {
+				for _, f := range st.of(arg) {
+					changed = st.add(in.Dst, derive(f, t.Pos, 1)) || changed
+				}
+			}
+		case ir.OpCall, ir.OpNew:
+			for _, f := range st.thrown[last] {
+				changed = st.add(in.Dst, derive(f, in.Pos, 1)) || changed
+			}
+		}
 	}
 	return changed
 }
@@ -772,8 +1036,9 @@ func (a *analyzer) call(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 		return false
 	}
 	changed := false
+	isNew := in.Op == ir.OpNew
 	recvOff := 0
-	if c.HasRecv && len(in.Args) > 0 {
+	if (c.HasRecv || c.Indirect) && len(in.Args) > 0 {
 		recvOff = 1
 	}
 	keyed := a.keyLabels(fn, in, recvOff)
@@ -785,6 +1050,7 @@ func (a *analyzer) call(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 		return fs
 	}
 	label := calleeLabel(c)
+	guards := st.guardsAt(fn)
 
 	// Sinks.
 	remote := false
@@ -798,22 +1064,22 @@ func (a *analyzer) call(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 			}
 			for _, f := range factsOf(i) {
 				if f.dt == "" {
-					sum.addParamSink(f.param, SinkHit{Rule: r.ID, Dest: dest, Sink: in.Pos, Func: fn.ID, Call: label, Lang: fn.Lang,
-						Path: appendPath(f.path, in.Pos), Xf: f.xf, Conf: f.conf * hit.Conf, Field: f.field})
+					sum.addParamSink(f.param, SinkHit{Rule: r.ID, Dest: dest, Sink: in.Pos, Func: a.reportFunc(fn), Call: label, Lang: fn.Lang,
+						Path: appendPath(f.path, in.Pos), Xf: f.xf, Conf: f.conf * hit.Conf, Field: f.field, Guards: guards})
 					continue
 				}
-				a.emit(f, SinkHit{Rule: r.ID, Dest: dest, Sink: in.Pos, Func: fn.ID, Call: label, Lang: fn.Lang, Conf: hit.Conf}, nil)
+				a.emit(f, SinkHit{Rule: r.ID, Dest: dest, Sink: in.Pos, Func: a.reportFunc(fn), Call: label, Lang: fn.Lang, Conf: hit.Conf, Guards: guards}, nil)
 			}
 		}
 	}
 
-	// Sources.
+	// Sources. A source that delivers its data to a callback (a location
+	// fix, an HTTP response) hands it to the closures it is given.
+	var sourced []*fact
 	for _, hit := range a.opts.Rules.Match(fn.Lang, rules.KindSource, c) {
 		f := &fact{dt: hit.Rule.DataType, param: -1, src: in.Pos, desc: "call " + label, path: []ir.Pos{in.Pos}, conf: 0.9 * hit.Conf}
 		changed = st.add(in.Dst, f) || changed
-		for _, cb := range c.Callbacks {
-			changed = st.add(cb, f) || changed
-		}
+		sourced = append(sourced, f)
 	}
 
 	// Transforms (sanitizers): the result carries the input's data types
@@ -830,18 +1096,71 @@ func (a *analyzer) call(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 
 	nameXf := a.opts.Names.FuncTransform(c.Name)
 
+	// Closures. An indirect call runs the closures its function value
+	// holds with its arguments. A closure passed as an argument may be
+	// called back by the callee with anything else the call is given.
+	invoked := false
+	if c.Indirect && len(in.Args) > 0 {
+		for _, cl := range st.closures[in.Args[0]] {
+			// Arguments beyond the closure's last parameter reach that
+			// parameter (varargs, an implicit it standing for several).
+			last := len(in.Args) - 2
+			if cf := a.funcs[cl.fn]; cf != nil {
+				last = len(cf.Params) - cf.Captures - 1
+			}
+			ok, ch := a.invoke(st, fn, in, cl, in.Args[1:], func(i int) []*fact {
+				var out []*fact
+				for j := i + 1; j < len(in.Args) && (j == i+1 || i == last); j++ {
+					out = append(out, factsOf(j)...)
+				}
+				return out
+			}, sum)
+			invoked, changed = invoked || ok, changed || ch
+		}
+	}
+	for i, arg := range in.Args {
+		if c.Indirect && i == 0 {
+			continue
+		}
+		cls := st.closures[arg]
+		if len(cls) == 0 {
+			continue
+		}
+		// The callee may keep the closure and run it at any later time
+		// (a listener, a stored handler): its captures are read with
+		// every mutation, wherever it happens. The closure's parameters
+		// correspond to the call's other arguments (the receiver of
+		// apply or forEach first).
+		inputs := append([]*fact(nil), sourced...)
+		var others []ir.VarID
+		for j := range in.Args {
+			if j != i && !(c.Indirect && j == 0) {
+				inputs = append(inputs, factsOf(j)...)
+				others = append(others, in.Args[j])
+			}
+		}
+		for _, cl := range cls {
+			_, ch := a.invokeLater(st, fn, in, cl, others, inputs, sum)
+			changed = changed || ch
+		}
+	}
+	if invoked {
+		return changed
+	}
+
 	// Calls into analyzed code: apply the callee summaries. A dynamically
-	// dispatched call may run Target or any of Targets (its overrides and
-	// implementations); a construction runs Ctor on the new object.
-	if c.Ctor != "" {
-		if s := a.summaryFor(c.Ctor); s != nil {
+	// dispatched call may run its target or any override or
+	// implementation of it; a construction runs the constructor on the
+	// new object.
+	if isNew && c.Target != "" {
+		if s := a.summaryFor(c.Target); s != nil {
 			// The constructor's first parameter is the new object.
 			base := append([]ir.VarID{in.Dst}, in.Args...)
 			var names []string
 			if c.ArgNames != nil {
 				names = append([]string{""}, c.ArgNames...)
 			}
-			args, idx := a.arrange(c.Ctor, base, names)
+			args, idx := a.arrange(c.Target, base, names)
 			factsAt := func(i int) []*fact {
 				switch {
 				case idx[i] < 0:
@@ -855,20 +1174,19 @@ func (a *analyzer) call(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 		}
 	}
 	applied := false
-	for _, t := range append([]string{c.Target}, c.Targets...) {
-		if t == "" {
-			continue
-		}
-		if s := a.summaryFor(t); s != nil {
-			args, idx := a.arrange(t, in.Args, c.ArgNames)
-			factsAt := func(i int) []*fact {
-				if idx[i] < 0 {
-					return nil
+	if !isNew && !c.Indirect {
+		for _, t := range a.cha.targets(c) {
+			if s := a.summaryFor(t); s != nil {
+				args, idx := a.arrange(t, in.Args, c.ArgNames)
+				factsAt := func(i int) []*fact {
+					if idx[i] < 0 {
+						return nil
+					}
+					return factsOf(idx[i])
 				}
-				return factsOf(idx[i])
+				changed = a.apply(st, fn, in, s, args, factsAt, nameXf, in.Dst, sum) || changed
+				applied = true
 			}
-			changed = a.apply(st, fn, in, s, args, factsAt, nameXf, in.Dst, sum) || changed
-			applied = true
 		}
 	}
 	if applied {
@@ -880,7 +1198,7 @@ func (a *analyzer) call(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 	// instead of smearing every field of the object onto the result.
 	nonRecv := len(in.Args) - recvOff
 	skipRecv := false
-	if recvOff == 1 && nonRecv == 0 && in.Args[0] >= 0 {
+	if c.HasRecv && recvOff == 1 && nonRecv == 0 && in.Args[0] >= 0 {
 		if owner := fn.Vars[in.Args[0]].Type; owner != "" && a.opts.Schema.KnownType(owner) {
 			if field, ok := getterField(c.Name); ok {
 				skipRecv = true
@@ -903,7 +1221,7 @@ func (a *analyzer) call(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 				continue
 			}
 			changed = st.add(in.Dst, derive(f, in.Pos, 0.95, nameXf)) || changed
-			if i >= recvOff && recvOff == 1 && !c.Construct && isMutator(c.Name) {
+			if i >= recvOff && c.HasRecv && recvOff == 1 && !isNew && isMutator(c.Name) {
 				// The receiver, and the object it came from when it is a
 				// builder call's result (sb.append(a).append(email)).
 				r := in.Args[0]
@@ -916,10 +1234,13 @@ func (a *analyzer) call(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 					r = next
 				}
 			}
-			for _, cb := range c.Callbacks {
-				changed = st.add(cb, derive(f, in.Pos, 0.9)) || changed
-			}
 		}
+	}
+	if r, ok := st.fluent[in.Dst]; ok && r == in.Args[0] && !remote {
+		// A builder or scope function returns its receiver: the result
+		// is the same object, with the mutations made to it here and
+		// later (User().apply { email = x }).
+		changed = a.alias(st, in, in.Dst, r) || changed
 	}
 	if nonRecv == 0 && in.Dst >= 0 && !skipRecv {
 		if m, ok := a.opts.Names.Getter(c.Name); ok {
@@ -938,6 +1259,48 @@ func (a *analyzer) call(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 		}
 	}
 	return changed
+}
+
+// invokeLater applies the summary of closure cl passed as a callback: every
+// input receives inputs, and the captures hold what their variables hold
+// at any point.
+func (a *analyzer) invokeLater(st *state, fn *ir.Func, in *ir.Instr, cl closure, argVars []ir.VarID, inputs []*fact, sum *Summary) (bool, bool) {
+	return a.runClosure(st, fn, in, cl, argVars, func(int) []*fact { return inputs }, st.all, sum)
+}
+
+// invoke applies the summary of closure cl at a call that runs it. The
+// closure's parameters are its inputs, then its captures: inputAt(i) is
+// what input i receives (argVars[i] the variable passed, when known), and
+// each capture receives the variable the closure bound. It reports
+// whether the closure's summary was known.
+func (a *analyzer) invoke(st *state, fn *ir.Func, in *ir.Instr, cl closure, argVars []ir.VarID, inputAt func(int) []*fact, sum *Summary) (bool, bool) {
+	return a.runClosure(st, fn, in, cl, argVars, inputAt, st.of, sum)
+}
+
+func (a *analyzer) runClosure(st *state, fn *ir.Func, in *ir.Instr, cl closure, argVars []ir.VarID, inputAt func(int) []*fact, captured func(ir.VarID) []*fact, sum *Summary) (bool, bool) {
+	cf := a.funcs[cl.fn]
+	s := a.summaryFor(cl.fn)
+	if cf == nil || s == nil {
+		return false, false
+	}
+	nIn := len(cf.Params) - cf.Captures
+	args := make([]ir.VarID, len(cf.Params))
+	for i := range args {
+		args[i] = ir.NoVar
+		switch {
+		case i < nIn && i < len(argVars):
+			args[i] = argVars[i]
+		case i >= nIn && i-nIn < len(cl.binds):
+			args[i] = cl.binds[i-nIn]
+		}
+	}
+	factsAt := func(i int) []*fact {
+		if i < nIn {
+			return inputAt(i)
+		}
+		return captured(args[i])
+	}
+	return true, a.apply(st, fn, in, s, args, factsAt, "", in.Dst, sum)
 }
 
 // apply applies a callee summary at a call. args are the callee's
@@ -984,10 +1347,13 @@ func (a *analyzer) apply(st *state, fn *ir.Func, in *ir.Instr, s *Summary, args 
 					h2.Path = appendPath(appendPath(f.path, in.Pos), h.Path...)
 					h2.Xf = mergeXf(f.xf, h.Xf...)
 					h2.Conf = f.conf * h.Conf
+					h2.Guards = mergeXf(h.Guards, st.guardsAt(fn)...)
 					sum.addParamSink(f.param, h2)
 					continue
 				}
-				a.emit(f, h, []ir.Pos{in.Pos})
+				h2 := h
+				h2.Guards = mergeXf(h.Guards, st.guardsAt(fn)...)
+				a.emit(f, h2, []ir.Pos{in.Pos})
 			}
 		}
 	}
@@ -1022,20 +1388,19 @@ func (a *analyzer) apply(st *state, fn *ir.Func, in *ir.Instr, s *Summary, args 
 		}
 		changed = st.add(dst, f) || changed
 	}
-	// What the callee throws reaches the handler (or escapes further).
-	for _, cv := range in.Call.Catch {
-		for i := range args {
-			for _, t := range s.ParamThrow[i] {
-				for _, f := range of(i, t.Field) {
-					d := derive(f, in.Pos, t.Conf, t.Xf...)
-					d.path = appendPath(d.path, t.Path...)
-					put(cv, "", d)
-				}
+	// What the callee throws: a handler of the call's block catches it,
+	// or it leaves this function (see analyzeFunc).
+	for i := range args {
+		for _, t := range s.ParamThrow[i] {
+			for _, f := range of(i, t.Field) {
+				d := derive(f, in.Pos, t.Conf, t.Xf...)
+				d.path = appendPath(d.path, t.Path...)
+				changed = st.addThrown(st.cur, d) || changed
 			}
 		}
-		for _, rf := range s.ThrowFacts {
-			put(cv, "", realToFact(rf, in.Pos))
-		}
+	}
+	for _, rf := range s.ThrowFacts {
+		changed = st.addThrown(st.cur, realToFact(rf, in.Pos)) || changed
 	}
 	return changed
 }
@@ -1145,10 +1510,16 @@ func (a *analyzer) emit(f *fact, h SinkHit, via []ir.Pos) {
 	fl := &finding.Flow{
 		DataType: f.dt, Source: f.src, Sink: h.Sink, SinkRule: h.Rule, Dest: h.Dest, Path: path,
 		Transforms: xf, Confidence: round2(conf), Function: h.Func, Lang: h.Lang, SourceDesc: f.desc, SinkCall: h.Call,
+		Guards: h.Guards,
 	}
 	k := strings.Join([]string{f.dt, h.Rule, h.Func, h.Sink.String(), xfKey(xf)}, "|")
-	if old, ok := a.flows[k]; ok && old.Confidence >= fl.Confidence {
-		return
+	if old, ok := a.flows[k]; ok {
+		// An unguarded path to the sink outweighs a guarded one; among
+		// equally guarded ones the more confident wins.
+		og, ng := len(old.Guards) > 0, len(fl.Guards) > 0
+		if (!og && ng) || (og == ng && old.Confidence >= fl.Confidence) {
+			return
+		}
 	}
 	a.flows[k] = fl
 }

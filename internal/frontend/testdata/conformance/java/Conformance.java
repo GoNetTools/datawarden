@@ -275,4 +275,36 @@ class Conformance {
         };
         show.accept(email);
     }
+
+    // scenario: consent-guard
+    interface Consents { boolean hasConsent(); }
+
+    void consentGuard(String email, Consents consents) {
+        if (!consents.hasConsent()) {
+            return;
+        }
+        // Reported with the consent check that guards it.
+        // ruleid: log.jvm.stdout
+        System.out.println(email);
+    }
+
+    // scenario: nested-field
+    static class Note { String text = ""; }
+
+    static class Folder { Note note = new Note(); }
+
+    void nestedField(String email) {
+        Folder f = new Folder();
+        f.note.text = email;
+        // ruleid: log.jvm.stdout
+        System.out.println(f.note.text);
+    }
+
+    // scenario: closure-assign
+    void closureAssign(String email, List<String> items) {
+        String[] found = {""};
+        items.forEach(item -> found[0] = email);
+        // ruleid: log.jvm.stdout
+        System.out.println(found[0]);
+    }
 }

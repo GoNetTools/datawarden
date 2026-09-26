@@ -72,6 +72,7 @@ func (fe *tsFrontend) Lower(ctx context.Context, files []string) (*ir.Module, er
 	for _, f := range tp.files {
 		tp.lowerFile(f)
 	}
+	tp.mod.Classes = tp.classTable()
 	return tp.mod, nil
 }
 
@@ -667,12 +668,12 @@ func (tb *tsBuilder) stmt(n *sitter.Node) ir.VarID {
 		return ir.NoVar
 	case "if_statement":
 		cond := n.ChildByFieldName("condition")
-		tb.stmt(cond)
+		c := tb.expr(cond)
 		var els func()
 		if alt := n.ChildByFieldName("alternative"); alt != nil {
 			els = func() { tb.stmt(alt) }
 		}
-		tb.ifElse(n, cond, func() { tb.stmt(n.ChildByFieldName("consequence")) }, els)
+		tb.ifElse(n, cond, c, func() { tb.stmt(n.ChildByFieldName("consequence")) }, els)
 		return ir.NoVar
 	case "for_statement":
 		tb.stmt(n.ChildByFieldName("initializer"))
@@ -771,7 +772,7 @@ func (tb *tsBuilder) expr(n *sitter.Node) ir.VarID {
 		if name == "undefined" {
 			return tb.constVar(name, n)
 		}
-		if _, local := tb.scope[name]; !local {
+		if _, local := tb.lookup(name); !local {
 			if q, ok := tb.f.imports[name]; ok {
 				return tb.fn.Named(name, q, tb.pos(n))
 			}
@@ -825,7 +826,7 @@ func (tb *tsBuilder) expr(n *sitter.Node) ir.VarID {
 		ctor := n.ChildByFieldName("constructor")
 		typ := tb.tp.resolveType(tb.f, tb.text(ctor))
 		args := tb.args(n.ChildByFieldName("arguments"))
-		return tb.emitCall(n, &ir.Call{Callee: typ, Name: shortName(typ), Construct: true}, args, typ)
+		return tb.newObject(n, typ, args, typ)
 	case "yield_expression":
 		v := ir.NoVar
 		for _, c := range named(n) {
@@ -845,10 +846,10 @@ func (tb *tsBuilder) expr(n *sitter.Node) ir.VarID {
 	case "binary_expression":
 		op := tb.text(n.ChildByFieldName("operator"))
 		l, r := tb.expr(n.ChildByFieldName("left")), tb.expr(n.ChildByFieldName("right"))
-		dst := tb.temp(n)
 		if tsCompare[op] {
-			return dst
+			return tb.logic(n, l, r)
 		}
+		dst := tb.temp(n)
 		if op == "&&" || op == "||" || op == "??" {
 			tb.assign(dst, n, l, r) // one of the operands itself
 		} else {
@@ -858,7 +859,9 @@ func (tb *tsBuilder) expr(n *sitter.Node) ir.VarID {
 	case "unary_expression":
 		arg := tb.expr(n.ChildByFieldName("argument"))
 		switch tb.text(n.ChildByFieldName("operator")) {
-		case "!", "typeof", "void", "delete":
+		case "!":
+			return tb.logic(n, arg)
+		case "typeof", "void", "delete":
 			return tb.temp(n)
 		}
 		return arg
@@ -960,7 +963,7 @@ func (tb *tsBuilder) assignment(n *sitter.Node) ir.VarID {
 	switch left.Type() {
 	case "identifier":
 		name := tb.text(left)
-		old, ok := tb.scope[name]
+		old, ok := tb.lookup(name)
 		if !ok {
 			dst := tb.declare(name, "", left)
 			tb.assign(dst, n, v)
@@ -993,7 +996,7 @@ func (tb *tsBuilder) assignment(n *sitter.Node) ir.VarID {
 			tb.store(base, stringValue(tb.f, idx), "", v, n)
 		} else {
 			tb.assign(base, n, v)
-			tb.noteAssign(base)
+			tb.cell(base)
 		}
 	case "object_pattern", "array_pattern":
 		tb.destructure(left, v, "")
@@ -1021,7 +1024,7 @@ func (tb *tsBuilder) staticPath(n *sitter.Node) string {
 	switch n.Type() {
 	case "identifier":
 		name := tb.text(n)
-		if _, local := tb.scope[name]; local {
+		if _, local := tb.lookup(name); local {
 			return ""
 		}
 		if q, ok := tb.f.imports[name]; ok {
@@ -1036,7 +1039,7 @@ func (tb *tsBuilder) staticPath(n *sitter.Node) string {
 		if obj.Type() == "identifier" {
 			switch tb.text(obj) {
 			case "window", "globalThis", "self", "global":
-				if _, local := tb.scope[tb.text(obj)]; !local {
+				if _, local := tb.lookup(tb.text(obj)); !local {
 					if tsGlobals[prop] {
 						return prop
 					}
@@ -1057,7 +1060,7 @@ func (tb *tsBuilder) typeOf(n *sitter.Node) string {
 	}
 	switch n.Type() {
 	case "identifier":
-		if v, ok := tb.scope[tb.text(n)]; ok {
+		if v, ok := tb.lookup(tb.text(n)); ok {
 			return tb.fn.Vars[v].Type
 		}
 	case "this":
@@ -1108,7 +1111,7 @@ func (tb *tsBuilder) call(n *sitter.Node) ir.VarID {
 		if name == "require" {
 			return tb.temp(n)
 		}
-		if v, local := tb.scope[name]; local {
+		if v, local := tb.lookup(name); local {
 			return tb.emitCall(n, &ir.Call{Name: name, HasRecv: true, RecvText: name}, append([]ir.VarID{v}, args...), "")
 		}
 		if id, ok := tb.tp.top[tb.f.pkg+"."+name]; ok {

@@ -271,3 +271,41 @@ func lambdaVariable(email string) {
 	}
 	show(email)
 }
+
+// scenario: consent-guard
+type consentStore interface{ HasConsent() bool }
+
+func consentGuard(email string, consents consentStore) {
+	if !consents.HasConsent() {
+		return
+	}
+	// Reported with the consent check that guards it.
+	// ruleid: log.go.stdlib
+	log.Println("tracking", email)
+}
+
+// scenario: nested-field
+type note struct{ text string }
+
+type folder struct{ note note }
+
+func nestedField(email string) {
+	var f folder
+	f.note.text = email
+	// ruleid: log.go.stdlib
+	log.Println(f.note.text)
+}
+
+// scenario: closure-assign
+func closureAssign(email string, items []string) {
+	found := ""
+	each(items, func(string) { found = email })
+	// ruleid: log.go.stdlib
+	log.Println(found)
+}
+
+func each(items []string, fn func(string)) {
+	for _, it := range items {
+		fn(it)
+	}
+}

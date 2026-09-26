@@ -25,7 +25,10 @@ type Flow struct {
 	Dest       Destination `json:"dest"`
 	Path       []ir.Pos    `json:"path"`
 	Transforms []string    `json:"transforms,omitempty"` // "masked", "sha256"
-	Confidence float64     `json:"confidence"`
+	// Guards are the consent checks that must pass for the sink to run
+	// ("consent check hasConsent() at app/Track.kt:12").
+	Guards     []string `json:"guards,omitempty"`
+	Confidence float64  `json:"confidence"`
 
 	// Function is the function enclosing the sink call.
 	Function   string `json:"function"`

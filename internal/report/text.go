@@ -64,6 +64,9 @@ func Text(w io.Writer, r *Report) error {
 		if len(f.Transforms) > 0 {
 			extra += " · transforms " + strings.Join(f.Transforms, ",")
 		}
+		if len(f.Guards) > 0 {
+			extra += " · guarded by " + strings.Join(f.Guards, "; ")
+		}
 		if f.Allowed != "" {
 			extra += " · " + f.Allowed
 		}

@@ -28,7 +28,23 @@ func lower(t *testing.T, fe func(frontend.Options) frontend.Frontend, files map[
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := m.Verify(); err != nil {
+		t.Errorf("lowered IR does not verify:\n%v", err)
+	}
 	return m
+}
+
+// ops maps each called name to the op of an instruction calling it.
+func ops(m *ir.Module) map[string]ir.Op {
+	out := map[string]ir.Op{}
+	for _, f := range m.Funcs {
+		for _, in := range f.Instrs {
+			if in.Call != nil {
+				out[in.Call.Name] = in.Op
+			}
+		}
+	}
+	return out
 }
 
 func calls(m *ir.Module) map[string]*ir.Call {
@@ -112,7 +128,7 @@ class Repo:
 	if c["check"] == nil || c["check"].Target != "app.api.views:Repo.check" || !c["check"].HasRecv {
 		t.Errorf("self method: %+v", c["check"])
 	}
-	if c["Customer"] == nil || !c["Customer"].Construct || c["Customer"].Callee != "app.api.models.Customer" {
+	if c["Customer"] == nil || ops(m)["Customer"] != ir.OpNew || c["Customer"].Callee != "app.api.models.Customer" {
 		t.Errorf("constructor through a relative import (.): %+v", c["Customer"])
 	}
 	if c["notify"] == nil || c["notify"].Target != "app.api.models:Customer.notify" {

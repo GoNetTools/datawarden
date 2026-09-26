@@ -6,10 +6,12 @@ package app
 import (
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -52,6 +54,9 @@ var conformanceScenarios = map[string]string{
 	"dynamic-dispatch":     "through an interface or protocol call into an implementation",
 	"exception":            "thrown inside an exception, caught and logged",
 	"lambda-variable":      "a lambda stored in a variable and called with the data",
+	"consent-guard":        "after a consent check, the flow is reported with the check as its guard",
+	"nested-field":         "stored two fields deep (a.b.c = v), then read back",
+	"closure-assign":       "a closure assigns the data to a variable it captured, read after the call",
 }
 
 var scenarioRe = regexp.MustCompile(`(?m)^\s*(?://+|#+)\s*scenario:\s*([a-z-]+)\s*$`)
@@ -110,5 +115,44 @@ func TestFrontendConformance(t *testing.T) {
 		for _, s := range missing {
 			t.Errorf("%s: scenario %q is missing (%s)", dir, s, conformanceScenarios[s])
 		}
+	}
+}
+
+// TestConsentGuards checks that the consent-guard scenario's flow carries
+// the consent check that guards it in every language, and that flows
+// without such a check carry none.
+func TestConsentGuards(t *testing.T) {
+	root := "../frontend/testdata/conformance"
+	available := NewComponents(time.Now).Frontends.Languages()
+	for _, l := range lang.CodeNames() {
+		if !slices.Contains(available, l) {
+			continue
+		}
+		t.Run(l, func(t *testing.T) {
+			if l == lang.Go {
+				if _, err := exec.LookPath("go"); err != nil {
+					t.Skip("go toolchain not available")
+				}
+			}
+			_, r := scanJSON(t, filepath.Join(root, l))
+			guarded, plain := 0, 0
+			for _, f := range r.Flows {
+				name := strings.ToLower(strings.ReplaceAll(f.Function, "_", ""))
+				switch {
+				case strings.HasSuffix(name, "consentguard"):
+					guarded++
+					if len(f.Guards) == 0 || !strings.Contains(strings.ToLower(f.Guards[0]), "consent") {
+						t.Errorf("%s: flow at %s has no consent guard: %v", f.Function, f.Sink, f.Guards)
+					}
+				case len(f.Guards) > 0:
+					t.Errorf("%s: unguarded flow at %s reported with guards %v", f.Function, f.Sink, f.Guards)
+				default:
+					plain++
+				}
+			}
+			if guarded == 0 || plain == 0 {
+				t.Errorf("%d guarded and %d unguarded flows", guarded, plain)
+			}
+		})
 	}
 }

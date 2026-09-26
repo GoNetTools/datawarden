@@ -263,3 +263,35 @@ fun lambdaVariable(email: String) {
     }
     show(email)
 }
+
+// scenario: consent-guard
+interface Consents {
+    fun hasConsent(): Boolean
+}
+
+fun consentGuard(email: String, consents: Consents) {
+    if (!consents.hasConsent()) return
+    // Reported with the consent check that guards it.
+    // ruleid: log.jvm.stdout
+    println(email)
+}
+
+// scenario: nested-field
+class Note(var text: String = "")
+
+class Folder(val note: Note = Note())
+
+fun nestedField(email: String) {
+    val f = Folder()
+    f.note.text = email
+    // ruleid: log.jvm.stdout
+    println(f.note.text)
+}
+
+// scenario: closure-assign
+fun closureAssign(email: String, items: List<String>) {
+    var found = ""
+    items.forEach { found = email }
+    // ruleid: log.jvm.stdout
+    println(found)
+}
