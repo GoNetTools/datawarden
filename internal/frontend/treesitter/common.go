@@ -55,16 +55,19 @@ type classInfo struct {
 }
 
 type program struct {
-	lang    string
-	opts    frontend.Options
-	files   []*srcFile
-	classes map[string]*classInfo
-	byShort map[string][]*classInfo
-	funcs   map[string]bool   // all declared function IDs
-	top     map[string]string // "<pkg or module>.<name>" -> function ID
-	ext     map[string][]string
-	modules map[string]bool // TS module ids in this run
-	mod     *ir.Module
+	lang string
+	opts frontend.Options
+	// normalize, when set, rewrites a file before parsing without moving
+	// any position in it (swiftNormalize).
+	normalize func([]byte) []byte
+	files     []*srcFile
+	classes   map[string]*classInfo
+	byShort   map[string][]*classInfo
+	funcs     map[string]bool   // all declared function IDs
+	top       map[string]string // "<pkg or module>.<name>" -> function ID
+	ext       map[string][]string
+	modules   map[string]bool // TS module ids in this run
+	mod       *ir.Module
 	// consts holds boolean constants declared in the source, keyed by
 	// "Class.NAME" for class members and "file|NAME" for top-level ones.
 	consts map[string]bool
@@ -101,6 +104,9 @@ func (p *program) parse(ctx context.Context, rels []string, lang *sitter.Languag
 		if err != nil {
 			p.warnf("%s: %v", rel, err)
 			continue
+		}
+		if p.normalize != nil {
+			src = p.normalize(src)
 		}
 		parser := sitter.NewParser()
 		parser.SetLanguage(lang)
@@ -154,9 +160,9 @@ func (p *program) constDecl(f *srcFile, n *sitter.Node) (string, *sitter.Node) {
 			}
 		}
 	case lang.Kotlin:
-		if n.Type() == "property_declaration" && !strings.Contains(f.text(firstOf(n, "binding_pattern_kind")), "var") {
+		if n.Type() == "property_declaration" && !hasChildToken(n, f.src, "var") {
 			if vd := firstOf(n, "variable_declaration"); vd != nil {
-				return f.text(firstOf(vd, "simple_identifier")), ktPropValue(n)
+				return f.text(firstOf(vd, "identifier")), ktPropValue(n)
 			}
 		}
 	case lang.Swift:

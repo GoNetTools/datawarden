@@ -127,7 +127,7 @@ What each component does:
 |---|---|
 | `frontend` | The `Frontend` interface, the `Registry` of frontends per language, the `Registrar` plugin contract. |
 | `frontend/golang` | Go via `go/packages` and SSA: full type information. |
-| `frontend/treesitter` | Python, Java, Kotlin, Swift, TypeScript via tree-sitter (cgo): syntax plus import and declaration resolution. |
+| `frontend/treesitter` | Python, Java, Kotlin, Swift, TypeScript via tree-sitter (cgo): syntax plus import and declaration resolution. Grammars come from `smacker/go-tree-sitter`, except Kotlin (`tree-sitter-grammars/tree-sitter-kotlin`, loaded into the same runtime with `sitter.NewLanguage`). A frontend may normalize a file before parsing without moving positions (`program.normalize`; Swift blanks syntax its grammar predates). |
 | `analysis` | The taint engine: sources, propagation, function summaries, flows. |
 | `detect` | Identifier classifier and taxonomy, schema index, literal validators. |
 | `rules` | Loading, validating and matching YAML sink, source and transform rules. |
