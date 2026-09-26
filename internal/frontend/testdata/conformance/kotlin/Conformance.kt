@@ -354,3 +354,24 @@ fun closureReturn(email: String) {
     val printer = makePrinter()
     printer(email)
 }
+
+// scenario: consent-helper
+fun mayContact(consents: Consents): Boolean = consents.hasConsent()
+
+fun consentHelper(email: String, consents: Consents) {
+    if (mayContact(consents)) {
+        // ruleid: log.jvm.stdout
+        println(email)
+    }
+}
+
+// scenario: consent-caller
+fun consentedSend(email: String) {
+    // Only ever called after a consent check: reported with it.
+    // ruleid: log.jvm.stdout
+    println(email)
+}
+
+fun consentCaller(email: String, consents: Consents) {
+    if (consents.hasConsent()) consentedSend(email)
+}

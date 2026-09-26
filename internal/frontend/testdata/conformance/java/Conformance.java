@@ -366,4 +366,29 @@ class Conformance {
         java.util.function.Consumer<String> printer = makePrinter();
         printer.accept(email);
     }
+
+    // scenario: consent-helper
+    boolean mayContact(Consents consents) {
+        return consents.hasConsent();
+    }
+
+    void consentHelper(String email, Consents consents) {
+        if (mayContact(consents)) {
+            // ruleid: log.jvm.stdout
+            System.out.println(email);
+        }
+    }
+
+    // scenario: consent-caller
+    void consentedSend(String email) {
+        // Only ever called after a consent check: reported with it.
+        // ruleid: log.jvm.stdout
+        System.out.println(email);
+    }
+
+    void consentCaller(String email, Consents consents) {
+        if (consents.hasConsent()) {
+            consentedSend(email);
+        }
+    }
 }

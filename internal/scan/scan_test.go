@@ -185,7 +185,7 @@ func TestFullScanRoutesFilesToFrontends(t *testing.T) {
 	if fx.frontends.opts.FS == nil || fx.frontends.opts.Root != "/repo" || fx.frontends.opts.KnownFunc == nil {
 		t.Errorf("frontend options not wired: %+v", fx.frontends.opts)
 	}
-	if fx.analyzer.input.Rules == nil || fx.analyzer.input.Schema == nil || fx.analyzer.input.Lookup == nil {
+	if fx.analyzer.input.Rules == nil || fx.analyzer.input.Schema == nil || fx.analyzer.input.Lookup == nil || fx.analyzer.input.Callers != nil {
 		t.Errorf("analysis input not wired: %+v", fx.analyzer.input)
 	}
 	if len(fx.schemas.built) != 1 || fx.schemas.built[0].Name != "proto:api/user.proto" {
@@ -223,6 +223,9 @@ func TestDiffModeAddsCallersFromCachedCallGraph(t *testing.T) {
 	}
 	if !fx.store.Has("go:other.go") {
 		t.Error("partial update dropped an untouched function")
+	}
+	if fx.analyzer.input.Callers == nil {
+		t.Error("a partial run does not give the analysis the cached callers")
 	}
 }
 

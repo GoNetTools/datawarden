@@ -369,3 +369,26 @@ def make_printer():
 def closure_return(email: str):
     printer = make_printer()
     printer(email)
+
+
+# scenario: consent-helper
+def may_contact(consents):
+    return consents.has_consent()
+
+
+def consent_helper(email: str, consents):
+    if email and may_contact(consents):
+        # ruleid: log.py.print
+        print(email)
+
+
+# scenario: consent-caller
+def consented_send(email: str):
+    # Only ever called after a consent check: reported with it.
+    # ruleid: log.py.print
+    print(email)
+
+
+def consent_caller(email: str, consents):
+    if consents.has_consent():
+        consented_send(email)

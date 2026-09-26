@@ -376,3 +376,26 @@ export function closureReturn(email: string) {
   const printer = makePrinter();
   printer(email);
 }
+
+// scenario: consent-helper
+function mayContact(consents: Consents): boolean {
+  return consents.hasConsent();
+}
+
+export function consentHelper(email: string, consents: Consents) {
+  if (mayContact(consents)) {
+    // ruleid: log.ts.console
+    console.log(email);
+  }
+}
+
+// scenario: consent-caller
+function consentedSend(email: string) {
+  // Only ever called after a consent check: reported with it.
+  // ruleid: log.ts.console
+  console.log(email);
+}
+
+export function consentCaller(email: string, consents: Consents) {
+  if (consents.hasConsent()) consentedSend(email);
+}

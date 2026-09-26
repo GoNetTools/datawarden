@@ -368,3 +368,26 @@ func closureReturn(email string) {
 	printer := makePrinter()
 	printer(email)
 }
+
+// scenario: consent-helper
+func mayContact(consents consentStore) bool { return consents.HasConsent() }
+
+func consentHelper(email string, consents consentStore) {
+	if mayContact(consents) {
+		// ruleid: log.go.stdlib
+		log.Println("tracking", email)
+	}
+}
+
+// scenario: consent-caller
+func consentedSend(email string) {
+	// Only ever called after a consent check: reported with it.
+	// ruleid: log.go.stdlib
+	log.Println("tracking", email)
+}
+
+func consentCaller(email string, consents consentStore) {
+	if consents.HasConsent() {
+		consentedSend(email)
+	}
+}

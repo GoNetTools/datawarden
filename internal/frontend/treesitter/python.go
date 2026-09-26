@@ -819,6 +819,21 @@ func (pb *pyBuilder) expr(n *sitter.Node) ir.VarID {
 			vs = append(vs, pb.expr(c))
 		}
 		return pb.logic(n, vs...)
+	case "boolean_operator":
+		// a and b evaluates to one of its operands, so it keeps their
+		// data (unlike &&), and names its operator so that a branch on
+		// it is read as both checks (consent guards).
+		var vs []ir.VarID
+		for _, c := range named(n) {
+			vs = append(vs, pb.expr(c))
+		}
+		op := "or"
+		if o := n.ChildByFieldName("operator"); o != nil && pb.text(o) == "and" {
+			op = "and"
+		}
+		dst := pb.temp(n)
+		pb.fn.Compute(dst, pb.pos(n), op, vs...)
+		return dst
 	case "conditional_expression":
 		k := named(n)
 		var parts []ir.VarID
@@ -867,7 +882,7 @@ func (pb *pyBuilder) expr(n *sitter.Node) ir.VarID {
 	case "comment":
 		return pb.temp(n)
 	}
-	// binary_operator, boolean_operator, concatenated_string, list, tuple,
+	// binary_operator, concatenated_string, list, tuple,
 	// set, expression_list, pattern_list: the value carries every part.
 	var parts []ir.VarID
 	for _, c := range named(n) {

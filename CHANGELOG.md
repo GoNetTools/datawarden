@@ -58,6 +58,9 @@ All notable changes to datawarden are documented here. The format follows [Keep 
 
 ### Fixed
 
+- Consent guards are found in more places: a helper that returns a consent check (`if (mayContact(c))`), Python `and` (`if email and consents.has_consent():`), and the callers of a function that is only ever called after a check. `policy.consent_guarded` (also per class) accepts guarded flows to the listed destination kinds.
+- `datawarden ir [paths...]` prints the IR of files (`--func`, `--format json`, `--classes`, `--verify`).
+
 - A closure passed to a function that runs it before returning (`forEach`, `map`, `filter`, `apply`, `let`, `sort.Slice`, …) sees its captured variables as they are at the call: `items.forEach { log(xs) }; xs.add(email)` is no longer reported. Closures passed to other functions are still treated as possibly running later.
 - Closures kept in a field, added to a collection or returned by a function are followed to where they are called: a handler passed to a constructor and called by another method (`Notifier { log(it) }.send(email)`), listeners added to a list and called in a loop (an event bus), and a closure returned by a factory and called by the caller (`makePrinter()(email)`). A call runs the closures held in the variable it calls, in its receiver (`h.accept(v)`, `r.run()`) or in the field it is named after (`this.onSend(v)`); calling a local that holds a closure no longer matches a sink rule of the same name (`log(email)` with `val log = makeLogger()`). Go functions used as values, such as a func literal that captures nothing or a named function passed as a callback, are closures in the IR. The cache format changes.
 - Python: assigning a name inside a nested function binds a local of that function unless it is declared `nonlocal` or `global`; it no longer taints the enclosing function's variable.

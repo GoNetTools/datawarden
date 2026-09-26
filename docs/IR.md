@@ -133,7 +133,9 @@ dominates `P`. Dominance is computed over normal and exceptional edges
 - **Control dependence**: a sink in a block dominated by the "consent
   given" successor of a branch on a consent check (`hasConsent()`,
   `user.optedIn`, `!consents.hasConsent()` with the successors swapped)
-  is reported with that check as a guard (`analysis/guard.go`).
+  is reported with that check as a guard (`analysis/guard.go`). A call
+  of a function whose every return is a consent check is one, and a
+  function every call of which is guarded inherits the checks.
 - **Closures**: `closure` values flow, over the whole program, through
   assigns and phis, into and out of fields (by owner type and field
   name) and collections, into the parameters of the functions they are

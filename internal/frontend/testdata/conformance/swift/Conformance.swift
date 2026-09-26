@@ -388,3 +388,28 @@ func closureReturn(email: String) {
     let printer = makePrinter()
     printer(email)
 }
+
+// scenario: consent-helper
+func mayContact(_ consents: Consents) -> Bool {
+    return consents.hasConsent()
+}
+
+func consentHelper(email: String, consents: Consents) {
+    if mayContact(consents) {
+        // ruleid: log.swift.print
+        print(email)
+    }
+}
+
+// scenario: consent-caller
+func consentedSend(email: String) {
+    // Only ever called after a consent check: reported with it.
+    // ruleid: log.swift.print
+    print(email)
+}
+
+func consentCaller(email: String, consents: Consents) {
+    if consents.hasConsent() {
+        consentedSend(email: email)
+    }
+}

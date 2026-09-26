@@ -595,6 +595,9 @@ func (l *lowerer) funcValues(fn *ssa.Function) []*ssa.Function {
 			continue
 		}
 		for _, ins := range b.Instrs {
+			if _, ok := ins.(*ssa.DebugRef); ok {
+				continue // names the source expression, not a use
+			}
 			_, call := ins.(ssa.CallInstruction)
 			for i, op := range ins.Operands(nil) {
 				if call && i == 0 {

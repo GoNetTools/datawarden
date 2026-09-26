@@ -357,6 +357,67 @@ func TestConsentGuardsInEngine(t *testing.T) {
 	}
 }
 
+// A helper returning a consent check guards like the check, and a function
+// only called after a check inherits it, unless a caller outside the run
+// may call it without one.
+func TestHelperAndCallerGuards(t *testing.T) {
+	// fun mayContact(c) = c.hasConsent()
+	helper := newFunc("p.mayContact")
+	hc := helper.AddParam("c", "", pos(1))
+	r := helper.Temp(pos(1))
+	helper.Emit(ir.Instr{Op: ir.OpCall, Dst: r, Args: []ir.VarID{hc}, Call: &ir.Call{Name: "hasConsent", HasRecv: true}, Pos: pos(1)})
+	helper.Return(pos(1), r)
+	// fun send(email) = log(email)
+	send := newFunc("p.send")
+	logTo(send, send.AddParam("email", "String", pos(5)), 6)
+	// fun caller(email, c) { if (mayContact(c)) send(email) }
+	caller := newFunc("p.caller")
+	email := caller.AddParam("email", "String", pos(10))
+	c := caller.AddParam("c", "", pos(10))
+	ok := caller.Temp(pos(11))
+	caller.Emit(ir.Instr{Op: ir.OpCall, Dst: ok, Args: []ir.VarID{c}, Call: &ir.Call{Name: "mayContact", Target: "p.mayContact"}, Pos: pos(11)})
+	then := caller.NewBlock()
+	caller.Emit(ir.Instr{Op: ir.OpCall, Dst: caller.Temp(pos(12)), Args: []ir.VarID{email}, Call: &ir.Call{Name: "send", Target: "p.send"}, Pos: pos(12)})
+	join := caller.NewBlock(then)
+	caller.Branch(0, ok, then, join)
+
+	run := func(callers func(string) []string) *Result {
+		rs, err := rules.Load(nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		names := detect.NewClassifier(detect.DefaultTaxonomy())
+		res, err := Analyze(context.Background(), []*ir.Func{helper, send, caller}, Options{Rules: rs, Schema: detect.BuildSchema(names, nil), Names: names, Callers: callers})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+	res := run(nil)
+	if len(res.Flows) == 0 {
+		t.Fatal("no flows")
+	}
+	for _, fl := range res.Flows {
+		if len(fl.Guards) != 1 || !strings.Contains(fl.Guards[0], "mayContact() (hasConsent())") {
+			t.Errorf("flow from %s at %s: guards %v", fl.Source, fl.Sink, fl.Guards)
+		}
+	}
+	res = run(func(id string) []string {
+		if id == "p.send" {
+			return []string{"p.caller", "p.elsewhere"}
+		}
+		return nil
+	})
+	if fl := flowAt(res, 6); fl == nil {
+		t.Fatal("no flow")
+	}
+	for _, fl := range res.Flows {
+		if fl.Source.Line == 5 && len(fl.Guards) != 0 {
+			t.Errorf("a caller outside the run may call send unguarded: %v", fl.Guards)
+		}
+	}
+}
+
 // Access paths: a.b.c is tracked through loads, stores and summaries.
 func TestAccessPaths(t *testing.T) {
 	// fun fill(u, v) { u.profile.note = v }

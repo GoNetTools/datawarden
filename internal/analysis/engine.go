@@ -50,6 +50,9 @@ type Options struct {
 	// Classes is the class table that dynamically dispatched calls are
 	// resolved against.
 	Classes []*ir.Class
+	// Callers returns the callers of a function known from earlier runs,
+	// when only part of the program is analysed (PR mode), or is nil.
+	Callers func(id string) []string
 }
 
 // RuleMatcher finds sink, source and transform rules for a call
@@ -81,6 +84,7 @@ type Input struct {
 	Lookup            func(id string) *Summary
 	FirstPartyDomains []string
 	Classes           []*ir.Class
+	Callers           func(id string) []string
 }
 
 // Engine is the analysis service. Its name classifier and threshold are
@@ -92,7 +96,7 @@ type Engine struct {
 
 // Analyze runs the analysis for one scan.
 func (e Engine) Analyze(ctx context.Context, funcs []*ir.Func, in Input) (*Result, error) {
-	return Analyze(ctx, funcs, Options{Rules: in.Rules, Schema: in.Schema, Names: e.Names, Lookup: in.Lookup, FirstPartyDomains: in.FirstPartyDomains, MinConf: e.MinConf, Classes: in.Classes})
+	return Analyze(ctx, funcs, Options{Rules: in.Rules, Schema: in.Schema, Names: e.Names, Lookup: in.Lookup, FirstPartyDomains: in.FirstPartyDomains, MinConf: e.MinConf, Classes: in.Classes, Callers: in.Callers})
 }
 
 // Result is the output of Analyze.
@@ -349,8 +353,11 @@ func derive(f *fact, pos ir.Pos, decay float64, xf ...string) *fact {
 }
 
 type analyzer struct {
-	cha       *hierarchy
-	flow      *closureFlow
+	cha  *hierarchy
+	flow *closureFlow
+	// guards are, per function, the consent checks guarding each block:
+	// its own branches and those every caller passed (guard.go).
+	guards    map[string][][]string
 	opts      Options
 	summaries map[string]*Summary
 	digests   map[string]string
@@ -405,6 +412,7 @@ func Analyze(ctx context.Context, funcs []*ir.Func, opts Options) (*Result, erro
 		}
 		sort.Strings(cg[f.ID])
 	}
+	a.guards = a.consentGuards(funcs)
 	for _, scc := range tarjan(funcs, cg, a.funcs) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -443,6 +451,64 @@ func Analyze(ctx context.Context, funcs []*ir.Func, opts Options) (*Result, erro
 		res.Flows = append(res.Flows, a.flows[k])
 	}
 	return res, nil
+}
+
+// consentGuards computes the consent checks guarding each block of each
+// function: branches on a consent check (or on a helper returning one) in
+// the function, and the checks guarding every call of it.
+func (a *analyzer) consentGuards(funcs []*ir.Func) map[string][][]string {
+	helpers := consentHelpers(funcs)
+	blocks := map[string][][]string{}
+	sites := map[string][]callSite{}
+	for _, f := range funcs {
+		blocks[f.ID] = guards(f, helpers)
+		for i := range f.Instrs {
+			in := &f.Instrs[i]
+			var ts []string
+			switch {
+			case in.Op == ir.OpClosure:
+				ts = []string{in.Func}
+			case in.Op == ir.OpNew && in.Call != nil:
+				ts = []string{in.Call.Target}
+			case in.Op == ir.OpCall && in.Call != nil:
+				ts = a.cha.targets(in.Call)
+			}
+			for _, t := range ts {
+				if _, ok := a.funcs[t]; ok && t != f.ID {
+					sites[t] = append(sites[t], callSite{fn: f.ID, block: in.Block})
+				}
+			}
+		}
+	}
+	if a.opts.Callers != nil {
+		// A function with a caller outside this run may be called
+		// without the check.
+		for t := range sites {
+			for _, c := range a.opts.Callers(t) {
+				if _, ok := a.funcs[c]; !ok {
+					sites[t] = append(sites[t], callSite{fn: c, block: -1})
+					break
+				}
+			}
+		}
+	}
+	inherited := inheritedGuards(sites, blocks)
+	out := map[string][][]string{}
+	for _, f := range funcs {
+		bg := blocks[f.ID]
+		if inh := inherited[f.ID]; len(inh) > 0 {
+			merged := make([][]string, len(f.Blocks))
+			for b := range merged {
+				if b < len(bg) {
+					merged[b] = append(merged[b], bg[b]...)
+				}
+				merged[b] = mergeXf(merged[b], inh...)
+			}
+			bg = merged
+		}
+		out[f.ID] = bg
+	}
+	return out
 }
 
 // reportFunc is the function a flow is reported in: for a closure, the
@@ -635,7 +701,7 @@ func shortType(t string) string {
 
 func (a *analyzer) analyzeFunc(fn *ir.Func) *Summary {
 	st := &state{facts: make([]map[string]*fact, len(fn.Vars)), stores: map[ir.VarID]map[string]map[string]*fact{}, minC: a.opts.MinConf,
-		order: newOrder(fn), multi: multiDefined(fn), fluent: fluentResults(fn), loads: loadsOf(fn), guards: guards(fn), last: lastInstrs(fn),
+		order: newOrder(fn), multi: multiDefined(fn), fluent: fluentResults(fn), loads: loadsOf(fn), guards: a.guards[fn.ID], last: lastInstrs(fn),
 		closures: a.flow.local(fn.ID)}
 	a.seed(st, fn)
 	sum := &Summary{}

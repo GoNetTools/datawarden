@@ -59,6 +59,8 @@ type Cache interface {
 	Has(id string) bool
 	Lookup(id string) *analysis.Summary
 	Callers(files []string, depth int) []string
+	// CallersOf returns the cached callers of a function.
+	CallersOf(id string) []string
 	SchemaTypes(skip map[string]bool) []*ir.TypeDecl
 	Classes(skip map[string]bool) []*ir.Class
 	ResetSchema()
@@ -206,9 +208,15 @@ func (s *Scanner) Run(ctx context.Context, req Request) (*Result, error) {
 	res.Schema, classes = s.buildSchema(req, all, prog, lowered, res.Mode)
 
 	// Taint analysis.
-	ar, err := s.Analyzer.Analyze(ctx, prog.Funcs, analysis.Input{
+	in := analysis.Input{
 		Rules: req.Rules, Schema: res.Schema, Lookup: req.Cache.Lookup, FirstPartyDomains: cfg.FirstPartyDomains, Classes: classes,
-	})
+	}
+	if res.Mode != ModeFull {
+		// Not every function is analysed: callers outside this run are
+		// known only from the cache.
+		in.Callers = req.Cache.CallersOf
+	}
+	ar, err := s.Analyzer.Analyze(ctx, prog.Funcs, in)
 	if err != nil {
 		return nil, err
 	}
