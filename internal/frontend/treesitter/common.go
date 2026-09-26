@@ -416,6 +416,18 @@ type builder struct {
 	catchers []ir.VarID
 	caught   ir.VarID
 	escaped  ir.VarID
+
+	// JVM reflection: variables holding a Class, Field or Method handle,
+	// and proxies with their invocation handler's callback input.
+	refl    map[ir.VarID]reflHandle
+	proxies map[ir.VarID]ir.VarID
+}
+
+// reflHandle is a reflective handle whose target is known from constant
+// names: kind 'c' a class, 'f' a field of it, 'm' a method of it.
+type reflHandle struct {
+	kind          byte
+	class, member string
 }
 
 // exit is where a path leaves a construct: its scope and block.
@@ -963,6 +975,16 @@ func (b *builder) ident(name string, n *sitter.Node) ir.VarID {
 
 func (b *builder) assign(dst ir.VarID, n *sitter.Node, args ...ir.VarID) {
 	b.fn.Assign(dst, b.pos(n), args...)
+	// Reflective handles and proxies stay what they are through copies
+	// and casts.
+	for _, a := range args {
+		if r, ok := b.refl[a]; ok && dst >= 0 {
+			b.markRefl(dst, r)
+		}
+		if cb, ok := b.proxies[a]; ok && dst >= 0 {
+			b.proxies[dst] = cb
+		}
+	}
 	// A variable holding a lambda (show = { log(it) }) is one: calling it
 	// feeds the lambda's parameters.
 	if _, has := b.lambdas[dst]; !has {
@@ -1070,7 +1092,18 @@ func (b *builder) caughtValue(n *sitter.Node) ir.VarID {
 
 // emitCall emits a call and returns its result variable.
 func (b *builder) emitCall(n *sitter.Node, c *ir.Call, args []ir.VarID, resultType string) ir.VarID {
+	if v, ok := b.reflectCall(n, c, args); ok {
+		return v
+	}
 	dst := b.fn.Named("", resultType, b.pos(n))
+	defer b.noteReflect(c, args, dst)
+	// A call on a proxy runs its invocation handler with the arguments.
+	if c.HasRecv && len(args) > 0 {
+		if cb, ok := b.proxies[args[0]]; ok {
+			c.Callbacks = append(c.Callbacks, cb)
+			c.Target, c.Targets = "", nil
+		}
+	}
 	if c.Construct && c.Ctor == "" {
 		c.Ctor = b.p.ctorID(c.Callee)
 	}
@@ -1149,6 +1182,122 @@ func (b *builder) lambda(n *sitter.Node, params []*sitter.Node, paramNames []str
 	}
 	b.lambdas[val] = cb
 	return val
+}
+
+func (b *builder) markRefl(v ir.VarID, r reflHandle) {
+	if b.refl == nil {
+		b.refl = map[ir.VarID]reflHandle{}
+	}
+	b.refl[v] = r
+}
+
+// handle returns the reflective handle v holds: one recorded for it, or a
+// class literal (User.class, User::class) lowered as the constant
+// "<class>.class".
+func (b *builder) handle(v ir.VarID) (reflHandle, bool) {
+	if r, ok := b.refl[v]; ok {
+		return r, true
+	}
+	if v >= 0 && int(v) < len(b.fn.Vars) {
+		if c := b.fn.Vars[v].Const; c != nil && strings.HasSuffix(*c, ".class") {
+			return reflHandle{kind: 'c', class: b.p.resolveType(b.f, strings.TrimSuffix(*c, ".class"))}, true
+		}
+	}
+	return reflHandle{}, false
+}
+
+func (b *builder) constString(v ir.VarID) (string, bool) {
+	if v < 0 || int(v) >= len(b.fn.Vars) || b.fn.Vars[v].Const == nil {
+		return "", false
+	}
+	return *b.fn.Vars[v].Const, true
+}
+
+// reflectCall lowers a use of a reflective handle as what it does:
+// field.get(obj) reads the field, field.set(obj, v) writes it,
+// method.invoke(obj, args...) calls the method, cls.newInstance() and
+// ctor.newInstance(args...) construct the class.
+func (b *builder) reflectCall(n *sitter.Node, c *ir.Call, args []ir.VarID) (ir.VarID, bool) {
+	if !c.HasRecv || len(args) == 0 {
+		return ir.NoVar, false
+	}
+	h, ok := b.handle(args[0])
+	if !ok {
+		return ir.NoVar, false
+	}
+	switch {
+	case h.kind == 'f' && strings.HasPrefix(c.Name, "get") && len(args) >= 2:
+		return b.load(args[1], h.member, h.class, n), true
+	case h.kind == 'f' && c.Name == "call" && len(args) >= 2: // Kotlin KProperty.call(obj)
+		return b.load(args[1], h.member, h.class, n), true
+	case h.kind == 'f' && strings.HasPrefix(c.Name, "set") && len(args) >= 3:
+		b.store(args[1], h.member, h.class, args[2], n)
+		return b.temp(n), true
+	case h.kind == 'm' && (c.Name == "invoke" || c.Name == "call") && len(args) >= 2:
+		id := b.p.methodID(h.class, h.member, 0)
+		call := &ir.Call{Callee: h.class + "." + h.member, Name: h.member, HasRecv: true, RecvType: h.class}
+		if id != "" {
+			call.Callee, call.Target = id, id
+		}
+		return b.emitCall(n, call, args[1:], ""), true
+	case h.kind == 'c' && c.Name == "newInstance":
+		return b.emitCall(n, &ir.Call{Callee: h.class, Name: shortName(h.class), Construct: true}, args[1:], h.class), true
+	}
+	return ir.NoVar, false
+}
+
+// noteReflect records the handle a reflective call returns: Class.forName
+// and getClass give a class; getDeclaredField, getMethod and their
+// variants on a class give a field or method of it; a constructor handle
+// stays the class. Proxy.newProxyInstance gives a proxy that runs the
+// handler lambda.
+func (b *builder) noteReflect(c *ir.Call, args []ir.VarID, dst ir.VarID) {
+	switch c.Name {
+	case "forName":
+		if len(args) > 0 && strings.Contains(c.Callee+c.RecvType+c.RecvText, "Class") {
+			if name, ok := b.constString(args[len(args)-1]); ok {
+				b.markRefl(dst, reflHandle{kind: 'c', class: name})
+			}
+		}
+		return
+	case "getClass":
+		if c.HasRecv && c.RecvType != "" {
+			b.markRefl(dst, reflHandle{kind: 'c', class: c.RecvType})
+		}
+		return
+	case "newProxyInstance":
+		if len(args) > 0 {
+			if cb, ok := b.lambdas[args[len(args)-1]]; ok {
+				if b.proxies == nil {
+					b.proxies = map[ir.VarID]ir.VarID{}
+				}
+				b.proxies[dst] = cb
+			}
+		}
+		return
+	}
+	if !c.HasRecv || len(args) == 0 {
+		return
+	}
+	h, ok := b.handle(args[0])
+	if !ok || h.kind != 'c' {
+		return
+	}
+	switch c.Name {
+	case "getDeclaredField", "getField", "getDeclaredMethod", "getMethod":
+		if len(args) < 2 {
+			return
+		}
+		if name, ok := b.constString(args[1]); ok {
+			kind := byte('m')
+			if strings.HasSuffix(c.Name, "Field") {
+				kind = 'f'
+			}
+			b.markRefl(dst, reflHandle{kind: kind, class: h.class, member: name})
+		}
+	case "getDeclaredConstructor", "getConstructor":
+		b.markRefl(dst, h)
+	}
 }
 
 func (b *builder) finish() *ir.Func {

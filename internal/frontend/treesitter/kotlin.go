@@ -454,6 +454,57 @@ func (kp *ktProgram) lowerClass(f *srcFile, n *sitter.Node, outer *classInfo) {
 	}
 }
 
+// callableRef lowers a Kotlin callable reference: User::class is the class
+// (for reflection), User::email a property handle whose get(obj) reads the
+// field, and Sender::send or sender::send a function value that calls the
+// method with its arguments.
+func (kb *ktBuilder) callableRef(n *sitter.Node) ir.VarID {
+	kids := named(n)
+	text := kb.text(n)
+	if len(kids) == 1 && strings.HasSuffix(text, "::class") {
+		return kb.constVar(kb.kp.resolveType(kb.f, kb.text(kids[0]))+".class", n)
+	}
+	if len(kids) < 2 {
+		return kb.temp(n)
+	}
+	owner, member := kids[0], kb.text(kids[len(kids)-1])
+	cls := kb.kp.resolveType(kb.f, kb.text(owner))
+	if c := kb.kp.class(cls); c != nil {
+		if _, isField := c.fields[member]; isField {
+			v := kb.temp(n)
+			kb.markRefl(v, reflHandle{kind: 'f', class: c.name, member: member})
+			return v
+		}
+	}
+	return kb.lambda(n, nil, nil, true, func() ir.VarID {
+		it := kb.scope["it"]
+		if c := kb.kp.class(cls); c != nil {
+			// Unbound: the first argument is the receiver.
+			call := &ir.Call{Callee: c.name + "." + member, Name: member, HasRecv: true, RecvType: c.name}
+			if id := kb.kp.methodID(c.name, member, 0); id != "" {
+				call.Callee, call.Target = id, id
+			}
+			return kb.emitCall(n, call, []ir.VarID{it, it}, "")
+		}
+		if _, local := kb.scope[kb.text(owner)]; local || kb.this != ir.NoVar {
+			// Bound: obj::send, this::send. The grammar parses the
+			// receiver as a type name, so it is looked up by name.
+			recv := kb.ident(kb.text(owner), owner)
+			if kb.text(owner) == "this" {
+				recv = kb.this
+			}
+			typ := kb.fn.Vars[recv].Type
+			call := &ir.Call{Callee: typ + "." + member, Name: member, HasRecv: true, RecvType: typ, RecvText: trimText(kb.text(owner))}
+			if id := kb.kp.methodID(typ, member, 0); id != "" {
+				call.Callee, call.Target = id, id
+			}
+			return kb.emitCall(n, call, []ir.VarID{recv, it}, "")
+		}
+		// A top-level function: ::send.
+		return kb.emitCall(n, &ir.Call{Callee: member, Name: member}, []ir.VarID{it}, "")
+	})
+}
+
 // noteGetter records that property prop of ci has a custom getter, lowered
 // as the JVM accessor getProp.
 func (kp *ktProgram) noteGetter(ci *classInfo, prop string) {
@@ -810,6 +861,18 @@ func (kb *ktBuilder) expr(n *sitter.Node) ir.VarID {
 		owner := kb.typeOf(kids[0])
 		obj := kb.expr(kids[0])
 		field := kb.text(fieldNode)
+		switch field {
+		case "java", "kotlin", "javaObjectType":
+			if _, ok := kb.handle(obj); ok {
+				return obj // User::class.java is still the class
+			}
+		case "javaClass":
+			if owner != "" {
+				v := kb.temp(n)
+				kb.markRefl(v, reflHandle{kind: 'c', class: owner})
+				return v
+			}
+		}
 		if strings.Contains(owner, ".") && kb.kp.class(owner) == nil && field != "" {
 			// A property of a Java class (telephony.line1Number) is its
 			// getter, getLine1Number(), which is what rules name.
@@ -907,7 +970,9 @@ func (kb *ktBuilder) expr(n *sitter.Node) ir.VarID {
 	case "jump_expression", "assignment", "property_declaration":
 		kb.stmt(n)
 		return kb.temp(n)
-	case "callable_reference", "type_test", "line_comment", "multiline_comment":
+	case "callable_reference":
+		return kb.callableRef(n)
+	case "type_test", "line_comment", "multiline_comment":
 		return kb.temp(n)
 	default:
 		if ktBool[t] {
