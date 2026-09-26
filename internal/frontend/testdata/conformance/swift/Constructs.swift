@@ -265,3 +265,41 @@ func caseBinding(email: String?) {
         break
     }
 }
+
+// Swift 5.9–6 syntax the grammar predates (typed throws, ownership
+// modifiers, suppressed conformances, await in conditions, macros) is
+// blanked before parsing; the code around it is analysed as usual.
+enum LookupError: Error { case missing }
+
+struct Token: ~Copyable {
+    let value: String
+}
+
+func lookup(_ email: consuming String) async throws(LookupError) -> sending String {
+    email
+}
+
+func modernSyntax(email: String) async {
+    if let found = try? await lookup(email),
+        !found.isEmpty
+    {
+        // ruleid: log.swift.print
+        print(found)
+    }
+    let other = "anonymous"
+    // ok: log.swift.print
+    print(other)
+}
+
+func emptyPattern(result: Result<Void, LookupError>, email: String) {
+    switch result {
+    case .success(): print("done")
+    case .failure(_):
+        // ruleid: log.swift.print
+        print(email)
+    }
+}
+
+#Preview {
+    Text("preview")
+}

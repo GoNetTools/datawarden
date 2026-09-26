@@ -38,6 +38,7 @@ type swProgram struct {
 
 func (fe *swFrontend) Lower(ctx context.Context, files []string) (*ir.Module, error) {
 	sp := &swProgram{program: newProgram(lang.Swift, fe.opts), static: map[string]bool{}, lowered: map[string]int{}, decls: map[string]*ir.TypeDecl{}}
+	sp.normalize = swiftNormalize
 	sp.parse(ctx, files, swift.GetLanguage())
 	for _, f := range sp.files {
 		sp.collect(f, f.root, "")

@@ -4,6 +4,10 @@ All notable changes to datawarden are documented here. The format follows [Keep 
 
 ## [Unreleased]
 
+### Fixed
+
+- Kotlin and Swift files that failed to parse on real code are read in full (#44). Kotlin now uses tree-sitter-kotlin 1.1 (tree-sitter-grammars), which parses `fun interface`, trailing commas in `when` conditions, function types with qualified receivers, `in` conditions, `as?` on a continuation line and assignments to properties of call results: 0 of 363 real-world Kotlin files fail to parse (8 before). Two quirks of that grammar are corrected while lowering: `"$name"` in a one-line string is an interpolation, and `!a.b()` negates the call rather than `a`. Swift keeps its grammar, the best of the available versions on real code; syntax newer than it that moves no data (typed `throws(E)`, `consuming`/`borrowing`/`sending`, `~Copyable`, `@unchecked`, `await`, `case .x():` and `#Preview { }` blocks) is blanked before parsing without moving any position. The parse warnings on Now in Android and immich are gone. The cache format changes.
+
 ## [0.1.0] - 2026-09-26
 
 First public release.

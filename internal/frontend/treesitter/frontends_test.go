@@ -7,6 +7,9 @@ package treesitter
 
 import (
 	"context"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -284,7 +287,7 @@ def f(flag):
 // Code inside syntax the grammar cannot parse is still lowered, and the
 // file gets a warning instead of being dropped silently.
 func TestSyntaxErrorsAreRecoveredAndReported(t *testing.T) {
-	m := lower(t, NewKotlin, map[string]string{"a/G.kt": "package a\nclass M { companion object { fun s(t: String) { println(t) } } }\nfun d(email: String) { log(email) }\n"})
+	m := lower(t, NewKotlin, map[string]string{"a/G.kt": "package a\nfun s(t: String) { println(t) ) }\nfun d(email: String) { log(email) }\n"})
 	if calls(m)["log"] == nil {
 		t.Error("the function after the syntax error was dropped")
 	}
@@ -362,5 +365,94 @@ fun cases(c: Consents, s: Int) {
 	sw := lower(t, NewSwift, map[string]string{"l.swift": "func f(n: Int) {\n    var i = n\n    repeat { i -= 1 } while i > 0\n}\n"})
 	if got := branchesOn(sw, "f"); len(got) != 1 {
 		t.Errorf("Swift repeat-while branches on %v", got)
+	}
+}
+
+// Swift 5.9–6 syntax the grammar predates parses without errors once
+// normalized (#44): typed throws, ownership modifiers, ~Copyable,
+// @unchecked, await in conditions, empty associated-value patterns and
+// #Preview blocks. The code after each is lowered.
+func TestSwiftNewerSyntaxParses(t *testing.T) {
+	src := `import SwiftUI
+
+struct Mutex<Value: ~Copyable>: ~Copyable, @unchecked Sendable {
+  init(_ initialValue: consuming sending Value) {}
+  borrowing func withLock<R: ~Copyable, E: Error>(_ body: (inout sending Value) throws(E) -> sending R) throws(E) -> sending R {
+    fatalError()
+  }
+}
+
+func fetch(id: String) async throws(FetchError) -> Data { Data() }
+
+func memories(api: API) async -> Entry? {
+  for memory in api.memories {
+    if let asset = memory.assets.first,
+      let entry = try? await build(asset)
+    {
+      return entry
+    }
+  }
+  guard
+    let randomImage = try? await api.fetchSearchResults().first
+  else {
+    return nil
+  }
+  return first(randomImage)
+}
+
+func handle(result: Result<Void, Failure>) {
+  switch result {
+    case .success(): complete(true)
+    case .failure(_): close()
+  }
+}
+
+#Preview(as: .systemSmall) {
+  Widget()
+} timeline: {
+  Entry.placeholder
+}
+
+func after(email: String) { log(email) }
+`
+	m := lower(t, NewSwift, map[string]string{"W.swift": src})
+	if len(m.Warnings) != 0 {
+		t.Errorf("warnings = %q", m.Warnings)
+	}
+	for _, name := range []string{"first", "complete", "close", "log"} {
+		if calls(m)[name] == nil {
+			t.Errorf("call of %s not lowered", name)
+		}
+	}
+}
+
+// The conformance and construct programs are valid code: every grammar
+// must read them without errors, or the constructs they test go
+// untested (#44).
+func TestConformanceProgramsParseCleanly(t *testing.T) {
+	for dir, fe := range map[string]func(frontend.Options) frontend.Frontend{
+		"kotlin": NewKotlin, "java": NewJava, "swift": NewSwift, "python": NewPython, "typescript": NewTypeScript,
+	} {
+		root := filepath.Join("..", "testdata", "conformance", dir)
+		var files []string
+		err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+			if err == nil && !d.IsDir() {
+				rel, _ := filepath.Rel(root, p)
+				files = append(files, filepath.ToSlash(rel))
+			}
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		m, err := fe(frontend.Options{FS: os.DirFS(root)}).Lower(context.Background(), files)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, w := range m.Warnings {
+			if strings.Contains(w, "syntax error") {
+				t.Errorf("%s: %s", dir, w)
+			}
+		}
 	}
 }

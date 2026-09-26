@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	sitter "github.com/smacker/go-tree-sitter"
-	"github.com/smacker/go-tree-sitter/kotlin"
+	tskotlin "github.com/tree-sitter-grammars/tree-sitter-kotlin/bindings/go"
 
 	"github.com/GoNetTools/datawarden/internal/frontend"
 	"github.com/GoNetTools/datawarden/internal/ir"
@@ -41,7 +41,7 @@ type ktProgram struct {
 
 func (fe *ktFrontend) Lower(ctx context.Context, files []string) (*ir.Module, error) {
 	kp := &ktProgram{program: newProgram(lang.Kotlin, fe.opts), extra: map[string]*ktExtra{}, extRecv: map[string]string{}, topRet: map[string]string{}}
-	kp.parse(ctx, files, kotlin.GetLanguage())
+	kp.parse(ctx, files, ktLanguage)
 	for _, f := range kp.files {
 		kp.header(f)
 		kp.collect(f, f.root, f.pkg, nil)
@@ -61,28 +61,32 @@ func (fe *ktFrontend) Lower(ctx context.Context, files []string) (*ir.Module, er
 	return kp.mod, nil
 }
 
+// ktLanguage is tree-sitter-kotlin 1.x (tree-sitter-grammars), which reads
+// current Kotlin: fun interfaces, trailing commas in when conditions,
+// function types with qualified receivers, assignments to properties of
+// call results.
+var ktLanguage = sitter.NewLanguage(tskotlin.Language())
+
 func (kp *ktProgram) header(f *srcFile) {
 	if ph := firstOf(f.root, "package_header"); ph != nil {
-		if id := firstOf(ph, "identifier"); id != nil {
+		if id := firstOf(ph, "qualified_identifier", "identifier"); id != nil {
 			f.pkg = f.text(id)
 		}
 	}
-	for _, il := range allOf(f.root, "import_list") {
-		for _, ih := range allOf(il, "import_header") {
-			id := firstOf(ih, "identifier")
-			if id == nil {
-				continue
-			}
-			q := f.text(id)
-			switch {
-			case firstOf(ih, "wildcard_import") != nil:
-				f.wildcards = append(f.wildcards, q)
-			case firstOf(ih, "import_alias") != nil:
-				alias := firstOf(firstOf(ih, "import_alias"), "type_identifier", "simple_identifier")
-				f.imports[f.text(alias)] = q
-			default:
-				f.imports[shortName(q)] = q
-			}
+	for _, ih := range allOf(f.root, "import") {
+		id := firstOf(ih, "qualified_identifier", "identifier")
+		if id == nil {
+			continue
+		}
+		q := f.text(id)
+		kids := named(ih)
+		switch {
+		case hasChildToken(ih, f.src, "*"):
+			f.wildcards = append(f.wildcards, q)
+		case len(kids) >= 2 && kids[len(kids)-1].Type() == "identifier":
+			f.imports[f.text(kids[len(kids)-1])] = q // import a.b.C as D
+		default:
+			f.imports[shortName(q)] = q
 		}
 	}
 }
@@ -95,19 +99,49 @@ func ktTypeText(f *srcFile, n *sitter.Node) string {
 	case "user_type":
 		var parts []string
 		for _, c := range named(n) {
-			if c.Type() == "type_identifier" {
+			if c.Type() == "identifier" {
 				parts = append(parts, f.text(c))
 			}
 		}
 		return strings.Join(parts, ".")
-	case "nullable_type":
-		return ktTypeText(f, firstOf(n, "user_type", "parenthesized_type"))
+	case "nullable_type", "parenthesized_type", "non_nullable_type":
+		return ktTypeText(f, ktTypeChild(n))
 	}
 	return ""
 }
 
+// ktTypeNodes are the node types a type is written as.
+var ktTypeNodes = []string{"user_type", "nullable_type", "function_type", "non_nullable_type", "parenthesized_type"}
+
 func ktTypeChild(n *sitter.Node) *sitter.Node {
-	return firstOf(n, "user_type", "nullable_type", "function_type")
+	return firstOf(n, ktTypeNodes...)
+}
+
+func isKtType(n *sitter.Node) bool {
+	for _, t := range ktTypeNodes {
+		if n.Type() == t {
+			return true
+		}
+	}
+	return false
+}
+
+// ktName is the name of a declaration: its name field, or its first
+// identifier.
+func ktName(n *sitter.Node) *sitter.Node {
+	if n == nil {
+		return nil
+	}
+	if id := n.ChildByFieldName("name"); id != nil {
+		return id
+	}
+	return firstOf(n, "identifier")
+}
+
+// ktIsProperty reports whether a primary constructor parameter declares a
+// property (val or var).
+func ktIsProperty(f *srcFile, cp *sitter.Node) bool {
+	return hasChildToken(cp, f.src, "val") || hasChildToken(cp, f.src, "var")
 }
 
 // ktAnnotations returns tags ("@Column" -> "email") and bare annotation names.
@@ -134,7 +168,7 @@ func ktAnnotations(f *srcFile, mods *sitter.Node) (map[string]string, []string) 
 		val := ""
 		for _, va := range allOf(args, "value_argument") {
 			kids := named(va)
-			if len(kids) == 2 && kids[0].Type() == "simple_identifier" {
+			if len(kids) == 2 && kids[0].Type() == "identifier" {
 				if f.text(kids[0]) == "name" || f.text(kids[0]) == "value" {
 					val = unquote(f.text(kids[1]))
 					break
@@ -194,19 +228,23 @@ func (kp *ktProgram) collect(f *srcFile, n *sitter.Node, scope string, outer *cl
 // ktFuncName returns the function name and, for extension functions, the
 // receiver type.
 func ktFuncName(f *srcFile, fn *sitter.Node) (name, recv string) {
+	id := fn.ChildByFieldName("name")
+	if id == nil {
+		return "", ""
+	}
 	var lastType *sitter.Node
 	for _, c := range named(fn) {
-		switch c.Type() {
-		case "user_type", "nullable_type":
+		if c.StartByte() >= id.StartByte() {
+			break
+		}
+		if isKtType(c) {
 			lastType = c
-		case "simple_identifier":
-			if lastType != nil {
-				recv = ktTypeText(f, lastType)
-			}
-			return f.text(c), recv
 		}
 	}
-	return "", ""
+	if lastType != nil {
+		recv = ktTypeText(f, lastType)
+	}
+	return f.text(id), recv
 }
 
 func ktReturnType(f *srcFile, fn *sitter.Node) string {
@@ -216,7 +254,7 @@ func ktReturnType(f *srcFile, fn *sitter.Node) string {
 			seenParams = true
 			continue
 		}
-		if seenParams && (c.Type() == "user_type" || c.Type() == "nullable_type") {
+		if seenParams && isKtType(c) {
 			return ktTypeText(f, c)
 		}
 	}
@@ -224,7 +262,7 @@ func ktReturnType(f *srcFile, fn *sitter.Node) string {
 }
 
 func (kp *ktProgram) collectClass(f *srcFile, n *sitter.Node, scope string, isObject bool) {
-	nameNode := firstOf(n, "type_identifier")
+	nameNode := ktName(n)
 	if nameNode == nil {
 		return
 	}
@@ -243,11 +281,11 @@ func (kp *ktProgram) collectClass(f *srcFile, n *sitter.Node, scope string, isOb
 		td.Kind = "entity"
 	}
 	if pc := firstOf(n, "primary_constructor"); pc != nil {
-		for _, cp := range allOf(pc, "class_parameter") {
-			if firstOf(cp, "binding_pattern_kind") == nil {
+		for _, cp := range allOf(firstOf(pc, "class_parameters"), "class_parameter") {
+			if !ktIsProperty(f, cp) {
 				continue
 			}
-			id := firstOf(cp, "simple_identifier")
+			id := firstOf(cp, "identifier")
 			if id == nil {
 				continue
 			}
@@ -257,11 +295,11 @@ func (kp *ktProgram) collectClass(f *srcFile, n *sitter.Node, scope string, isOb
 			td.Fields = append(td.Fields, ir.Field{Name: f.text(id), Type: typ, Tags: tags, Pos: posOf(f, id)})
 		}
 	}
-	for _, ds := range allOf(n, "delegation_specifier") {
-		if ut := firstOf(ds, "user_type"); ut != nil {
+	for _, ds := range allOf(firstOf(n, "delegation_specifiers"), "delegation_specifier") {
+		if ut := ktTypeChild(ds); ut != nil {
 			ci.supers = append(ci.supers, ktTypeText(f, ut))
-		} else if ci2 := firstOf(ds, "constructor_invocation"); ci2 != nil {
-			ci.supers = append(ci.supers, ktTypeText(f, firstOf(ci2, "user_type")))
+		} else if ci2 := firstOf(ds, "constructor_invocation", "explicit_delegation"); ci2 != nil {
+			ci.supers = append(ci.supers, ktTypeText(f, ktTypeChild(ci2)))
 		}
 	}
 	body := firstOf(n, "class_body", "enum_class_body")
@@ -279,7 +317,7 @@ func (kp *ktProgram) collectClass(f *srcFile, n *sitter.Node, scope string, isOb
 				if vd == nil {
 					continue
 				}
-				id := firstOf(vd, "simple_identifier")
+				id := firstOf(vd, "identifier")
 				prop = f.text(id)
 				if firstOf(m, "getter") != nil {
 					kp.noteGetter(ci, prop)
@@ -335,7 +373,7 @@ func ktCtorType(f *srcFile, prop *sitter.Node) string {
 		return ""
 	}
 	callee := named(ce)
-	if len(callee) > 0 && callee[0].Type() == "simple_identifier" && isUpperStart(f.text(callee[0])) {
+	if len(callee) > 0 && callee[0].Type() == "identifier" && isUpperStart(f.text(callee[0])) {
 		return f.text(callee[0])
 	}
 	return ""
@@ -370,7 +408,7 @@ func (kp *ktProgram) lowerDecls(f *srcFile, n *sitter.Node, cls *classInfo) {
 }
 
 func (kp *ktProgram) lowerClass(f *srcFile, n *sitter.Node, outer *classInfo) {
-	nameNode := firstOf(n, "type_identifier")
+	nameNode := ktName(n)
 	if nameNode == nil {
 		return
 	}
@@ -393,14 +431,14 @@ func (kp *ktProgram) lowerClass(f *srcFile, n *sitter.Node, outer *classInfo) {
 		init.addThis(qual, n)
 	}
 	if pc := firstOf(n, "primary_constructor"); pc != nil {
-		for _, cp := range allOf(pc, "class_parameter") {
-			id := firstOf(cp, "simple_identifier")
+		for _, cp := range allOf(firstOf(pc, "class_parameters"), "class_parameter") {
+			id := firstOf(cp, "identifier")
 			if id == nil {
 				continue
 			}
 			typ := kp.resolveType(f, ktTypeText(f, ktTypeChild(cp)))
 			v := init.param(f.text(id), typ, id)
-			if firstOf(cp, "binding_pattern_kind") != nil && init.this != ir.NoVar {
+			if ktIsProperty(f, cp) && init.this != ir.NoVar {
 				init.store(init.this, f.text(id), qual, v, id)
 			}
 		}
@@ -418,7 +456,7 @@ func (kp *ktProgram) lowerClass(f *srcFile, n *sitter.Node, outer *classInfo) {
 			case "property_declaration":
 				vd := firstOf(m, "variable_declaration")
 				if vd != nil {
-					prop = f.text(firstOf(vd, "simple_identifier"))
+					prop = f.text(firstOf(vd, "identifier"))
 					if g := firstOf(m, "getter"); g != nil {
 						kp.lowerGetter(f, ci, prop, g)
 					}
@@ -429,10 +467,10 @@ func (kp *ktProgram) lowerClass(f *srcFile, n *sitter.Node, outer *classInfo) {
 				}
 				v := ib.expr(val)
 				if init.this != ir.NoVar {
-					init.store(init.this, f.text(firstOf(vd, "simple_identifier")), qual, v, m)
+					init.store(init.this, f.text(firstOf(vd, "identifier")), qual, v, m)
 				}
 			case "anonymous_initializer":
-				ib.block(firstOf(m, "statements"))
+				ib.block(firstOf(m, "block"))
 			case "function_declaration":
 				kp.lowerFunc(f, m, ci, static || isObject)
 			case "secondary_constructor":
@@ -440,7 +478,7 @@ func (kp *ktProgram) lowerClass(f *srcFile, n *sitter.Node, outer *classInfo) {
 				sb.addThis(qual, m)
 				skb := &ktBuilder{builder: sb, kp: kp}
 				skb.params(firstOf(m, "function_value_parameters"))
-				skb.block(firstOf(m, "statements"))
+				skb.block(firstOf(m, "block"))
 				sb.finish()
 			case "companion_object":
 				walk(firstOf(m, "class_body"), true)
@@ -524,7 +562,7 @@ func (kp *ktProgram) lowerGetter(f *srcFile, ci *classInfo, prop string, g *sitt
 	b.addThis(ci.name, g)
 	kb := &ktBuilder{builder: b, kp: kp}
 	if body := firstOf(g, "function_body"); body != nil {
-		if st := firstOf(body, "statements"); st != nil {
+		if st := firstOf(body, "block"); st != nil {
 			kb.block(st)
 		} else if k := named(body); len(k) > 0 {
 			kb.ret(k[0], kb.expr(k[0]))
@@ -537,10 +575,14 @@ func ktPropValue(prop *sitter.Node) *sitter.Node {
 	kids := named(prop)
 	for i := len(kids) - 1; i >= 0; i-- {
 		switch kids[i].Type() {
-		case "modifiers", "binding_pattern_kind", "variable_declaration", "multi_variable_declaration", "type_constraints", "getter", "setter", "type_parameters":
+		case "modifiers", "variable_declaration", "multi_variable_declaration", "type_constraints", "getter", "setter", "type_parameters",
+			"line_comment", "block_comment":
 			continue
 		case "property_delegate":
-			return firstOf(kids[i], "call_expression", "lambda_literal")
+			return firstOf(kids[i], "call_expression", "lambda_literal", "annotated_lambda")
+		}
+		if isKtType(kids[i]) {
+			continue // the receiver type of an extension property
 		}
 		return kids[i]
 	}
@@ -572,7 +614,7 @@ func (kp *ktProgram) lowerFunc(f *srcFile, n *sitter.Node, cls *classInfo, stati
 	kb.params(firstOf(n, "function_value_parameters"))
 	if body := firstOf(n, "function_body"); body != nil {
 		kids := named(body)
-		if len(kids) == 1 && kids[0].Type() != "block" && kids[0].Type() != "statements" {
+		if len(kids) == 1 && kids[0].Type() != "block" {
 			b.ret(kids[0], kb.expr(kids[0]))
 		} else {
 			for _, k := range kids {
@@ -586,11 +628,52 @@ func (kp *ktProgram) lowerFunc(f *srcFile, n *sitter.Node, cls *classInfo, stati
 type ktBuilder struct {
 	*builder
 	kp *ktProgram
+	// hoisted is a prefix operator the grammar attached to the receiver
+	// of a call or member chain (!a.b() read as (!a).b()): lowering the
+	// chain sees through it, and the operator applies to the chain.
+	hoisted *sitter.Node
+}
+
+// ktChains are the expressions a member or call chain is built from.
+var ktChains = map[string]bool{"call_expression": true, "navigation_expression": true, "index_expression": true}
+
+// ktMisboundPrefix returns the prefix operator expression at the start of
+// chain n, when there is one: tree-sitter-kotlin binds a prefix operator
+// tighter than member access, so !consents.hasConsent() is read as
+// (!consents).hasConsent().
+func ktMisboundPrefix(n *sitter.Node) *sitter.Node {
+	if !ktChains[n.Type()] {
+		return nil
+	}
+	c := n
+	for ktChains[c.Type()] {
+		kids := named(c)
+		if len(kids) == 0 {
+			return nil
+		}
+		c = kids[0]
+	}
+	if c.Type() != "unary_expression" || c.StartByte() != n.StartByte() {
+		return nil
+	}
+	if op := c.ChildByFieldName("operator"); op == nil || op.StartByte() != c.StartByte() {
+		return nil // a postfix operator (a!!.b) is bound correctly
+	}
+	return c
+}
+
+// seeThrough returns n, or the operand of the hoisted prefix operator
+// when n is that operator's expression.
+func (kb *ktBuilder) seeThrough(n *sitter.Node) *sitter.Node {
+	if n != nil && kb.hoisted != nil && n.Equal(kb.hoisted) {
+		return n.ChildByFieldName("argument")
+	}
+	return n
 }
 
 func (kb *ktBuilder) params(fvp *sitter.Node) {
 	for _, p := range allOf(fvp, "parameter") {
-		id := firstOf(p, "simple_identifier")
+		id := firstOf(p, "identifier")
 		if id == nil {
 			continue
 		}
@@ -604,24 +687,86 @@ func (kb *ktBuilder) block(n *sitter.Node) ir.VarID {
 		return ir.NoVar
 	}
 	switch n.Type() {
-	case "statements", "block", "control_structure_body", "function_body":
+	case "block", "function_body", "lambda_literal", "source_file":
 		last := ir.NoVar
 		for _, c := range named(n) {
-			if c.Type() == "label" { // outer@ for (...)
-				kb.label = strings.TrimSuffix(kb.text(c), "@")
+			switch c.Type() {
+			case "lambda_parameters", "label":
 				continue
 			}
 			last = kb.stmt(c)
-			kb.label = ""
 		}
 		return last
 	}
 	return kb.stmt(n)
 }
 
-func (kb *ktBuilder) stmt(n *sitter.Node) ir.VarID {
+// ktBody is the body of a control structure: its block, or the statement
+// written without braces. It is the last named child that is not the
+// condition, a label or a comment.
+func ktBody(n *sitter.Node, skip ...*sitter.Node) *sitter.Node {
+	kids := named(n)
+	for i := len(kids) - 1; i >= 0; i-- {
+		k := kids[i]
+		switch k.Type() {
+		case "label", "line_comment", "block_comment", "annotation":
+			continue
+		}
+		skipped := false
+		for _, s := range skip {
+			skipped = skipped || (s != nil && s.Equal(k))
+		}
+		if !skipped {
+			return k
+		}
+		return nil
+	}
+	return nil
+}
+
+// ktLabel is the label of a loop (outer@ for ...), without the @.
+func (kb *ktBuilder) ktLabel(n *sitter.Node) string {
+	if l := firstOf(n, "label"); l != nil {
+		return strings.TrimSuffix(kb.text(l), "@")
+	}
+	return ""
+}
+
+// ktJump reports whether n is break or continue, possibly labelled
+// (break@outer): the grammar reads them as an identifier, or as a label
+// "break@" applied to the target's name.
+func (kb *ktBuilder) ktJump(n *sitter.Node) (isJump, isContinue bool, label string) {
 	switch n.Type() {
-	case "statements", "block", "control_structure_body":
+	case "identifier":
+		switch kb.text(n) {
+		case "break":
+			return true, false, ""
+		case "continue":
+			return true, true, ""
+		}
+	case "labeled_expression":
+		l := firstOf(n, "label")
+		kids := named(n)
+		if l == nil || len(kids) != 2 || kids[1].Type() != "identifier" {
+			return false, false, ""
+		}
+		switch kb.text(l) {
+		case "break@":
+			return true, false, kb.text(kids[1])
+		case "continue@":
+			return true, true, kb.text(kids[1])
+		}
+	}
+	return false, false, ""
+}
+
+func (kb *ktBuilder) stmt(n *sitter.Node) ir.VarID {
+	if ok, cont, label := kb.ktJump(n); ok {
+		kb.jump(cont, label)
+		return ir.NoVar
+	}
+	switch n.Type() {
+	case "block":
 		return kb.block(n)
 	case "property_declaration":
 		val := ktPropValue(n)
@@ -630,7 +775,7 @@ func (kb *ktBuilder) stmt(n *sitter.Node) ir.VarID {
 			v = kb.expr(val)
 		}
 		if vd := firstOf(n, "variable_declaration"); vd != nil {
-			id := firstOf(vd, "simple_identifier")
+			id := firstOf(vd, "identifier")
 			typ := kb.kp.resolveType(kb.f, ktTypeText(kb.f, ktTypeChild(vd)))
 			if typ == "" && v != ir.NoVar {
 				typ = kb.fn.Vars[v].Type
@@ -639,7 +784,7 @@ func (kb *ktBuilder) stmt(n *sitter.Node) ir.VarID {
 			kb.assign(dst, n, v)
 		} else if mv := firstOf(n, "multi_variable_declaration"); mv != nil {
 			for _, vd := range allOf(mv, "variable_declaration") {
-				id := firstOf(vd, "simple_identifier")
+				id := firstOf(vd, "identifier")
 				dst := kb.declare(kb.text(id), "", id)
 				kb.assign(dst, n, v)
 			}
@@ -648,52 +793,42 @@ func (kb *ktBuilder) stmt(n *sitter.Node) ir.VarID {
 	case "assignment":
 		kb.assignment(n)
 		return ir.NoVar
-	case "jump_expression":
-		kids := named(n)
-		t := kb.text(n)
-		switch {
-		case strings.HasPrefix(t, "return"):
-			var v ir.VarID = ir.NoVar
-			if len(kids) > 0 {
-				v = kb.expr(kids[len(kids)-1])
-			}
-			kb.ret(n, v)
-		case strings.HasPrefix(t, "throw"):
-			if len(kids) > 0 {
-				kb.throwValue(kb.expr(kids[len(kids)-1]), n)
-			}
-		case strings.HasPrefix(t, "break") || strings.HasPrefix(t, "continue"):
-			label := ""
-			if l := firstOf(n, "label"); l != nil {
-				label = strings.TrimPrefix(kb.text(l), "@")
-			}
-			kb.jump(strings.HasPrefix(t, "continue"), label)
-		default:
-			for _, k := range kids {
-				kb.expr(k)
-			}
+	case "return_expression":
+		var v ir.VarID = ir.NoVar
+		if e := ktBody(n, n.ChildByFieldName("label")); e != nil {
+			v = kb.expr(e)
+		}
+		kb.ret(n, v)
+		return ir.NoVar
+	case "throw_expression":
+		if kids := named(n); len(kids) > 0 {
+			kb.throwValue(kb.expr(kids[len(kids)-1]), n)
 		}
 		return ir.NoVar
 	case "for_statement":
 		var iter ir.VarID = ir.NoVar
 		var vars []*sitter.Node
-		var body *sitter.Node
+		var iterNode, body *sitter.Node
 		for _, c := range named(n) {
 			switch c.Type() {
 			case "variable_declaration":
 				vars = append(vars, c)
 			case "multi_variable_declaration":
 				vars = append(vars, allOf(c, "variable_declaration")...)
-			case "control_structure_body":
-				body = c
-			case "annotation":
+			case "label", "annotation", "line_comment", "block_comment":
 			default:
-				iter = kb.expr(c)
+				if iterNode == nil {
+					iterNode = c
+				} else {
+					body = c
+				}
 			}
 		}
+		iter = kb.expr(iterNode)
+		kb.label = kb.ktLabel(n)
 		kb.loop(n, func() {
 			for _, vd := range vars {
-				id := firstOf(vd, "simple_identifier")
+				id := firstOf(vd, "identifier")
 				dst := kb.declare(kb.text(id), kb.kp.resolveType(kb.f, ktTypeText(kb.f, ktTypeChild(vd))), id)
 				kb.assign(dst, vd, iter)
 			}
@@ -701,30 +836,21 @@ func (kb *ktBuilder) stmt(n *sitter.Node) ir.VarID {
 		})
 		return ir.NoVar
 	case "while_statement", "do_while_statement":
-		var cond *sitter.Node
-		for _, c := range named(n) {
-			if c.Type() != "control_structure_body" {
-				cond = c
-			}
-		}
+		cond := n.ChildByFieldName("condition")
+		body := ktBody(n, cond)
 		v, known := kb.truth(cond)
 		if known && !v && n.Type() == "while_statement" {
 			kb.expr(cond) // while (false): the body never runs
 			return ir.NoVar
 		}
 		test := func() ir.VarID { return kb.expr(cond) }
-		spec := loopSpec{infinite: known && v, body: func() {
-			for _, c := range named(n) {
-				if c.Type() == "control_structure_body" {
-					kb.block(c)
-				}
-			}
-		}}
+		spec := loopSpec{infinite: known && v, body: func() { kb.block(body) }}
 		if n.Type() == "do_while_statement" {
 			spec.post = test
 		} else {
 			spec.cond = test
 		}
+		kb.label = kb.ktLabel(n)
 		kb.loopWith(n, spec)
 		return ir.NoVar
 	case "function_declaration":
@@ -732,7 +858,7 @@ func (kb *ktBuilder) stmt(n *sitter.Node) ir.VarID {
 		var pnodes []*sitter.Node
 		var pnames []string
 		for _, p := range allOf(firstOf(n, "function_value_parameters"), "parameter") {
-			if id := firstOf(p, "simple_identifier"); id != nil {
+			if id := firstOf(p, "identifier"); id != nil {
 				pnodes, pnames = append(pnodes, id), append(pnames, kb.text(id))
 			}
 		}
@@ -744,30 +870,28 @@ func (kb *ktBuilder) stmt(n *sitter.Node) ir.VarID {
 			}
 			return last
 		})
-		if id := firstOf(n, "simple_identifier"); id != nil {
+		if id := n.ChildByFieldName("name"); id != nil {
 			kb.scope[kb.text(id)] = fn
 		}
 		return ir.NoVar
-	case "class_declaration", "object_declaration", "type_alias", "line_comment", "multiline_comment":
+	case "class_declaration", "object_declaration", "type_alias", "line_comment", "block_comment":
 		return ir.NoVar
 	}
 	return kb.expr(n)
 }
 
 func (kb *ktBuilder) assignment(n *sitter.Node) {
-	kids := named(n)
-	if len(kids) < 2 {
+	target, valNode := n.ChildByFieldName("left"), n.ChildByFieldName("right")
+	if target == nil || valNode == nil {
 		return
 	}
-	target, valNode := kids[0], kids[len(kids)-1]
 	v := kb.expr(valNode)
-	augmented := !hasChildToken(n, kb.f.src, "=")
-	tk := named(target)
-	switch {
-	case len(tk) == 1 && tk[0].Type() == "simple_identifier":
-		name := kb.text(tk[0])
+	augmented := kb.text(n.ChildByFieldName("operator")) != "="
+	switch target.Type() {
+	case "identifier":
+		name := kb.text(target)
 		if old, ok := kb.lookup(name); ok {
-			dst := kb.redefine(name, old, "", tk[0])
+			dst := kb.redefine(name, old, "", target)
 			if augmented {
 				kb.assign(dst, n, old, v)
 			} else {
@@ -786,51 +910,140 @@ func (kb *ktBuilder) assignment(n *sitter.Node) {
 			kb.store(it, name, "", v, n)
 			return
 		}
-		dst := kb.declare(name, "", tk[0])
+		dst := kb.declare(name, "", target)
 		kb.assign(dst, n, v)
-	case len(tk) >= 2 && tk[len(tk)-1].Type() == "navigation_suffix":
-		objNode := tk[0]
-		obj, owner := kb.expr(objNode), kb.typeOf(objNode)
+	case "navigation_expression":
 		// a.b.c = v: the object is a.b.
-		for _, suf := range tk[1 : len(tk)-1] {
-			if suf.Type() != "navigation_suffix" {
-				break
-			}
-			name := kb.text(firstOf(suf, "simple_identifier"))
-			obj = kb.load(obj, name, owner, suf)
-			owner = kb.fn.Vars[obj].Type
+		tk := named(target)
+		if len(tk) < 2 || tk[len(tk)-1].Type() != "identifier" {
+			kb.expr(target)
+			return
 		}
-		field := kb.text(firstOf(tk[len(tk)-1], "simple_identifier"))
-		kb.store(obj, field, owner, v, n)
-	case len(tk) >= 2 && tk[len(tk)-1].Type() == "indexing_suffix":
+		obj, owner := kb.expr(tk[0]), kb.typeOf(tk[0])
+		kb.store(obj, kb.text(tk[len(tk)-1]), owner, v, n)
+	case "index_expression":
+		tk := named(target)
 		obj := kb.expr(tk[0])
-		idx := named(tk[len(tk)-1])
-		if len(idx) == 1 && idx[0].Type() == "string_literal" && !ktInterpolated(idx[0]) {
-			kb.store(obj, unquote(kb.text(idx[0])), "", v, n)
-		} else {
-			kb.assign(obj, n, v)
-			kb.cell(obj)
+		idx := tk[1:]
+		if len(idx) == 1 && idx[0].Type() == "string_literal" {
+			if key, ok := kb.ktStaticString(idx[0]); ok {
+				kb.store(obj, key, "", v, n)
+				return
+			}
 		}
+		for _, i := range idx {
+			kb.expr(i)
+		}
+		kb.assign(obj, n, v)
+		kb.cell(obj)
 	default:
-		for _, t := range tk {
-			kb.expr(t)
-		}
+		kb.expr(target)
 	}
 }
 
-func ktInterpolated(n *sitter.Node) bool {
-	return firstOf(n, "interpolated_identifier", "interpolated_expression") != nil
+// ktStringPart is a piece of a string template: literal text, or an
+// expression whose value is interpolated.
+type ktStringPart struct {
+	text string
+	expr *sitter.Node
+	name *sitter.Node // $name, whose node covers the text after the $
+	id   string
 }
 
-var ktBool = map[string]bool{"comparison_expression": true, "equality_expression": true, "conjunction_expression": true, "disjunction_expression": true, "check_expression": true}
+// ktStringParts splits a string literal into text and interpolations.
+// tree-sitter-kotlin reads "$name" in a single-line string as a "$"
+// string_content followed by text starting with the name, so a "$" before
+// an identifier is an interpolation of that identifier.
+func (kb *ktBuilder) ktStringParts(n *sitter.Node) []ktStringPart {
+	var parts []ktStringPart
+	kids := named(n)
+	for i := 0; i < len(kids); i++ {
+		c := kids[i]
+		switch c.Type() {
+		case "string_content", "escape_sequence":
+			t := kb.text(c)
+			if t == "$" && i+1 < len(kids) && kids[i+1].Type() == "string_content" {
+				next := kb.text(kids[i+1])
+				if id := ktLeadingIdent(next); id != "" {
+					parts = append(parts, ktStringPart{name: kids[i+1], id: id})
+					parts = append(parts, ktStringPart{text: next[len(id):]})
+					i++
+					continue
+				}
+			}
+			parts = append(parts, ktStringPart{text: t})
+		case "interpolation":
+			if e := named(c); len(e) > 0 {
+				if e[0].Type() == "identifier" && !strings.HasPrefix(kb.text(c), "${") {
+					parts = append(parts, ktStringPart{name: e[0], id: kb.text(e[0])})
+				} else {
+					parts = append(parts, ktStringPart{expr: e[0]})
+				}
+			}
+		}
+	}
+	return parts
+}
+
+// ktLeadingIdent is the identifier s starts with, or "".
+func ktLeadingIdent(s string) string {
+	end := 0
+	for end < len(s) && (isWordByte(s[end])) {
+		end++
+	}
+	if end == 0 || s[0] >= '0' && s[0] <= '9' {
+		return ""
+	}
+	return s[:end]
+}
+
+// ktStaticString returns the text of a string literal without
+// interpolations.
+func (kb *ktBuilder) ktStaticString(n *sitter.Node) (string, bool) {
+	var sb strings.Builder
+	for _, p := range kb.ktStringParts(n) {
+		if p.expr != nil || p.name != nil {
+			return "", false
+		}
+		sb.WriteString(p.text)
+	}
+	return sb.String(), true
+}
+
+var ktLiterals = map[string]bool{"true": true, "false": true, "null": true}
 
 func (kb *ktBuilder) expr(n *sitter.Node) ir.VarID {
 	if n == nil {
 		return ir.NoVar
 	}
+	n = kb.seeThrough(n)
+	if u := ktMisboundPrefix(n); u != nil && kb.hoisted == nil {
+		// !a.b(): the chain's value, then the operator.
+		kb.hoisted = u
+		v := kb.expr(n)
+		kb.hoisted = nil
+		switch kb.text(u.ChildByFieldName("operator")) {
+		case "!":
+			return kb.logic(u, v)
+		case "-", "+":
+			dst := kb.temp(u)
+			kb.compute(dst, u, v)
+			return dst
+		}
+		return v
+	}
+	if ok, _, _ := kb.ktJump(n); ok {
+		kb.stmt(n)
+		return kb.temp(n)
+	}
 	switch t := n.Type(); t {
-	case "simple_identifier":
+	case "identifier":
 		name := kb.text(n)
+		if ktLiterals[name] {
+			if _, local := kb.lookup(name); !local {
+				return kb.constVar(name, n)
+			}
+		}
 		if _, local := kb.lookup(name); !local {
 			if q := kb.classRef(n); q != "" {
 				v := kb.fn.Named(shortName(q), q, kb.pos(n))
@@ -843,41 +1056,35 @@ func (kb *ktBuilder) expr(n *sitter.Node) ir.VarID {
 			return kb.this
 		}
 		return kb.ident("this", n)
-	case "string_literal", "line_string_literal", "multi_line_string_literal":
-		if !ktInterpolated(n) {
-			var sb strings.Builder
-			for _, c := range named(n) {
-				if c.Type() == "string_content" {
-					sb.WriteString(kb.text(c))
-				}
-			}
-			return kb.constVar(sb.String(), n)
+	case "string_literal", "multiline_string_literal":
+		if s, ok := kb.ktStaticString(n); ok {
+			return kb.constVar(s, n)
 		}
 		var parts []ir.VarID
-		for _, c := range named(n) {
-			switch c.Type() {
-			case "interpolated_identifier":
-				parts = append(parts, kb.ident(strings.TrimPrefix(kb.text(c), "$"), c))
-			case "interpolated_expression":
-				for _, e := range named(c) {
-					parts = append(parts, kb.expr(e))
-				}
+		for _, p := range kb.ktStringParts(n) {
+			switch {
+			case p.name != nil:
+				parts = append(parts, kb.ident(p.id, p.name))
+			case p.expr != nil:
+				parts = append(parts, kb.expr(p.expr))
 			}
 		}
 		dst := kb.temp(n)
 		kb.compute(dst, n, parts...)
 		return dst
-	case "integer_literal", "real_literal", "boolean_literal", "null_literal", "character_literal", "hex_literal", "bin_literal", "long_literal", "unsigned_literal":
+	case "number_literal", "float_literal", "character_literal":
 		return kb.constVar(kb.text(n), n)
 	case "navigation_expression":
 		kids := named(n)
 		if len(kids) < 2 {
 			return kb.temp(n)
 		}
-		suffix := kids[len(kids)-1]
-		fieldNode := firstOf(suffix, "simple_identifier")
-		if fieldNode == nil {
+		fieldNode := kids[len(kids)-1]
+		if fieldNode.Type() != "identifier" {
 			return kb.expr(kids[0])
+		}
+		if hasChildToken(n, kb.f.src, "::") {
+			return kb.callableRef(n) // User::email read as a navigation
 		}
 		if q := kb.classRef(kids[0]); q != "" {
 			// Static field / enum constant: Build.SERIAL, R.string.x
@@ -909,53 +1116,79 @@ func (kb *ktBuilder) expr(n *sitter.Node) ir.VarID {
 		return kb.load(obj, field, owner, n)
 	case "call_expression":
 		return kb.call(n)
-	case "indexing_expression":
+	case "index_expression":
 		kids := named(n)
 		base := kb.expr(kids[0])
-		if len(kids) > 1 {
-			idx := named(kids[len(kids)-1])
-			if len(idx) == 1 && idx[0].Type() == "string_literal" && !ktInterpolated(idx[0]) {
-				return kb.load(base, unquote(kb.text(idx[0])), "", n)
+		idx := kids[1:]
+		if len(idx) == 1 && idx[0].Type() == "string_literal" {
+			if key, ok := kb.ktStaticString(idx[0]); ok {
+				return kb.load(base, key, "", n)
 			}
-			for _, i := range idx {
-				kb.expr(i)
-			}
+		}
+		for _, i := range idx {
+			kb.expr(i)
 		}
 		dst := kb.temp(n)
 		kb.assign(dst, n, base)
 		return dst
 	case "parenthesized_expression", "annotated_expression", "labeled_expression", "spread_expression":
 		kids := named(n)
-		if len(kids) == 0 {
-			return kb.temp(n)
+		for i := len(kids) - 1; i >= 0; i-- {
+			if kids[i].Type() != "label" && kids[i].Type() != "annotation" {
+				return kb.expr(kids[i])
+			}
 		}
-		return kb.expr(kids[len(kids)-1])
+		return kb.temp(n)
 	case "as_expression":
-		kids := named(n)
-		v := kb.expr(kids[0])
-		if len(kids) > 1 {
-			dst := kb.fn.Named("", kb.kp.resolveType(kb.f, ktTypeText(kb.f, kids[len(kids)-1])), kb.pos(n))
+		v := kb.expr(n.ChildByFieldName("left"))
+		if r := n.ChildByFieldName("right"); r != nil {
+			dst := kb.fn.Named("", kb.kp.resolveType(kb.f, ktTypeText(kb.f, r)), kb.pos(n))
 			kb.assign(dst, n, v)
 			return dst
 		}
 		return v
-	case "prefix_expression", "postfix_expression":
-		kids := named(n)
-		if len(kids) == 0 {
+	case "unary_expression":
+		arg := n.ChildByFieldName("argument")
+		if arg == nil {
 			return kb.temp(n)
 		}
-		if strings.HasPrefix(kb.text(n), "!") && !strings.HasSuffix(kb.text(n), "!!") {
-			return kb.logic(n, kb.expr(kids[len(kids)-1]))
+		if kb.text(n.ChildByFieldName("operator")) == "!" {
+			return kb.logic(n, kb.expr(arg))
 		}
-		for _, k := range kids {
-			if k.Type() != "annotation" && k.Type() != "label" {
-				return kb.expr(k)
+		return kb.expr(arg)
+	case "binary_expression":
+		l, r := kb.expr(n.ChildByFieldName("left")), kb.expr(n.ChildByFieldName("right"))
+		switch op := kb.text(n.ChildByFieldName("operator")); {
+		case ir.Logical(op):
+			return kb.logic(n, l, r)
+		case op == "?:":
+			// a ?: b is one of them.
+			dst := kb.temp(n)
+			kb.assign(dst, n, l, r)
+			return dst
+		}
+		dst := kb.temp(n)
+		kb.compute(dst, n, l, r)
+		return dst
+	case "is_expression", "in_expression":
+		var vs []ir.VarID
+		for _, c := range named(n) {
+			if !isKtType(c) {
+				vs = append(vs, kb.expr(c))
 			}
 		}
-		return kb.temp(n)
+		return kb.logic(n, vs...)
+	case "range_expression":
+		var parts []ir.VarID
+		for _, c := range named(n) {
+			parts = append(parts, kb.expr(c))
+		}
+		dst := kb.temp(n)
+		kb.compute(dst, n, parts...)
+		return dst
 	case "infix_expression":
 		kids := named(n)
-		if len(kids) == 3 && kids[1].Type() == "simple_identifier" {
+		if len(kids) == 3 && kids[1].Type() == "identifier" {
 			l, r := kb.expr(kids[0]), kb.expr(kids[2])
 			op := kb.text(kids[1])
 			if op == "to" {
@@ -970,7 +1203,7 @@ func (kb *ktBuilder) expr(n *sitter.Node) ir.VarID {
 	case "anonymous_function":
 		return kb.lambda(n, nil, nil, false, func() ir.VarID {
 			for _, p := range allOf(firstOf(n, "function_value_parameters"), "parameter") {
-				if id := firstOf(p, "simple_identifier"); id != nil {
+				if id := firstOf(p, "identifier"); id != nil {
 					kb.declare(kb.text(id), "", id)
 				}
 			}
@@ -980,7 +1213,7 @@ func (kb *ktBuilder) expr(n *sitter.Node) ir.VarID {
 		return kb.lambda(n, nil, nil, false, func() ir.VarID {
 			for _, fd := range allOf(firstOf(n, "class_body"), "function_declaration") {
 				for _, p := range allOf(firstOf(fd, "function_value_parameters"), "parameter") {
-					if id := firstOf(p, "simple_identifier"); id != nil {
+					if id := firstOf(p, "identifier"); id != nil {
 						kb.declare(kb.text(id), "", id)
 					}
 				}
@@ -992,40 +1225,23 @@ func (kb *ktBuilder) expr(n *sitter.Node) ir.VarID {
 			}
 			return ir.NoVar
 		})
-	case "jump_expression", "assignment", "property_declaration":
+	case "return_expression", "throw_expression", "assignment", "property_declaration", "for_statement", "while_statement", "do_while_statement":
 		kb.stmt(n)
 		return kb.temp(n)
 	case "callable_reference":
 		return kb.callableRef(n)
-	case "type_test", "line_comment", "multiline_comment":
+	case "type_test", "range_test", "line_comment", "block_comment":
 		return kb.temp(n)
-	default:
-		if ktBool[t] {
-			var vs []ir.VarID
-			for _, c := range named(n) {
-				vs = append(vs, kb.expr(c))
-			}
-			return kb.logic(n, vs...)
-		}
 	}
-	// Generic: the value depends on every child (additive, elvis, range,
-	// collection literals, ...).
+	// Generic: the value depends on every child (collection literals, ...).
 	var parts []ir.VarID
 	for _, c := range named(n) {
 		parts = append(parts, kb.expr(c))
 	}
 	dst := kb.temp(n)
-	if ktComputed[n.Type()] {
-		kb.compute(dst, n, parts...)
-	} else {
-		kb.assign(dst, n, parts...)
-	}
+	kb.assign(dst, n, parts...)
 	return dst
 }
-
-// ktComputed are expressions whose value is new, built from the parts'
-// current state, rather than a reference to one of them.
-var ktComputed = map[string]bool{"additive_expression": true, "multiplicative_expression": true, "range_expression": true}
 
 // conditional lowers if, when and try expressions: each arm is a separate
 // path from the scope before it, and the expression's value is the value of
@@ -1041,15 +1257,15 @@ func (kb *ktBuilder) conditionalArms(n *sitter.Node) {
 	}
 	switch n.Type() {
 	case "if_expression":
-		var cond *sitter.Node
-		cv := ir.NoVar
+		cond := n.ChildByFieldName("condition")
+		cv := kb.expr(cond)
 		var bodies []*sitter.Node
 		for _, c := range named(n) {
-			if c.Type() == "control_structure_body" {
+			switch {
+			case cond != nil && c.Equal(cond):
+			case c.Type() == "line_comment" || c.Type() == "block_comment":
+			default:
 				bodies = append(bodies, c)
-			} else {
-				cond = c
-				cv = kb.expr(c)
 			}
 		}
 		if len(bodies) == 0 {
@@ -1073,23 +1289,26 @@ func (kb *ktBuilder) conditionalArms(n *sitter.Node) {
 			case "when_subject":
 				var vd *sitter.Node
 				for _, k := range named(c) {
-					if k.Type() == "variable_declaration" {
+					switch k.Type() {
+					case "variable_declaration":
 						vd = k
+						continue
+					case "annotation":
 						continue
 					}
 					subject = kb.expr(k)
 					if vd != nil {
-						id := firstOf(vd, "simple_identifier")
+						id := firstOf(vd, "identifier")
 						kb.assign(kb.declare(kb.text(id), "", id), k, subject)
 					}
 				}
 			case "when_entry":
-				body := firstOf(c, "control_structure_body")
+				conds := fieldChildren(c, "condition")
+				body := ktBody(c, conds...)
 				if body == nil {
 					continue
 				}
 				arms = append(arms, arm(body))
-				conds := allOf(c, "when_condition")
 				if len(conds) == 0 {
 					exhaustive = true
 					tests = append(tests, nil)
@@ -1097,28 +1316,29 @@ func (kb *ktBuilder) conditionalArms(n *sitter.Node) {
 				}
 				tests = append(tests, func() ir.VarID {
 					var vs []ir.VarID
-					for _, cond := range conds {
-						for _, k := range named(cond) {
-							switch k.Type() {
-							case "range_test", "type_test":
-								v := ir.NoVar
-								for _, x := range named(k) {
+					for _, k := range conds {
+						switch k.Type() {
+						case "range_test", "type_test":
+							v := ir.NoVar
+							for _, x := range named(k) {
+								if !isKtType(x) {
 									v = kb.expr(x)
 								}
-								t := kb.temp(k)
-								op := "in"
-								if k.Type() == "type_test" {
-									op = "is"
-								}
-								if subject != ir.NoVar && v != ir.NoVar {
-									kb.fn.Compute(t, kb.pos(k), op, subject, v)
-								} else {
-									t = ir.NoVar
-								}
-								vs = append(vs, t)
-							default:
-								vs = append(vs, kb.expr(k))
 							}
+							t := kb.temp(k)
+							op := "in"
+							if k.Type() == "type_test" {
+								op = "is"
+								v = kb.constVar(ktTypeText(kb.f, ktTypeChild(k)), k)
+							}
+							if subject != ir.NoVar && v != ir.NoVar {
+								kb.fn.Compute(t, kb.pos(k), op, subject, v)
+							} else {
+								t = ir.NoVar
+							}
+							vs = append(vs, t)
+						default:
+							vs = append(vs, kb.expr(k))
 						}
 					}
 					return kb.matches(c, subject, vs...)
@@ -1134,15 +1354,15 @@ func (kb *ktBuilder) conditionalArms(n *sitter.Node) {
 			switch c.Type() {
 			case "catch_block":
 				handlers = append(handlers, func() {
-					if id := firstOf(c, "simple_identifier"); id != nil {
+					if id := firstOf(c, "identifier"); id != nil {
 						kb.assign(kb.declare(kb.text(id), "", id), id, kb.caughtValue(id))
 					}
-					if b := firstOf(c, "statements"); b != nil {
+					if b := firstOf(c, "block"); b != nil {
 						set(kb.block(b))
 					}
 				})
 			case "finally_block":
-				finally = func() { kb.block(firstOf(c, "statements")) }
+				finally = func() { kb.block(firstOf(c, "block")) }
 			default:
 				if body == nil {
 					body = c
@@ -1169,13 +1389,13 @@ func (kb *ktBuilder) lambdaLit(n *sitter.Node) ir.VarID {
 		for _, vd := range named(lp) {
 			switch vd.Type() {
 			case "variable_declaration":
-				if id := firstOf(vd, "simple_identifier"); id != nil {
+				if id := firstOf(vd, "identifier"); id != nil {
 					pnodes = append(pnodes, id)
 					pnames = append(pnames, kb.text(id))
 				}
 			case "multi_variable_declaration":
 				for _, v := range allOf(vd, "variable_declaration") {
-					if id := firstOf(v, "simple_identifier"); id != nil {
+					if id := firstOf(v, "identifier"); id != nil {
 						pnodes = append(pnodes, id)
 						pnames = append(pnames, kb.text(id))
 					}
@@ -1184,7 +1404,7 @@ func (kb *ktBuilder) lambdaLit(n *sitter.Node) ir.VarID {
 		}
 	}
 	return kb.lambda(n, pnodes, pnames, true, func() ir.VarID {
-		return kb.block(firstOf(n, "statements"))
+		return kb.block(n)
 	})
 }
 
@@ -1198,8 +1418,9 @@ var ktBuiltins = map[string]string{
 // classRef resolves an expression that names a class or object (Sentry,
 // android.util.Log, FirebaseCrashlytics) to its qualified name.
 func (kb *ktBuilder) classRef(n *sitter.Node) string {
+	n = kb.seeThrough(n)
 	switch n.Type() {
-	case "simple_identifier":
+	case "identifier":
 		name := kb.text(n)
 		if _, local := kb.lookup(name); local {
 			return ""
@@ -1224,7 +1445,7 @@ func (kb *ktBuilder) classRef(n *sitter.Node) string {
 	case "navigation_expression":
 		txt := strings.ReplaceAll(kb.text(n), " ", "")
 		segs := strings.Split(txt, ".")
-		if len(segs) < 2 || strings.ContainsAny(txt, "()?![]") {
+		if len(segs) < 2 || strings.ContainsAny(txt, "()?![]:") {
 			return ""
 		}
 		if q, ok := kb.f.imports[segs[0]]; ok && isUpperStart(segs[0]) && isUpperStart(segs[len(segs)-1]) {
@@ -1248,8 +1469,12 @@ func (kb *ktBuilder) classRef(n *sitter.Node) string {
 
 // typeOf returns the best-known static type of an expression.
 func (kb *ktBuilder) typeOf(n *sitter.Node) string {
+	n = kb.seeThrough(n)
+	if n == nil {
+		return ""
+	}
 	switch n.Type() {
-	case "simple_identifier":
+	case "identifier":
 		name := kb.text(n)
 		if v, ok := kb.lookup(name); ok {
 			return kb.fn.Vars[v].Type
@@ -1265,11 +1490,9 @@ func (kb *ktBuilder) typeOf(n *sitter.Node) string {
 		}
 	case "navigation_expression":
 		kids := named(n)
-		if len(kids) >= 2 {
-			if fn := firstOf(kids[len(kids)-1], "simple_identifier"); fn != nil {
-				if owner := kb.typeOf(kids[0]); owner != "" {
-					return kb.kp.fieldType(owner, kb.text(fn))
-				}
+		if len(kids) >= 2 && kids[len(kids)-1].Type() == "identifier" {
+			if owner := kb.typeOf(kids[0]); owner != "" {
+				return kb.kp.fieldType(owner, kb.text(kids[len(kids)-1]))
 			}
 		}
 	case "call_expression":
@@ -1279,14 +1502,17 @@ func (kb *ktBuilder) typeOf(n *sitter.Node) string {
 		}
 		callee := kids[0]
 		switch callee.Type() {
-		case "simple_identifier":
+		case "identifier":
 			name := kb.text(callee)
 			if isUpperStart(name) {
 				return kb.kp.resolveType(kb.f, name)
 			}
 		case "navigation_expression":
 			ck := named(callee)
-			m := kb.text(firstOf(ck[len(ck)-1], "simple_identifier"))
+			if len(ck) < 2 {
+				return ""
+			}
+			m := kb.text(ck[len(ck)-1])
 			if q := kb.classRef(ck[0]); q != "" {
 				if ex := kb.kp.extra[q]; ex != nil {
 					if rt, ok := ex.returns[m]; ok {
@@ -1312,29 +1538,28 @@ func (kb *ktBuilder) typeOf(n *sitter.Node) string {
 			return kb.typeOf(k[0])
 		}
 	case "as_expression":
-		k := named(n)
-		return kb.kp.resolveType(kb.f, ktTypeText(kb.f, k[len(k)-1]))
+		return kb.kp.resolveType(kb.f, ktTypeText(kb.f, n.ChildByFieldName("right")))
 	}
 	return ""
 }
 
-func (kb *ktBuilder) args(suffix *sitter.Node) []ir.VarID {
+// args lowers the arguments of a call: its value arguments and a
+// trailing lambda.
+func (kb *ktBuilder) args(call *sitter.Node) []ir.VarID {
 	var out []ir.VarID
-	if suffix == nil {
-		return nil
-	}
-	for _, c := range named(suffix) {
+	for i, c := range named(call) {
+		if i == 0 {
+			continue // the callee
+		}
 		switch c.Type() {
 		case "value_arguments":
 			for _, va := range allOf(c, "value_argument") {
 				kids := named(va)
 				if len(kids) == 0 {
-					// A keyword literal (null) has no named node; it
-					// still takes its position.
 					out = append(out, kb.constVar(kb.text(va), va))
 					continue
 				}
-				if len(kids) >= 2 && kids[0].Type() == "simple_identifier" && hasChildToken(va, kb.f.src, "=") {
+				if len(kids) >= 2 && kids[0].Type() == "identifier" && hasChildToken(va, kb.f.src, "=") {
 					// Named argument: User(email = x) — keep the name.
 					out = append(out, kb.kwarg(kb.text(kids[0]), kb.expr(kids[len(kids)-1]), va))
 					continue
@@ -1354,11 +1579,10 @@ func (kb *ktBuilder) call(n *sitter.Node) ir.VarID {
 		return kb.temp(n)
 	}
 	calleeNode := kids[0]
-	suffix := firstOf(n, "call_suffix")
 	switch calleeNode.Type() {
-	case "simple_identifier":
+	case "identifier":
 		name := kb.text(calleeNode)
-		args := kb.args(suffix)
+		args := kb.args(n)
 		if v, local := kb.lookup(name); local {
 			return kb.emitCall(n, &ir.Call{Name: "invoke", HasRecv: true, RecvText: name}, append([]ir.VarID{v}, args...), "")
 		}
@@ -1409,17 +1633,13 @@ func (kb *ktBuilder) call(n *sitter.Node) ir.VarID {
 		return kb.emitCall(n, c, args, "")
 	case "navigation_expression":
 		ck := named(calleeNode)
-		if len(ck) < 2 {
+		if len(ck) < 2 || ck[len(ck)-1].Type() != "identifier" || hasChildToken(calleeNode, kb.f.src, "::") {
 			break
 		}
-		mNode := firstOf(ck[len(ck)-1], "simple_identifier")
-		if mNode == nil {
-			break
-		}
-		m := kb.text(mNode)
+		m := kb.text(ck[len(ck)-1])
 		recvNode := ck[0]
 		if q := kb.classRef(recvNode); q != "" {
-			args := kb.args(suffix)
+			args := kb.args(n)
 			c := &ir.Call{Name: m, RecvType: q, RecvText: trimText(kb.text(recvNode))}
 			if strings.Contains(q, ".") {
 				c.Callee = q + "." + m
@@ -1437,7 +1657,7 @@ func (kb *ktBuilder) call(n *sitter.Node) ir.VarID {
 		}
 		typ := kb.typeOf(recvNode)
 		recv := kb.expr(recvNode)
-		args := kb.args(suffix)
+		args := kb.args(n)
 		c := &ir.Call{Name: m, HasRecv: true, RecvType: typ, RecvText: trimText(kb.text(recvNode))}
 		rt := ""
 		if typ != "" && strings.Contains(typ, ".") {
@@ -1462,6 +1682,6 @@ func (kb *ktBuilder) call(n *sitter.Node) ir.VarID {
 	}
 	// Invocation of an arbitrary expression (lambda variable, factory()()).
 	fv := kb.expr(calleeNode)
-	args := kb.args(suffix)
+	args := kb.args(n)
 	return kb.emitCall(n, &ir.Call{Name: "invoke", HasRecv: true, RecvText: trimText(kb.text(calleeNode))}, append([]ir.VarID{fv}, args...), "")
 }

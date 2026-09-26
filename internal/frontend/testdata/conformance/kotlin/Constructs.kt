@@ -206,3 +206,74 @@ fun reflectiveProperty(t: Ticket) {
     // ok: log.jvm.stdout
     println(prop.get(t))
 }
+
+// Current Kotlin syntax the previous grammar could not read (#44). Each
+// construct is followed by a flow, so the code around it must be lowered.
+fun interface Sender {
+    fun send(to: String)
+}
+
+class Stats {
+    var trackedEmail: String = ""
+}
+
+class Holder(private val stats: Stats) {
+    fun get(): Stats = stats
+}
+
+fun assignToPropertyOfCallResult(holder: Holder, email: String) {
+    holder.get().trackedEmail = email
+    // ruleid: log.jvm.stdout
+    println(holder.get().trackedEmail)
+}
+
+fun whenWithInAndTrailingComma(email: String, known: List<String>, kind: Int) {
+    when (email) {
+        in known -> println("known")
+        else -> {
+            // ruleid: log.jvm.stdout
+            println(email)
+        }
+    }
+    when (kind) {
+        1,
+        2,
+        -> println("small")
+        else -> {
+            // ruleid: log.jvm.stdout
+            println(email)
+        }
+    }
+}
+
+fun qualifiedReceiverType(block: StringBuilder.() -> Unit, email: String) {
+    // ruleid: log.jvm.stdout
+    println(email)
+}
+
+fun safeCastOnNextLine(value: Any, email: String) {
+    val text = value
+        .toString()
+        as? String
+        ?: return
+    // ruleid: log.jvm.stdout
+    println(text + email)
+}
+
+fun shortTemplate(email: String) {
+    // "$name" in a one-line string is an interpolation of name.
+    // ruleid: log.jvm.stdout
+    println("sent to $email today")
+    // ok: log.jvm.stdout
+    println("costs $5")
+}
+
+fun consentNegatedCall(consents: Consents, email: String) {
+    if (!consents.hasConsent()) {
+        // ok: log.jvm.stdout
+        println("no consent")
+        return
+    }
+    // ruleid: log.jvm.stdout
+    println(email)
+}
