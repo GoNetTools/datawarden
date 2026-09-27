@@ -15,6 +15,13 @@ class SignupLogging {
         Log.d(TAG, "order $orderId")
     }
 
+    fun logcatWtfAndPrintln(email: String, phoneNumber: String) {
+        // ruleid: log.android.logcat
+        Log.wtf(TAG, "unexpected state for $email")
+        // ruleid: log.android.logcat
+        Log.println(Log.ERROR, TAG, "OTP to $phoneNumber")
+    }
+
     fun timber(phoneNumber: String) {
         // ruleid: log.android.timber
         Timber.i("OTP sent to %s", phoneNumber)

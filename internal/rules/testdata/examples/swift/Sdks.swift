@@ -1,8 +1,13 @@
 // Examples for the Swift SDK rules.
 import Amplitude
+import Bugsnag
+import BrazeKit
+import DatadogCore
+import DatadogRUM
 import FirebaseAnalytics
 import FirebaseCrashlytics
 import Mixpanel
+import Segment
 import Sentry
 
 func sentry(email: String, userId: String) {
@@ -39,4 +44,34 @@ func mixpanel(email: String) {
 func amplitude(email: String) {
     // ruleid: sdk.swift.amplitude
     Amplitude.instance().setUserId(email)
+}
+
+func bugsnag(email: String, userId: String) {
+    // ruleid: sdk.swift.bugsnag
+    Bugsnag.setUser(userId, withEmail: email, andName: nil)
+    // ok: sdk.swift.bugsnag
+    Bugsnag.leaveBreadcrumb(withMessage: "checkout started")
+}
+
+func datadog(userId: String, email: String, cartSize: Int) {
+    // ruleid: sdk.swift.datadog
+    Datadog.setUserInfo(id: userId, name: nil, email: email)
+    // ok: sdk.swift.datadog
+    RUMMonitor.shared().addAttribute(forKey: "cart_size", value: cartSize)
+}
+
+func segment(email: String) {
+    // ruleid: sdk.swift.segment
+    Analytics.shared().identify("user-1", traits: ["email": email])
+    // ok: sdk.swift.segment
+    Analytics.shared().track("Checkout Started")
+}
+
+func braze(braze: Braze, email: String, phoneNumber: String) {
+    // ruleid: sdk.swift.braze
+    braze.user.set(email: email)
+    // ruleid: sdk.swift.braze
+    braze.logCustomEvent(name: "otp_sent", properties: ["phone": phoneNumber])
+    // ok: sdk.swift.braze
+    braze.logCustomEvent(name: "app_opened")
 }

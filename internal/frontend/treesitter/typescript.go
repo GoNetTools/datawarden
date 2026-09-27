@@ -44,6 +44,8 @@ type tsProgram struct {
 var tsGlobals = map[string]bool{
 	"console": true, "localStorage": true, "sessionStorage": true, "navigator": true, "document": true, "JSON": true,
 	"Math": true, "Object": true, "Array": true, "Promise": true, "fetch": true, "gtag": true, "fbq": true, "Intercom": true,
+	// Analytics and error-reporting snippets that define a window global.
+	"heap": true, "FS": true, "hj": true, "Rollbar": true, "Bugsnag": true,
 	"process": true, "Buffer": true, "crypto": true, "btoa": true, "atob": true, "location": true, "history": true, "XMLHttpRequest": true,
 }
 

@@ -172,6 +172,38 @@
   dest: { host: notify.bugsnag.com, kind: third_party, vendor: Bugsnag }
   category: crash_reporting
 
+- id: sdk.rollbar
+  lang: [kotlin, java]
+  call: ["com.rollbar.android.Rollbar.debug", "com.rollbar.android.Rollbar.info", "com.rollbar.android.Rollbar.warning", "com.rollbar.android.Rollbar.error",
+         "com.rollbar.android.Rollbar.critical", "com.rollbar.android.Rollbar.log", "com.rollbar.android.Rollbar.setPersonData",
+         "com.rollbar.notifier.Rollbar.debug", "com.rollbar.notifier.Rollbar.info", "com.rollbar.notifier.Rollbar.warning", "com.rollbar.notifier.Rollbar.error",
+         "com.rollbar.notifier.Rollbar.critical", "com.rollbar.notifier.Rollbar.log"]
+  receiver: "(?i)rollbar"
+  arg: "*"
+  dest: { host: api.rollbar.com, kind: third_party, vendor: Rollbar }
+  category: crash_reporting
+
+- id: sdk.datadog
+  lang: [kotlin, java]
+  call: ["com.datadog.android.Datadog.setUserInfo", "com.datadog.android.Datadog.addUserProperties",
+         "com.datadog.android.rum.RumMonitor.addAction", "com.datadog.android.rum.RumMonitor.addAttribute", "com.datadog.android.rum.RumMonitor.addError",
+         "com.datadog.android.rum.RumMonitor.startView", "com.datadog.android.rum.RumMonitor.startAction", "com.datadog.android.log.Logger.*"]
+  receiver: "(?i)datadog|rummonitor|^(this\\.)?_?rum$"
+  arg: "*"
+  dest: { host: browser-intake-datadoghq.com, kind: third_party, vendor: Datadog }
+  category: monitoring
+
+- id: sdk.newrelic
+  lang: [kotlin, java]
+  call: ["com.newrelic.agent.android.NewRelic.setUserId", "com.newrelic.agent.android.NewRelic.setAttribute", "com.newrelic.agent.android.NewRelic.recordCustomEvent",
+         "com.newrelic.agent.android.NewRelic.recordBreadcrumb", "com.newrelic.agent.android.NewRelic.recordHandledException",
+         "com.newrelic.agent.android.NewRelic.logInfo", "com.newrelic.agent.android.NewRelic.logWarning", "com.newrelic.agent.android.NewRelic.logError",
+         "com.newrelic.agent.android.NewRelic.logDebug", "com.newrelic.agent.android.NewRelic.log", "com.newrelic.agent.android.NewRelic.logAttributes"]
+  receiver: "(?i)newrelic"
+  arg: "*"
+  dest: { host: mobile-collector.newrelic.com, kind: third_party, vendor: New Relic }
+  category: monitoring
+
 - id: storage.android.shared_prefs
   lang: [kotlin, java]
   call: ["android.content.SharedPreferences.Editor.putString", "android.content.SharedPreferences.Editor.putStringSet"]
