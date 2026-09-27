@@ -39,7 +39,7 @@ All notable changes to datawarden are documented here. The format follows [Keep 
 
 - Scanning the same code twice gives the same report (#53). The analysis keeps one fact per data type in each variable and caps some lists. At equal confidence it kept whichever candidate arrived first, and the arrival order followed Go's randomised map iteration. So a flow's source, its path, and on large projects whether some flows were reported at all changed from run to run: saleor gave 597 to 600 flows. Every such choice now follows a fixed order: higher confidence, then an unguarded path, a fact seeded by the variable's own name, the earliest source, the shortest path. A full list keeps its best entries instead of its first ones. As a result:
   - gotify/server gains two violations of a kind already reported one line earlier (a username in a zerolog warning).
-  - A data loader's `load(key)` no longer counts as returning its key (`AppByTokenLoader(ctx).load(token)` is an app), which removes two credential false positives on saleor.
+  - A data loader's `load(key)` no longer counts as returning its key (`AppByTokenLoader(ctx).load(token)` is an app), which removes a credential false positive on saleor (an auth token that seemed to reach a tax-calculation log) and two more that keeping the best entries would have surfaced.
 
   Eval scores are unchanged, and the cache format changes.
 
