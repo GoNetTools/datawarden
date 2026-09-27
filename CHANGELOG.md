@@ -50,6 +50,13 @@ All notable changes to datawarden are documented here. The format follows [Keep 
 
 ### Fixed
 
+- Values no longer reach unrelated sinks through handler closures (#32). On gotify, a `CurrentUserExternal` built in the login handler was reported in `api/oidc.go` logs, with a path that jumped from `session.go` into `database/user.go`.
+  - **Cause:** the closure analysis treated a field read of an object holding closures as an element of a collection. A handler struct kept next to its route (or `gin.Context`, which is given every handler) therefore made its `DB` field "hold" all the handlers. That spread to the `DB` field of every object of that type, and each `d.DB.Where(...)` ran them.
+  - **Fix:** a field of a declared type now holds only the closures stored in it. Map reads and objects of unknown shape are unchanged.
+  - **Results:** gotify goes from 71 to 27 flows. The only violation lost is the issue's, and `api/oidc.go:521` is now reported with its real source (`model.User.Name`). juice-shop loses two violations that ran OAuth data into a `console.log` in the bundled three.js. Eval scores are unchanged.
+  - **`explain`:** a step where the value comes out of a function the call runs, rather than one it names, now says so ("runs `api.SessionAPI.Login`, a function value the analysis assumes `gorm.DB.Where` may call", or "calls X, which implements Y"). Before, it read as if the call's arguments carried the value.
+
+  The cache format changes.
 - A key no longer labels a value that says what it is (#34). `Str("address", l.Addr().String())` is the listen address, not a postal address. The key is ignored when the value is:
   - a call or field that names a network location (`Addr()`, `RemoteAddr`, `Host`, `URL`, `Port`, `Endpoint`, also through `String()`);
   - a variable whose own name is another data type (`Str("email", phone)` is a phone);

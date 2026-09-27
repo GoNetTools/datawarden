@@ -320,8 +320,15 @@ func (cf *closureFlow) transfer(fn *ir.Func, in *ir.Instr) {
 			owner = ownerOf(fn, in.Args[0])
 		}
 		cf.addVar(fn.ID, in.Dst, cf.field(owner, in.Field, fn.Lang), false)
-		// An element of a collection holding closures.
-		cf.addVar(fn.ID, in.Dst, of(in.Args[0]), false)
+		// An element of a collection holding closures (a map read by key,
+		// a property of an object of unknown shape). A field of a declared
+		// type holds only what is stored in it: a handler struct that runs
+		// closures does not make its database handle one, and the load
+		// below would otherwise put them into that field of every object
+		// of the type (#32).
+		if in.Owner == "" || !cf.a.opts.Schema.KnownType(in.Owner) {
+			cf.addVar(fn.ID, in.Dst, of(in.Args[0]), false)
+		}
 		// The loaded object is the one in the field: what is added to it
 		// (this.handlers.add(h)) is in the field. Only for an owner of
 		// known type: with an unknown one, the field would stand for that

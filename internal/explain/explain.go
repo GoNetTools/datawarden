@@ -383,6 +383,11 @@ func (x Explainer) steps(in Input, idx *index, code func(ir.Pos) string) []Step 
 			s.Func = r.fn.ID
 			s.IR = ir.FormatInstr(r.fn, &r.fn.Instrs[r.i])
 			s.What = x.describe(in, idx, r)
+			if n := len(out); n > 0 {
+				if w := ranHere(r, out[n-1].Func); w != "" {
+					s.What = w
+				}
+			}
 		default:
 			if vs := idx.vars[p]; len(vs) > 0 {
 				v := vs[0].fn.Vars[vs[0].i]
@@ -414,6 +419,23 @@ func (x Explainer) steps(in Input, idx *index, code func(ir.Pos) string) []Step 
 		out = append(out, s)
 	}
 	return out
+}
+
+// ranHere describes a call step reached from prev, a function the call
+// does not name: one the call runs, so the value comes out of it. That is
+// an implementation of an interface method, or a closure (a callback or
+// handler) the analysis assumes the call may run. Without this, the step
+// reads as if the call's arguments carried the value.
+func ranHere(r ref, prev string) string {
+	ins := &r.fn.Instrs[r.i]
+	c := ins.Call
+	if ins.Op != ir.OpCall || c == nil || prev == "" || prev == r.fn.ID || prev == c.Target || prev == c.Callee {
+		return ""
+	}
+	if name := prev[strings.LastIndexByte(prev, '.')+1:]; name == c.Name {
+		return fmt.Sprintf("calls %s, which implements %s: what it returns or writes comes out here", short(prev), short(label(c)))
+	}
+	return fmt.Sprintf("runs %s, a function value the analysis assumes %s may call (a callback or handler it holds or is given): what it returns or writes comes out here", short(prev), short(label(c)))
 }
 
 func (x Explainer) describe(in Input, idx *index, r ref) string {

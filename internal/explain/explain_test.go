@@ -203,3 +203,39 @@ func TestStepsAndSources(t *testing.T) {
 		t.Errorf("schema hint: %q %+v", e.Source.Why, e.Silence)
 	}
 }
+
+// A value that comes out of a function the call does not name is said to
+// come from a function the call runs (#32): a closure the call is assumed
+// to run, or an implementation of the interface method it calls.
+func TestStepFromAFunctionTheCallRuns(t *testing.T) {
+	pos := func(line int) ir.Pos { return ir.Pos{File: "main.go", Line: line, Col: 3} }
+	handler := &ir.Func{ID: "app.API.login", Lang: "go", File: "main.go"}
+	handler.NewBlock()
+	p := handler.Temp(pos(2))
+	handler.Emit(ir.Instr{Op: ir.OpNew, Dst: p, Pos: pos(2), Call: &ir.Call{Callee: "app.profile", Name: "profile"}})
+	handler.Emit(ir.Instr{Op: ir.OpReturn, Args: []ir.VarID{p}, Pos: pos(3)})
+
+	caller := &ir.Func{ID: "app.report", Lang: "go", File: "main.go"}
+	caller.NewBlock()
+	db := caller.AddParam("db", "gorm.io/gorm.DB", pos(5))
+	res := caller.Temp(pos(6))
+	caller.Emit(ir.Instr{Op: ir.OpCall, Dst: res, Args: []ir.VarID{db}, Pos: pos(6), Call: &ir.Call{Callee: "gorm.io/gorm.DB.Where", Name: "Where", HasRecv: true}})
+	got := caller.Temp(pos(7))
+	caller.Emit(ir.Instr{Op: ir.OpCall, Dst: got, Args: []ir.VarID{db}, Pos: pos(7), Call: &ir.Call{Callee: "app.Store.login", Name: "login", HasRecv: true}})
+	caller.Emit(ir.Instr{Op: ir.OpCall, Dst: caller.Temp(pos(8)), Args: []ir.VarID{res}, Pos: pos(8), Call: &ir.Call{Callee: "log.Println", Name: "Println"}})
+
+	for _, tc := range []struct {
+		at   int
+		want string
+	}{
+		{6, "runs `app.API.login`, a function value the analysis assumes `gorm.DB.Where` may call"},
+		{7, "calls `app.API.login`, which implements `app.Store.login`"},
+	} {
+		fl := &finding.Flow{DataType: "person_name", SinkRule: "log.go.stdlib", Source: pos(2), Sink: pos(8),
+			Path: []ir.Pos{pos(2), pos(tc.at), pos(8)}, Function: caller.ID, Lang: "go", SourceDesc: "value of type app.profile", SinkCall: "log.Println"}
+		e := Explainer{}.Explain(Input{Flow: fl, Funcs: []*ir.Func{handler, caller}, Lines: func(string) []string { return nil }})
+		if len(e.Steps) < 2 || !strings.Contains(e.Steps[1].What, tc.want) {
+			t.Errorf("line %d: steps %+v, want %q", tc.at, e.Steps, tc.want)
+		}
+	}
+}
