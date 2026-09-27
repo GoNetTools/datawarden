@@ -429,13 +429,13 @@ func (x Explainer) steps(in Input, idx *index, code func(ir.Pos) string) []Step 
 func ranHere(r ref, prev string) string {
 	ins := &r.fn.Instrs[r.i]
 	c := ins.Call
-	if ins.Op != ir.OpCall || c == nil || prev == "" || prev == r.fn.ID || prev == c.Target || prev == c.Callee {
+	if ins.Op != ir.OpCall || c == nil || prev == "" || prev == r.fn.ID {
 		return ""
 	}
-	// A function this one calls by name returned it, even when the path
-	// does not stop at that call.
-	for i := range r.fn.Instrs {
-		if o := r.fn.Instrs[i].Call; o != nil && (o.Target == prev || o.Callee == prev) {
+	// A function called by name here or earlier returned it, even when the
+	// path does not stop at that call.
+	for _, o := range r.fn.Instrs[:r.i+1] {
+		if o.Call != nil && (o.Call.Target == prev || o.Call.Callee == prev) {
 			return ""
 		}
 	}

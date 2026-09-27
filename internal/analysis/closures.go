@@ -41,14 +41,17 @@ type closureFlow struct {
 	fields map[string]map[string][]closure // field name -> owner (short name, "" unknown) -> closures
 	rets   map[string][]closure
 	deps   *fileDeps
-	grew   bool
+	// ownerFiles caches the files declaring each owner type and its
+	// supertypes, for field.
+	ownerFiles map[string][]string
+	grew       bool
 }
 
 // maxClosureRounds bounds the fixpoint over the whole program.
 const maxClosureRounds = 32
 
 func newClosureFlow(a *analyzer, funcs []*ir.Func) *closureFlow {
-	cf := &closureFlow{a: a, vars: map[string]map[ir.VarID][]closure{}, fields: map[string]map[string][]closure{}, rets: map[string][]closure{}}
+	cf := &closureFlow{a: a, vars: map[string]map[ir.VarID][]closure{}, fields: map[string]map[string][]closure{}, rets: map[string][]closure{}, ownerFiles: map[string][]string{}}
 	has := false
 	for _, f := range funcs {
 		for i := range f.Instrs {
@@ -157,18 +160,19 @@ func (cf *closureFlow) field(owner, field string, fn *ir.Func) []closure {
 	if len(m) == 0 {
 		return nil
 	}
-	var ownerFiles []string
-	for _, c := range cf.a.cha.byShort[owner] {
-		ownerFiles = append(ownerFiles, c.File)
+	ownerFiles, ok := cf.ownerFiles[owner]
+	if !ok {
+		for _, o := range cf.a.cha.ancestors(owner) {
+			for _, c := range cf.a.cha.byShort[shortClass(o)] {
+				ownerFiles = append(ownerFiles, c.File)
+			}
+		}
+		cf.ownerFiles[owner] = ownerFiles
 	}
 	var out []closure
 	add := func(src []closure) {
 		for _, c := range src {
-			f := cf.a.funcs[c.fn]
-			if f != nil && f.Lang != fn.Lang {
-				continue
-			}
-			if f != nil && cf.deps != nil && !cf.deps.related(fn.File, f.File, ownerFiles) {
+			if f := cf.a.funcs[c.fn]; f != nil && (f.Lang != fn.Lang || !cf.deps.related(fn.File, f.File, ownerFiles)) {
 				continue
 			}
 			out, _ = cf.addAll(out, []closure{c}, false, nil)
