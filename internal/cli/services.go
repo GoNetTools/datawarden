@@ -34,6 +34,8 @@ type ConfigLoader interface {
 // also the scanner's rule matcher.
 type RuleSet interface {
 	Match(lang, kind string, c *ir.Call) []rules.Hit
+	MatchField(lang, owner, field, recv string) []rules.Hit
+	MatchParam(lang string, annotations []string) []rules.Hit
 	ByID(id string) *rules.Rule
 	All() []*rules.Rule
 	Hash() string

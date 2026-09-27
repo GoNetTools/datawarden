@@ -2,7 +2,7 @@
 
 This is the specification of the intermediate representation that every
 frontend produces and the taint engine consumes (`internal/ir`). It is
-version **2** (`ir.Version`). `ir.Verify` checks a function against the
+version **3** (`ir.Version`). `ir.Verify` checks a function against the
 rules marked **must** below; every frontend's output is verified in the
 tests (`TestLoweredIRVerifies`, and each tree-sitter frontend test).
 
@@ -50,6 +50,11 @@ A `Var` has a source-level `Name` (empty for temporaries), a best-effort
 definition (an instruction whose `Dst` it is). A parameter or a constant
 **must** have none. Each assignment to a local in the source therefore
 makes a new variable with the same name.
+
+**Annotations.** A parameter may carry its annotations or decorators in
+`Annotations`, each `Name`, or `Name:key` when its first argument is a
+string: `@RequestBody` is `RequestBody`, `@Body("email")` is `Body:email`.
+Source rules with `param_annotation` read them.
 
 **Cells.** A variable with `Cell` set is a location rather than a value:
 it may be defined any number of times, and each definition is a *weak
@@ -200,6 +205,7 @@ b2:
 
 ## Changes
 
+- **3**: `Var.Annotations` on parameters.
 - **2**: `phi`, `compute`, `new`, `throw`, `catch`, `closure` and `yield`
   replace the `Snapshot` and `Throw` flags and `Call.Construct`, `Ctor`,
   `Catch` and `Callbacks`; closures are separate functions with capture

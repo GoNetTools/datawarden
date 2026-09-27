@@ -1,0 +1,116 @@
+# Source rules for what a client sends to a web handler: request bodies,
+# forms and bound request objects. Request data is personal data often, not
+# always, so these rules have a moderate confidence. A value read under a
+# constant key or field name (form["email"], req.body.page,
+# getParameter("q")) is described by that name instead, so only data read
+# as a whole, or under a key the code computes, is request_data.
+
+# Go
+
+- id: src.go.http_request
+  kind: source
+  lang: go
+  field: ["net/http.Request.Body", "net/http.Request.Form", "net/http.Request.PostForm", "net/http.Request.MultipartForm"]
+  call: ["net/http.Request.FormValue", "net/http.Request.PostFormValue"]
+  data_type: request_data
+  confidence: 0.9
+- id: src.go.gin_request
+  kind: source
+  lang: go
+  call: ["github.com/gin-gonic/gin.Context.PostForm", "github.com/gin-gonic/gin.Context.DefaultPostForm", "github.com/gin-gonic/gin.Context.GetPostForm",
+         "github.com/gin-gonic/gin.Context.PostFormArray", "github.com/gin-gonic/gin.Context.PostFormMap", "github.com/gin-gonic/gin.Context.GetRawData"]
+  data_type: request_data
+  confidence: 0.9
+- id: src.go.gin_bind
+  kind: source
+  lang: go
+  call: ["github.com/gin-gonic/gin.Context.Bind*", "github.com/gin-gonic/gin.Context.ShouldBind*", "github.com/gin-gonic/gin.Context.MustBindWith"]
+  arg: 0
+  data_type: request_data
+  confidence: 0.9
+  description: The request body bound into the value the handler passes (c.ShouldBindJSON(&req)).
+- id: src.go.echo_request
+  kind: source
+  lang: go
+  call: ["github.com/labstack/echo*.Context.FormValue", "github.com/labstack/echo*.Context.FormParams"]
+  data_type: request_data
+  confidence: 0.9
+- id: src.go.echo_bind
+  kind: source
+  lang: go
+  call: ["github.com/labstack/echo*.Context.Bind", "github.com/labstack/echo*.DefaultBinder.Bind*"]
+  arg: 0
+  data_type: request_data
+  confidence: 0.9
+- id: src.go.chi_url_param
+  kind: source
+  lang: go
+  call: ["github.com/go-chi/chi*.URLParam"]
+  data_type: request_data
+  confidence: 0.9
+  description: A path parameter read under a key the code computes; one read under a literal key is described by the key.
+
+# Python
+
+- id: src.py.flask_request
+  kind: source
+  lang: python
+  field: ["flask.request.form", "flask.request.json", "flask.request.args", "flask.request.values", "flask.request.data", "flask.request.files"]
+  call: ["flask.request.get_json", "flask.request.get_data", "flask.request.*.get", "flask.request.*.getlist", "flask.request.*.to_dict"]
+  data_type: request_data
+  confidence: 0.9
+- id: src.py.django_request
+  kind: source
+  lang: python
+  field: ["django.http.HttpRequest.POST", "django.http.HttpRequest.GET", "django.http.HttpRequest.body", "django.http.HttpRequest.FILES",
+          "rest_framework.request.Request.data", "rest_framework.request.Request.query_params"]
+  receiver: "^request$"
+  data_type: request_data
+  confidence: 0.9
+  description: Django and Django REST framework views, whose request parameter is usually untyped (def view(request)).
+
+# TypeScript and JavaScript
+
+- id: src.ts.express_request
+  kind: source
+  lang: typescript
+  field: ["express.Request.body", "express.Request.query", "express.Request.params", "koa.Request.body", "koa.Request.query"]
+  receiver: "^(req|request|ctx\\.request)$"
+  data_type: request_data
+  confidence: 0.9
+  description: Express and Koa handlers (req.body, ctx.request.body).
+- id: src.ts.fetch_request
+  kind: source
+  lang: typescript
+  call: ["Request.json", "Request.formData", "Request.text", "NextRequest.json", "NextRequest.formData", "NextRequest.text",
+         "next/server.NextRequest.json", "next/server.NextRequest.formData", "next/server.NextRequest.text"]
+  receiver: "^(req|request)$"
+  data_type: request_data
+  confidence: 0.9
+  description: Next.js route handlers and other fetch-style handlers (await request.json()).
+- id: src.ts.nest_body
+  kind: source
+  lang: typescript
+  param_annotation: [Body]
+  data_type: request_data
+  confidence: 0.9
+  description: NestJS @Body() parameters. @Body("email") is described by its key.
+
+# JVM
+
+- id: src.jvm.servlet_request
+  kind: source
+  lang: [java, kotlin]
+  call: ["javax.servlet.*ServletRequest.getParameter*", "jakarta.servlet.*ServletRequest.getParameter*",
+         "javax.servlet.*ServletRequest.getInputStream", "jakarta.servlet.*ServletRequest.getInputStream",
+         "javax.servlet.*ServletRequest.getReader", "jakarta.servlet.*ServletRequest.getReader"]
+  receiver: "^(req|request)$"
+  data_type: request_data
+  confidence: 0.9
+- id: src.jvm.spring_request_body
+  kind: source
+  lang: [java, kotlin]
+  param_annotation: [RequestBody]
+  data_type: request_data
+  confidence: 0.9
+  description: Spring @RequestBody parameters. @RequestParam and @PathVariable parameters are described by their names.

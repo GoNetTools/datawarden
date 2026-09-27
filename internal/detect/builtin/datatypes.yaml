@@ -12,7 +12,8 @@
 # map), sensitive (special-category data, GDPR art. 9), severity,
 # patterns (identifier words, space-separated tokens), weak (ambiguous
 # abbreviations, lower confidence), exclude (tokens that rule the type out)
-# and values (regular expressions for committed values, see below).
+# values (regular expressions for committed values, see below) and
+# rules_only (a type only source rules produce, with no patterns).
 
 classes:
   - id: pii
@@ -136,6 +137,17 @@ data_types:
     class: pii
     sensitive: true
     patterns: [bank account, bankaccount, account number, accountnumber, account no, acct number, acct no, iban, routing number]
+
+  - id: request_data
+    label: Request data
+    category: request
+    class: pii
+    # Data a client sent to a web handler, read as a whole or under a key
+    # the source doesn't give (r.Body, req.body, request.POST,
+    # @RequestBody). Often personal data, not always, so the source rules
+    # that produce it have a moderate confidence. Read under a known key or
+    # field name (form["email"], req.body.page), the name says what it is.
+    rules_only: true
 
   - id: location
     label: Precise geolocation

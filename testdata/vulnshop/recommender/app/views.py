@@ -42,6 +42,15 @@ def login():
     return jsonify(ok=False), 401
 
 
+@app.post("/feedback")
+def feedback():
+    # LEAK: the whole submitted form, contact details included, in the log.
+    log.info("feedback %s", request.form)
+    # SAFE: one query parameter, named for what it is.
+    log.info("from page %s", request.args.get("page"))
+    return jsonify(ok=True)
+
+
 def debug_attempt(user, secret_password):
     # LEAK: email and password printed by a debugging helper.
     print(f"login attempt {user}:{secret_password}")

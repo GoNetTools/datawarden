@@ -673,12 +673,25 @@ func (kb *ktBuilder) seeThrough(n *Node) *Node {
 }
 
 func (kb *ktBuilder) params(fvp *Node) {
-	for _, p := range allOf(fvp, "parameter") {
-		id := firstOf(p, "identifier")
-		if id == nil {
+	var mods *Node // the parameter_modifiers before a parameter
+	for _, p := range named(fvp) {
+		if p.Type() == "parameter_modifiers" {
+			mods = p
 			continue
 		}
-		kb.param(kb.text(id), kb.kp.resolveType(kb.f, ktTypeText(kb.f, ktTypeChild(p))), id)
+		if p.Type() != "parameter" {
+			continue
+		}
+		id := firstOf(p, "identifier")
+		if id == nil {
+			mods = nil
+			continue
+		}
+		v := kb.param(kb.text(id), kb.kp.resolveType(kb.f, ktTypeText(kb.f, ktTypeChild(p))), id)
+		if tags, names := ktAnnotations(kb.f, mods); len(names) > 0 {
+			kb.annotate(v, tags, names)
+		}
+		mods = nil
 	}
 }
 

@@ -59,10 +59,28 @@ type Options struct {
 	Callers func(id string) []string
 }
 
-// RuleMatcher finds sink, source and transform rules for a call
-// (implemented by *rules.Set).
+// RuleMatcher finds sink, source and transform rules for a call, and
+// source rules for a field read or a parameter's annotations (implemented
+// by *rules.Set).
 type RuleMatcher interface {
 	Match(lang, kind string, c *ir.Call) []rules.Hit
+	MatchField(lang, owner, field, recv string) []rules.Hit
+	MatchParam(lang string, annotations []string) []rules.Hit
+}
+
+// requestData is the data type of what a client sent to a web handler
+// (req.body, request.POST, @RequestBody). Read under a known key or field
+// name (form["email"], req.body.page), the name says what the value is:
+// the part does not carry requestData.
+const requestData = "request_data"
+
+// sourceConf is the confidence of what a source rule hit produces.
+func sourceConf(h rules.Hit) float64 {
+	c := h.Rule.Confidence
+	if c == 0 {
+		c = 1
+	}
+	return 0.9 * h.Conf * c
 }
 
 // SchemaIndex answers schema questions (implemented by *detect.Schema).
@@ -727,6 +745,12 @@ func (a *analyzer) seed(st *state, fn *ir.Func) {
 	for i, pid := range fn.Params {
 		v := fn.Vars[pid]
 		st.add(pid, &fact{dt: "", param: i, src: v.Pos, desc: "parameter " + v.Name, path: []ir.Pos{v.Pos}, conf: 1})
+		if len(v.Annotations) > 0 {
+			// @RequestBody Map body, @Body() dto: what the client sent.
+			for _, h := range a.opts.Rules.MatchParam(fn.Lang, v.Annotations) {
+				st.add(pid, &fact{dt: h.Rule.DataType, param: -1, src: v.Pos, desc: fmt.Sprintf("parameter %s (%s)", v.Name, h.How), path: []ir.Pos{v.Pos}, conf: sourceConf(h), seed: true})
+			}
+		}
 	}
 	for id := range fn.Vars {
 		v := &fn.Vars[id]
@@ -1064,6 +1088,8 @@ func (a *analyzer) fieldFacts(st *state, fn *ir.Func, obj ir.VarID, owner, field
 				d.field = joinField(d.field, part)
 			}
 			out = append(out, d)
+		case f.dt == requestData && name != "":
+			// req.body.page: the field name says what it holds.
 		case !known:
 			out = append(out, derive(f, pos, 0.8))
 		}
@@ -1118,6 +1144,15 @@ func (a *analyzer) step(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 		}
 		obj := in.Args[0]
 		for _, f := range a.fieldFacts(st, fn, obj, in.Owner, in.Field, in.Pos) {
+			changed = st.add(in.Dst, f) || changed
+		}
+		// A field read that is a source: r.Body, req.body, request.POST.
+		owner := in.Owner
+		if owner == "" {
+			owner = copiedType(fn, st.defs, obj)
+		}
+		for _, h := range a.opts.Rules.MatchField(fn.Lang, owner, in.Field, accessPath(fn, st.defs, obj)) {
+			f := &fact{dt: h.Rule.DataType, param: -1, src: in.Pos, desc: fmt.Sprintf("field %s (%s)", in.Field, h.How), path: []ir.Pos{in.Pos}, conf: sourceConf(h)}
 			changed = st.add(in.Dst, f) || changed
 		}
 		// The loaded object's own fields: what was stored under
@@ -1303,6 +1338,63 @@ func dataFreeName(name string) bool {
 // key.
 var publicParts = map[string]bool{"getcertificate": true, "getcertificatechain": true, "getpublickey": true, "getpublic": true, "publickey": true, "certificate": true}
 
+// decodeInto maps decoders to the argument they fill (receiver included).
+var decodeInto = map[string]int{
+	"encoding/json.Unmarshal":                  1,
+	"encoding/json.Decoder.Decode":             1,
+	"encoding/xml.Unmarshal":                   1,
+	"encoding/xml.Decoder.Decode":              1,
+	"encoding/gob.Decoder.Decode":              1,
+	"gopkg.in/yaml.v3.Unmarshal":               1,
+	"github.com/gorilla/schema.Decoder.Decode": 1,
+}
+
+// keyedRead reports whether a call reads a value under a constant key:
+// a getter given a string literal first (form.get("page"),
+// r.FormValue("ssn"), getParameter("q")), or chi.URLParam(r, "id").
+func (a *analyzer) keyedRead(fn *ir.Func, defs []int, in *ir.Instr, recvOff int) bool {
+	if in.Call == nil || !isGetterName(in.Call.Name) && !strings.HasSuffix(in.Call.Name, "Param") {
+		return false
+	}
+	for i := recvOff; i < len(in.Args); i++ {
+		if k, ok := constOf(fn, defs, in.Args[i]); ok && k != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// accessPath writes the object v as the source does when it is a named
+// variable or a chain of field reads from one (req, ctx.request), else "".
+func accessPath(fn *ir.Func, defs []int, v ir.VarID) string {
+	path := ""
+	for depth := 0; depth < 4 && v >= 0 && int(v) < len(fn.Vars); depth++ {
+		if name := fn.Vars[v].Name; name != "" {
+			if path == "" {
+				return name
+			}
+			return name + "." + path
+		}
+		if int(v) >= len(defs) || defs[v] < 0 {
+			return ""
+		}
+		in := &fn.Instrs[defs[v]]
+		switch {
+		case in.Op == ir.OpAssign && len(in.Args) == 1:
+		case in.Op == ir.OpLoad && len(in.Args) == 1 && in.Field != "":
+			if path == "" {
+				path = in.Field
+			} else {
+				path = in.Field + "." + path
+			}
+		default:
+			return ""
+		}
+		v = in.Args[0]
+	}
+	return ""
+}
+
 func isGetterName(name string) bool {
 	n := strings.ToLower(name)
 	for _, v := range getterVerbs {
@@ -1401,8 +1493,22 @@ func (a *analyzer) call(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 	// Sources. A source that delivers its data to a callback (a location
 	// fix, an HTTP response) hands it to the closures it is given.
 	var sourced []*fact
+	keyedRead := a.keyedRead(fn, st.defs, in, recvOff)
 	for _, hit := range match(fn.Lang, rules.KindSource, c) {
-		f := &fact{dt: hit.Rule.DataType, param: -1, src: in.Pos, desc: "call " + label, path: []ir.Pos{in.Pos}, conf: 0.9 * hit.Conf}
+		if hit.Rule.DataType == requestData && keyedRead {
+			// r.FormValue("page"): the key says what the value is.
+			continue
+		}
+		f := &fact{dt: hit.Rule.DataType, param: -1, src: in.Pos, desc: "call " + label, path: []ir.Pos{in.Pos}, conf: sourceConf(hit)}
+		if into := hit.Rule.Arg.Indexes; len(into) > 0 {
+			// c.ShouldBindJSON(&v): the call fills its argument.
+			for _, i := range into {
+				if j := recvOff + i; i >= 0 && j < len(in.Args) {
+					changed = st.mutate(in.Args[j], "", st.mutation(f)) || changed
+				}
+			}
+			continue
+		}
 		changed = st.add(in.Dst, f) || changed
 		sourced = append(sourced, f)
 	}
@@ -1569,6 +1675,18 @@ func (a *analyzer) call(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 	if dataFreeCalls[lname] {
 		return changed
 	}
+	if dst, ok := decodeInto[c.Callee]; ok && dst < len(in.Args) {
+		// A decoder fills the value it is given with what it reads:
+		// json.NewDecoder(r.Body).Decode(&v), json.Unmarshal(b, &v).
+		for i := range in.Args {
+			if i == dst {
+				continue
+			}
+			for _, f := range factsOf(i) {
+				changed = st.mutate(in.Args[dst], "", st.mutation(derive(f, in.Pos, 0.95))) || changed
+			}
+		}
+	}
 	for i := range in.Args {
 		if skipRecv && i == 0 {
 			continue
@@ -1581,6 +1699,10 @@ func (a *analyzer) call(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 				continue
 			}
 			if i == 0 && recvOff == 1 && f.stored != "" && !readsPart(fn, st.defs, in, f.stored) {
+				continue
+			}
+			if i == 0 && recvOff == 1 && f.dt == requestData && keyedRead {
+				// request.form.get("page"): the key says what it is.
 				continue
 			}
 			changed = st.add(in.Dst, derive(f, in.Pos, 0.95, nameXf)) || changed

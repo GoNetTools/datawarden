@@ -3,6 +3,9 @@ module example.com/ruleexamples
 go 1.22
 
 require (
+	github.com/gin-gonic/gin v0.0.0
+	github.com/go-chi/chi/v5 v5.0.0
+	github.com/labstack/echo/v4 v4.0.0
 	github.com/aws/aws-sdk-go-v2/service/sns v0.0.0
 	github.com/getsentry/sentry-go v0.0.0
 	github.com/redis/go-redis/v9 v9.0.0
@@ -16,6 +19,9 @@ require (
 )
 
 replace (
+	github.com/gin-gonic/gin => ../../gostubs/gin
+	github.com/go-chi/chi/v5 => ../../gostubs/chi
+	github.com/labstack/echo/v4 => ../../gostubs/echo
 	github.com/aws/aws-sdk-go-v2/service/sns => ../../gostubs/sns
 	github.com/getsentry/sentry-go => ../../gostubs/sentry-go
 	github.com/redis/go-redis/v9 => ../../gostubs/go-redis

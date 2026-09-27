@@ -93,6 +93,39 @@ export function f(email: string) { Sentry.setUser({ email }); }`})
 	}
 }
 
+// Parameter annotations and decorators are recorded, with their key.
+func TestParameterAnnotations(t *testing.T) {
+	for _, tc := range []struct {
+		fe   func(frontend.Options) frontend.Frontend
+		file string
+		src  string
+	}{
+		{NewJava, "C.java", "class C { void create(@RequestBody Map<String, Object> body, @RequestParam(value = \"page\") String page, String plain) {} }"},
+		{NewKotlin, "C.kt", "class C { fun create(@RequestBody body: Map<String, Any>, @RequestParam(\"page\") page: String, plain: String) {} }"},
+		{NewTypeScript, "c.ts", "class C { create(@Body() body: any, @Query('page') page: string, plain: string) {} }"},
+	} {
+		m := lower(t, tc.fe, map[string]string{tc.file: tc.src})
+		got := map[string][]string{}
+		for _, f := range m.Funcs {
+			for _, p := range f.Params {
+				got[f.Vars[p].Name] = f.Vars[p].Annotations
+			}
+		}
+		want := map[string][]string{"body": {"RequestBody"}, "page": {"RequestParam:page"}}
+		if strings.HasSuffix(tc.file, ".ts") {
+			want = map[string][]string{"body": {"Body"}, "page": {"Query:page"}}
+		}
+		for name, w := range want {
+			if strings.Join(got[name], ",") != strings.Join(w, ",") {
+				t.Errorf("%s: %s annotations = %v, want %v", tc.file, name, got[name], w)
+			}
+		}
+		if len(got["plain"]) > 0 {
+			t.Errorf("%s: plain parameter annotated %v", tc.file, got["plain"])
+		}
+	}
+}
+
 func TestMissingFileSystemIsAWarning(t *testing.T) {
 	m, err := NewKotlin(frontend.Options{}).Lower(context.Background(), []string{"x.kt"})
 	if err != nil || len(m.Warnings) != 1 {

@@ -89,9 +89,17 @@ func TestSummariesAndRecursion(t *testing.T) {
 	}
 }
 
+// noFieldSources matches no field or parameter sources.
+type noFieldSources struct{}
+
+func (noFieldSources) MatchField(lang, owner, field, recv string) []rules.Hit { return nil }
+func (noFieldSources) MatchParam(lang string, annotations []string) []rules.Hit {
+	return nil
+}
+
 // fakeRules reports every call named "leak" as a third-party sink, so the
 // engine can be tested without the YAML rule set.
-type fakeRules struct{}
+type fakeRules struct{ noFieldSources }
 
 func (fakeRules) Match(lang, kind string, c *ir.Call) []rules.Hit {
 	if kind != rules.KindSink || c.Name != "leak" {
@@ -182,7 +190,7 @@ func TestHostOf(t *testing.T) {
 
 // httpRules reports calls named "post" as a network sink whose first
 // argument is the URL.
-type httpRules struct{}
+type httpRules struct{ noFieldSources }
 
 func (httpRules) Match(lang, kind string, c *ir.Call) []rules.Hit {
 	if kind != rules.KindSink || c.Name != "post" {
@@ -193,7 +201,7 @@ func (httpRules) Match(lang, kind string, c *ir.Call) []rules.Hit {
 }
 
 // bothRules combines httpRules and fakeRules.
-type bothRules struct{}
+type bothRules struct{ noFieldSources }
 
 func (bothRules) Match(lang, kind string, c *ir.Call) []rules.Hit {
 	return append(httpRules{}.Match(lang, kind, c), fakeRules{}.Match(lang, kind, c)...)

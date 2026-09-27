@@ -547,6 +547,9 @@ func (tb *tsBuilder) paramNode(p *Node, ctor bool) {
 		switch pat.Type() {
 		case "identifier":
 			v := tb.param(tb.text(pat), typ, pat)
+			if tags, names := tsDecorators(tb.f, p); len(names) > 0 {
+				tb.annotate(v, tags, names)
+			}
 			if ctor && tb.this != ir.NoVar && (firstOf(p, "accessibility_modifier") != nil || hasChildToken(p, tb.f.src, "readonly")) {
 				tb.store(tb.this, tb.text(pat), tb.cls.name, v, p)
 			}

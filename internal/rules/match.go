@@ -40,6 +40,55 @@ func (s *Set) Match(lang, kind string, c *ir.Call) []Hit {
 	return hits
 }
 
+// MatchField returns the source rules matching a read of field from an
+// object of type owner (qualified when known), written recv in the source
+// when it is a variable or a chain of field reads from one.
+func (s *Set) MatchField(lang, owner, field, recv string) []Hit {
+	var hits []Hit
+	owner = strings.TrimLeft(owner, "*&")
+	for _, r := range s.Rules {
+		if r.Kind != KindSource || len(r.fields) == 0 || !r.hasLang(lang) {
+			continue
+		}
+		best := Hit{}
+		for _, f := range r.fields {
+			switch {
+			case f.name != field:
+			case owner != "" && f.owner.MatchString(owner):
+				best = maxHit(best, Hit{Rule: r, Conf: 1.0, How: "field of " + owner})
+			case r.recvRe != nil && recv != "" && r.recvRe.MatchString(recv):
+				best = maxHit(best, Hit{Rule: r, Conf: 0.8, How: "field of " + recv})
+			}
+		}
+		if best.Rule != nil {
+			hits = append(hits, best)
+		}
+	}
+	return hits
+}
+
+// MatchParam returns the source rules matching a parameter's annotations,
+// each "Name" or "Name:key" (a key names what the parameter holds, so
+// only keyless annotations match).
+func (s *Set) MatchParam(lang string, annotations []string) []Hit {
+	var hits []Hit
+	for _, r := range s.Rules {
+		if r.Kind != KindSource || len(r.ParamAnnotation) == 0 || !r.hasLang(lang) {
+			continue
+		}
+	next:
+		for _, a := range annotations {
+			for _, name := range r.ParamAnnotation {
+				if a == name {
+					hits = append(hits, Hit{Rule: r, Conf: 1.0, How: "@" + name})
+					break next
+				}
+			}
+		}
+	}
+	return hits
+}
+
 func (r *Rule) hasLang(l string) bool {
 	for _, x := range r.Lang {
 		if x == l || x == "*" {

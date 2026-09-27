@@ -224,6 +224,21 @@ A value whose type is a data class/entity with sensitive fields (a `Customer`) c
 | US SSN | area/group/serial rules; advertising SSNs skipped |
 | Secrets | the taxonomy's value patterns: AWS access key ids, Stripe, Google, SendGrid, Anthropic and OpenAI API keys, GitHub, GitLab and Slack tokens, JWTs, private key blocks. Documentation values (`AKIAIOSFODNN7EXAMPLE`, the jwt.io sample), `xxxx` and `${VAR}` templates, and low-entropy strings are skipped |
 
+**4. Source rules.** Some APIs return personal data whatever the result is called: phone numbers, device IDs, location and contacts on Android and in React Native.
+
+What a client sends to a web handler is **request data** (`request_data`, class `pii`):
+
+| Language | Frameworks | Sources |
+|---|---|---|
+| Go | `net/http`, gin, echo, chi | `r.Body`, `r.Form`, `r.PostForm`, `c.GetRawData()`, `c.ShouldBindJSON(&v)`, `c.Bind(&v)`, and `json.NewDecoder(r.Body).Decode(&v)` through the decoder |
+| Python | Flask, Django, Django REST framework | `request.form`, `request.json`, `request.get_json()`, `request.POST`, `request.body`, `request.data` |
+| TypeScript | Express, Koa, Next.js, NestJS | `req.body`, `req.query`, `ctx.request.body`, `await request.json()`, `@Body()` |
+| Java, Kotlin | Spring, servlets | `@RequestBody`, `request.getParameter(name)`, `getInputStream()` |
+
+- **A key or field name decides the type.** A value read under a constant key or field name is described by that name. So `request.form["ssn"]` and `req.body.email` are `us_ssn` and `email`, and `req.body.page`, `request.args.get("page")`, `@RequestParam("page")` and `@Body("plan")` are not sources at all.
+- **What stays request data** is what is read as a whole or under a key the code computes: logging `req.body`, a bound request object, or `request.getParameter(name)`.
+- **Confidence.** Request data is often personal, not always, so these sources have a moderate confidence: 0.81, or about 0.6 when only the variable name (an untyped `req` or `request`) says it's a request.
+
 Test files (`_test.go`, `*.spec.ts`, `test_*.py`, `tests/`, `src/test/`, `e2e/`, ...) are scanned too, but personal data found in them scores 0.6 times its usual confidence, below the default `literals.min_confidence`, since test users are almost always made up. Credentials in test files keep their score, and fixtures and seed data (`fixtures/`, `seed.sql`) are not test files: that is where production exports get committed.
 
 Reports never print the value, only a masked form (`555*****12`; secrets keep only their first four characters, `AKIA********`) and, in the baseline, a hash.
@@ -265,7 +280,7 @@ Telemetry.send("order", mapOf("orderId" to orderId))
 
 `datawarden rules test .datawarden/rules/examples` scans the directory with the repository's rules and policy, and fails if an expected finding is missing, an `ok:` line is reported, or any violation is unannotated. `todoruleid:` and `todook:` record known misses and false positives. Every built-in rule has such an example in `internal/rules/testdata/examples/`.
 
-Other fields: `kind: source` (with `data_type`) and `kind: transform` (with `transform`, e.g. `sha256`), `host_arg` (take the destination host from a constant URL argument, as for `http.Post` and `fetch`), `match_bare` (match an unresolved call without receiver, for Kotlin scope functions such as `prefs.edit { putString(...) }`), `severity`, `category`, `description`.
+Other fields: `kind: source` (with `data_type`; a source can also be a field read, `field: ["express.Request.body"]`, a parameter annotation, `param_annotation: [RequestBody]`, or the argument a call fills, `arg: 0`, and `confidence` scales what it produces) and `kind: transform` (with `transform`, e.g. `sha256`), `host_arg` (take the destination host from a constant URL argument, as for `http.Post` and `fetch`), `match_bare` (match an unresolved call without receiver, for Kotlin scope functions such as `prefs.edit { putString(...) }`), `severity`, `category`, `description`.
 
 Destination kinds: `third_party`, `first_party`, `log`, `storage` (device/local), `network` (host unknown or not first-party), `ipc` (clipboard, broadcasts).
 
@@ -425,6 +440,7 @@ About half of the flow findings are real: identity-token claims, user names and 
 - Dynamic destinations (URLs built at runtime) show up as `network (unknown host)`.
 - Phone and national ID numbers are found through names and schema hints, not as committed values: the literal detector does not report them (US SSNs excepted).
 - Secret *values* are recognised only for the providers in the taxonomy's value patterns; a generic `password = "..."` assignment is not reported as a literal, because it is almost always a test or placeholder value.
+- Request data read through a framework not listed under source rules is found only through names. Add a repository source rule (`field`, `call` or `param_annotation`) for it.
 - Name-based sources depend on naming. Add explicit hints (`pii:"..."` tags, `@PII`, proto options, SQL comments) where names are unhelpful, and `pii:"-"` to silence a field.
 
 ### Measuring accuracy and speed

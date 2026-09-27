@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -251,7 +252,7 @@ func TestIRPrintsLoweredFunctions(t *testing.T) {
 	if code := h.run("ir", "--classes"); code != ExitClean {
 		t.Fatalf("ir: exit %d %s", code, h.errb)
 	}
-	for _, want := range []string{"# IR version 2 · 1 functions", "# Repo.kt:3", "func com.acme.Repo.save(v0:email)", `call Log.d(v0:email)`, "class com.acme.Repo", "save -> com.acme.Repo.save"} {
+	for _, want := range []string{"# IR version " + strconv.Itoa(ir.Version) + " · 1 functions", "# Repo.kt:3", "func com.acme.Repo.save(v0:email)", `call Log.d(v0:email)`, "class com.acme.Repo", "save -> com.acme.Repo.save"} {
 		if !strings.Contains(h.out.String(), want) {
 			t.Errorf("text output lacks %q:\n%s", want, h.out)
 		}
