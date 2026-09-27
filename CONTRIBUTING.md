@@ -14,6 +14,8 @@ This is a sensitive-data scanner, so issues, pull requests and fixtures are full
 
 ## Development setup
 
+New to the project? [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) walks you from a fresh clone through a first scan, a tour of the code and your first pull request.
+
 You need:
 
 - **Go**: the version in `go.mod` or newer. CI tests the current and previous Go releases.
@@ -56,7 +58,7 @@ Use the issue templates. The most useful report is a **minimal snippet** (synthe
 
 ### Add or fix a rule
 
-Built-in rules are YAML files in `internal/rules/builtin/` (`go.yaml`, `jvm.yaml`, `typescript.yaml`, `sources.yaml`, `transforms.yaml`), embedded in the binary. The README's [Sink rules](README.md#sink-rules) section documents the fields. Rule files are read strictly: a misspelt key, an unknown `lang` or an id defined twice in one file is an error.
+Built-in rules are YAML files in `internal/rules/builtin/` (`go.yaml`, `jvm.yaml`, `python.yaml`, `swift.yaml`, `typescript.yaml`, `sources.yaml`, `requests.yaml`, `transforms.yaml`), embedded in the binary. The README's [Sink rules](README.md#sink-rules) section documents the fields. Rule files are read strictly: a misspelt key, an unknown `lang` or an id defined twice in one file is an error.
 
 1. **Write the rule.** Give it a stable, dotted id. Sinks start with their category (`log.`, `sdk.`, `net.`, `storage.`, `ipc.`), sources with `src.` and transforms with `xform.`: for example `sdk.<lang>.<vendor>.<call>`. Ids are part of baseline fingerprints, so don't rename existing ones. A source rule must produce a data type from the taxonomy. `TestBuiltinRuleConventions` checks all of this.
 2. **Add an example** under `internal/rules/testdata/examples/<language>/`. Write the call the way real code writes it, and annotate the line above it:
