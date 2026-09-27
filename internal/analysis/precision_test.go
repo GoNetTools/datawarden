@@ -139,3 +139,29 @@ func TestAppendPathDropsLoops(t *testing.T) {
 		t.Errorf("appendPath = %v, want %v", got, want)
 	}
 }
+
+// A data loader answers with the value stored under the key it is
+// given: AppByTokenLoader(ctx).load(token) is an app, not the token.
+func TestLoaderLookupDoesNotReturnTheKey(t *testing.T) {
+	f := newFunc("app.resolve")
+	f.Lang = "python"
+	token := f.AddParam("auth_token", "", pos(1))
+	loader := f.Temp(pos(2))
+	f.Emit(ir.Instr{Op: ir.OpNew, Dst: loader, Call: &ir.Call{Callee: "app.AppByTokenLoader", Name: "AppByTokenLoader"}, Pos: pos(2)})
+	app := call(f, 3, &ir.Call{Callee: "app.AppByTokenLoader().load", Name: "load", RecvText: "AppByTokenLoader(context)", HasRecv: true}, loader, token)
+	pyLog(f, app, 4)
+	other := call(f, 5, &ir.Call{Name: "load", RecvText: "cache", HasRecv: true}, f.Temp(pos(5)), token)
+	pyLog(f, other, 6)
+
+	res := analyze(t, nil, f)
+	if fl := flowAt(res, 4); fl != nil {
+		t.Errorf("the loaded value reported as the token: %+v", fl)
+	}
+	if flowAt(res, 6) == nil {
+		t.Error("an unknown load() that is not a data loader no longer carries its argument")
+	}
+}
+
+func pyLog(f *ir.Func, arg ir.VarID, line int) {
+	call(f, line, &ir.Call{Callee: "logging.info", Name: "info"}, f.ConstVar("%s", pos(line)), arg)
+}
