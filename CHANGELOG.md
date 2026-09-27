@@ -50,6 +50,16 @@ All notable changes to datawarden are documented here. The format follows [Keep 
 
 ### Fixed
 
+- Code in one program no longer runs closures of another program in the same repository (#55). A method called on a receiver of unknown type runs the closures kept in a field of its name (`this.onSend(v)`, `bus.notify(v)`). That now happens only when the calling code and the closure's code are part of one program: one uses the other, directly or through other files, or both use the file that declares the type of the object between them.
+  - **Problem:** before, a server's `res.render(view, {...})` ran the `render` closures of a copy of three.js shipped as a browser asset, and `hash.update(data)` ran its `update` closures.
+  - **How:** which files use which is worked out from the IR: the functions calls resolve to, types, and module names.
+  - **Results:**
+    - OWASP Juice Shop goes from 57 to 28 violations. Every one removed ran server data into three.js, the Angular app, the challenge code snippets or a lint script.
+    - Two Angular-internal flows that those had hidden are now reported with their real source.
+    - Every other app and the eval scores are unchanged.
+  - **`explain`:** a step no longer says a call "runs" a function that the current function also calls by name.
+
+  The cache format changes.
 - Values no longer reach unrelated sinks through handler closures (#32). On gotify, a `CurrentUserExternal` built in the login handler was reported in `api/oidc.go` logs, with a path that jumped from `session.go` into `database/user.go`.
   - **Cause:** the closure analysis treated a field read of an object holding closures as an element of a collection. A handler struct kept next to its route (or `gin.Context`, which is given every handler) therefore made its `DB` field "hold" all the handlers. That spread to the `DB` field of every object of that type, and each `d.DB.Where(...)` ran them.
   - **Fix:** a field of a declared type now holds only the closures stored in it. Map reads and objects of unknown shape are unchanged.

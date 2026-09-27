@@ -238,4 +238,14 @@ func TestStepFromAFunctionTheCallRuns(t *testing.T) {
 			t.Errorf("line %d: steps %+v, want %q", tc.at, e.Steps, tc.want)
 		}
 	}
+
+	// A function the caller calls by name returned the value, even when
+	// the path goes on at another call.
+	caller.Emit(ir.Instr{Op: ir.OpCall, Dst: caller.Temp(pos(9)), Pos: pos(9), Call: &ir.Call{Name: "login", Target: handler.ID}})
+	fl := &finding.Flow{DataType: "person_name", SinkRule: "log.go.stdlib", Source: pos(2), Sink: pos(8),
+		Path: []ir.Pos{pos(2), pos(6), pos(8)}, Function: caller.ID, Lang: "go", SourceDesc: "value of type app.profile", SinkCall: "log.Println"}
+	e := Explainer{}.Explain(Input{Flow: fl, Funcs: []*ir.Func{handler, caller}, Lines: func(string) []string { return nil }})
+	if len(e.Steps) < 2 || strings.Contains(e.Steps[1].What, "runs") {
+		t.Errorf("steps %+v: a function called by name is not run by another call", e.Steps)
+	}
 }
