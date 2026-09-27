@@ -92,6 +92,45 @@
   dest: { host: sns.amazonaws.com, kind: third_party, vendor: AWS SNS }
   category: messaging
 
+- id: sdk.py.otel
+  lang: python
+  call: ["opentelemetry.trace.get_current_span().set_attribute", "opentelemetry.trace.get_current_span().set_attributes",
+         "opentelemetry.trace.get_current_span().add_event", "opentelemetry.trace.get_current_span().record_exception",
+         "opentelemetry.trace.Span.set_attribute", "opentelemetry.trace.Span.set_attributes", "opentelemetry.trace.Span.add_event",
+         "opentelemetry.trace.Span.record_exception", "opentelemetry.baggage.set_baggage"]
+  receiver: "(?i)^(self\\.)?_?(current_|root_|parent_|child_)?span$"
+  arg: "*"
+  dest: { kind: third_party, host: otel-collector, vendor: OpenTelemetry collector }
+  category: tracing
+  description: Span attributes and events, and baggage (propagated to downstream services), are exported to the tracing backend. Logs bridged from the logging module are covered by log.py.logging.
+
+- id: sdk.py.datadog.trace
+  lang: python
+  call: ["ddtrace.tracer.current_span().set_tag", "ddtrace.tracer.current_root_span().set_tag", "ddtrace.tracer.current_span().set_tags",
+         "ddtrace.Span.set_tag", "ddtrace.Span.set_tags", "ddtrace.trace.Span.set_tag", "ddtrace.span.Span.set_tag",
+         "ddtrace.contrib.trace_utils.set_user", "ddtrace.appsec.trace_utils.track_user_login_success_event", "ddtrace.appsec.trace_utils.track_custom_event"]
+  receiver: "(?i)^(self\\.)?_?(current_|root_)?span$"
+  arg: "*"
+  dest: { kind: third_party, host: datadoghq.com, vendor: Datadog }
+  category: tracing
+
+- id: sdk.py.newrelic
+  lang: python
+  call: ["newrelic.agent.add_custom_attribute", "newrelic.agent.add_custom_attributes", "newrelic.agent.add_custom_parameter",
+         "newrelic.agent.add_custom_span_attribute", "newrelic.agent.record_custom_event", "newrelic.agent.set_user_id", "newrelic.agent.record_log_event"]
+  arg: "*"
+  dest: { kind: third_party, host: collector.newrelic.com, vendor: New Relic }
+  category: tracing
+
+- id: sdk.py.honeycomb
+  lang: python
+  call: ["beeline.add_context_field", "beeline.add_context", "beeline.add_trace_field", "beeline.add_rollup_field",
+         "libhoney.Event.add_field", "libhoney.Event.add", "libhoney.new_event().add_field", "libhoney.new_event().add"]
+  receiver: "(?i)^(self\\.)?_?(hny_?)?(ev|event)$"
+  arg: "*"
+  dest: { kind: third_party, host: api.honeycomb.io, vendor: Honeycomb }
+  category: tracing
+
 - id: net.py.http
   lang: python
   call: ["requests.get", "requests.post", "requests.put", "requests.patch", "requests.delete", "requests.request", "requests.Session.get", "requests.Session.post",
