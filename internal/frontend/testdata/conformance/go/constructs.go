@@ -8,6 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"log/slog"
+	"net"
+	"net/http"
 	"strconv"
 	"strings"
 )
@@ -187,4 +190,27 @@ func tupleResults(email string) {
 	}
 	// ruleid: log.go.stdlib
 	log.Println(addr)
+}
+
+func keyedValues(l net.Listener, r *http.Request, note, phone string) {
+	// A key names a value that does not say what it is.
+	// ruleid: log.go.stdlib
+	log.Println(slog.String("address", note))
+	// A value that says what it is keeps its own meaning: the listen
+	// address, the request's host and URL are not postal addresses.
+	// ok: log.go.stdlib
+	log.Println(slog.String("address", l.Addr().String()))
+	host := r.Host
+	// ok: log.go.stdlib
+	log.Println(slog.String("address", host))
+	// ok: log.go.stdlib
+	log.Println(slog.String("address", r.URL.String()))
+	// ok: log.go.stdlib
+	log.Println(slog.String("address", "unknown"))
+	// A hard-coded secret is the secret itself.
+	// ruleid: log.go.stdlib
+	log.Println(slog.String("password", "hunter2"))
+	// The value is a phone, whatever the key says.
+	// ruleid: log.go.stdlib
+	log.Println(slog.String("email", phone))
 }
