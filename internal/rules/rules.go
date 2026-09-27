@@ -164,8 +164,9 @@ type Rule struct {
 	callRes  []*regexp.Regexp
 	fields   []fieldPattern
 	recvRe   *regexp.Regexp
-	names    []string // last segment of each call pattern
-	typeSegs []string // second-to-last segment of each call pattern
+	names    []string         // last segment of each call pattern
+	nameRes  []*regexp.Regexp // names with a wildcard, compiled; nil for others
+	typeSegs []string         // second-to-last segment of each call pattern
 }
 
 // Set is a validated, indexed collection of rules.
@@ -387,7 +388,7 @@ func (r *Rule) compile() error {
 	if r.HostArg != nil && *r.HostArg < 0 {
 		return fmt.Errorf("host_arg %d: indexes start at 0", *r.HostArg)
 	}
-	r.callRes, r.names, r.typeSegs = nil, nil, nil
+	r.callRes, r.names, r.nameRes, r.typeSegs = nil, nil, nil, nil
 	for _, c := range r.Call {
 		re, err := globToRegexp(c)
 		if err != nil {
@@ -395,7 +396,13 @@ func (r *Rule) compile() error {
 		}
 		r.callRes = append(r.callRes, re)
 		segs := splitCallee(c)
-		r.names = append(r.names, segs[len(segs)-1])
+		name := segs[len(segs)-1]
+		r.names = append(r.names, name)
+		var nameRe *regexp.Regexp
+		if name != "*" && strings.Contains(name, "*") {
+			nameRe, _ = globToRegexp(name) // nil when invalid: matches nothing
+		}
+		r.nameRes = append(r.nameRes, nameRe)
 		ts := ""
 		if len(segs) >= 2 {
 			ts = segs[len(segs)-2]

@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"slices"
 
 	"github.com/GoNetTools/datawarden/internal/finding"
 )
@@ -45,7 +46,7 @@ renders on GitHub.
 	if err != nil {
 		return err
 	}
-	if !contains([]string{"svg", "dot", "mermaid"}, *format) {
+	if !slices.Contains([]string{"svg", "dot", "mermaid"}, *format) {
 		return fmt.Errorf("unknown format %q (svg, dot, mermaid)", *format)
 	}
 	var re *regexp.Regexp
@@ -65,9 +66,7 @@ renders on GitHub.
 	if err != nil {
 		return err
 	}
-	for _, wn := range res.Warnings {
-		fmt.Fprintf(a.Stderr, "warning: %s\n", wn)
-	}
+	a.warn(res.Warnings)
 	flows, lits := a.Policy.Apply(s.cfg, res.Flows, res.Literals)
 	if _, _, err := a.markBaseline(s.inRoot(s.cfg.Baseline), flows, lits); err != nil {
 		return err

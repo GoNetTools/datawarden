@@ -389,7 +389,7 @@ func TestHelperAndCallerGuards(t *testing.T) {
 			t.Fatal(err)
 		}
 		names := detect.NewClassifier(detect.DefaultTaxonomy())
-		res, err := Analyze(context.Background(), []*ir.Func{helper, send, caller}, Options{Rules: rs, Schema: detect.BuildSchema(names, nil), Names: names, Callers: callers})
+		res, err := Analyze(context.Background(), []*ir.Func{helper, send, caller}, Options{Input: Input{Rules: rs, Schema: detect.BuildSchema(names, nil), Callers: callers}, Names: names})
 		if err != nil {
 			t.Fatal(err)
 		}

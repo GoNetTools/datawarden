@@ -64,14 +64,7 @@ func (fe *pyFrontend) Lower(ctx context.Context, files []string) (*ir.Module, er
 			pp.rets[id] = t
 		}
 	}
-	for _, c := range pp.classes {
-		for k, t := range c.fields {
-			c.fields[k] = pp.resolveType(c.file, t)
-		}
-		for i, s := range c.supers {
-			c.supers[i] = pp.resolveType(c.file, s)
-		}
-	}
+	pp.resolveClassTypes(true)
 	for _, f := range pp.files {
 		pp.lowerFile(f)
 	}
@@ -517,11 +510,10 @@ type pyBuilder struct {
 
 // emitCall types the result of a call of a function of the program by
 // its return annotation.
-func (pb *pyBuilder) emitCall(n *Node, c *ir.Call, args []ir.VarID, resultType string) ir.VarID {
-	if resultType == "" && c.Target != "" {
-		resultType = pb.pp.rets[c.Target]
-	}
-	return pb.builder.emitCall(n, c, args, resultType)
+// emitCall emits a call whose result has the declared return type of its
+// target, when known.
+func (pb *pyBuilder) emitCall(n *Node, c *ir.Call, args []ir.VarID) ir.VarID {
+	return pb.builder.emitCall(n, c, args, pb.pp.rets[c.Target])
 }
 
 func (pb *pyBuilder) stmt(n *Node) ir.VarID {
@@ -717,7 +709,7 @@ func (pb *pyBuilder) bind(t *Node, v ir.VarID) {
 		}
 		var dst ir.VarID
 		if ok {
-			dst = pb.redefine(name, old, "", t)
+			dst = pb.redefine(name, old, t)
 		} else {
 			dst = pb.declare(name, "", t)
 		}
@@ -807,8 +799,7 @@ func (pb *pyBuilder) expr(n *Node) ir.VarID {
 		obj := n.ChildByFieldName("object")
 		attr := pb.text(n.ChildByFieldName("attribute"))
 		if p := pb.staticPath(obj); p != "" {
-			o := pb.fn.Named(shortName(p), p, pb.pos(obj))
-			return pb.load(o, attr, p, n)
+			return pb.loadStatic(obj, p, attr, n)
 		}
 		owner := pb.typeOf(obj)
 		return pb.load(pb.expr(obj), attr, owner, n)
@@ -1051,10 +1042,10 @@ func (pb *pyBuilder) callWith(n, fn *Node, pre []ir.VarID) ir.VarID {
 	case "identifier":
 		name := pb.text(fn)
 		if v, local := pb.lookup(name); local {
-			return pb.emitCall(n, &ir.Call{Name: name, HasRecv: true, RecvText: name}, append([]ir.VarID{v}, args()...), "")
+			return pb.emitCall(n, &ir.Call{Name: name, HasRecv: true, RecvText: name}, append([]ir.VarID{v}, args()...))
 		}
 		if id, ok := pb.pp.top[pb.f.pkg+"."+name]; ok {
-			return pb.emitCall(n, &ir.Call{Callee: id, Name: name, Target: id}, args(), "")
+			return pb.emitCall(n, &ir.Call{Callee: id, Name: name, Target: id}, args())
 		}
 		if c := pb.pp.class(pb.pp.resolveType(pb.f, name)); c != nil {
 			return pb.construct(n, c, args())
@@ -1066,9 +1057,9 @@ func (pb *pyBuilder) callWith(n, fn *Node, pre []ir.VarID) ir.VarID {
 					c.Target = id
 				}
 			}
-			return pb.emitCall(n, c, args(), "")
+			return pb.emitCall(n, c, args())
 		}
-		return pb.emitCall(n, &ir.Call{Callee: name, Name: name}, args(), "")
+		return pb.emitCall(n, &ir.Call{Callee: name, Name: name}, args())
 	case "attribute":
 		obj := fn.ChildByFieldName("object")
 		m := pb.text(fn.ChildByFieldName("attribute"))
@@ -1077,14 +1068,14 @@ func (pb *pyBuilder) callWith(n, fn *Node, pre []ir.VarID) ir.VarID {
 			if pb.pp.modules[p] && pb.pp.known(p+":"+m) {
 				c.Target = p + ":" + m // import app.util; app.util.helper()
 			}
-			return pb.emitCall(n, c, args(), "")
+			return pb.emitCall(n, c, args())
 		}
 		if obj.Type() == "call" {
 			// factory().method(): logging.getLogger(__name__).info(...)
 			if p := pb.staticPath(obj.ChildByFieldName("function")); p != "" {
 				recv := pb.expr(obj)
 				c := &ir.Call{Callee: p + "()." + m, Name: m, HasRecv: true, RecvText: trimText(pb.text(obj))}
-				return pb.emitCall(n, c, append([]ir.VarID{recv}, args()...), "")
+				return pb.emitCall(n, c, append([]ir.VarID{recv}, args()...))
 			}
 		}
 		typ := pb.typeOf(obj)
@@ -1093,7 +1084,7 @@ func (pb *pyBuilder) callWith(n, fn *Node, pre []ir.VarID) ir.VarID {
 				if c := pb.pp.class(pb.pp.resolveType(pb.f, pb.text(obj))); c != nil {
 					// Class.method(...): a static or class method.
 					if id := pb.pp.methodID(c.name, m, 0); id != "" {
-						return pb.emitCall(n, &ir.Call{Callee: id, Name: m, Target: id}, args(), "")
+						return pb.emitCall(n, &ir.Call{Callee: id, Name: m, Target: id}, args())
 					}
 				}
 			}
@@ -1105,16 +1096,16 @@ func (pb *pyBuilder) callWith(n, fn *Node, pre []ir.VarID) ir.VarID {
 				c.Target, c.Callee = id, id
 				if pb.pp.static[id] {
 					c.HasRecv = false
-					return pb.emitCall(n, c, args(), "")
+					return pb.emitCall(n, c, args())
 				}
 			} else if strings.Contains(typ, ".") {
 				c.Callee = typ + "." + m
 			}
 		}
-		return pb.emitCall(n, c, append([]ir.VarID{recv}, args()...), "")
+		return pb.emitCall(n, c, append([]ir.VarID{recv}, args()...))
 	}
 	fv := pb.expr(fn)
-	return pb.emitCall(n, &ir.Call{Name: "call", HasRecv: true, RecvText: trimText(pb.text(fn))}, append([]ir.VarID{fv}, args()...), "")
+	return pb.emitCall(n, &ir.Call{Name: "call", HasRecv: true, RecvText: trimText(pb.text(fn))}, append([]ir.VarID{fv}, args()...))
 }
 
 // construct lowers Class(...): like a constructor in the JVM frontends,

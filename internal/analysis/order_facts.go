@@ -97,22 +97,32 @@ func compareTransfer(a, b Transfer) int {
 }
 
 // compareSinkHits prefers an unguarded path, then the more confident one,
-// then the rest of the fields.
+// then the rest of the fields. It is on the hot path of every summary
+// update, so each comparison runs only when the ones before it tie
+// (cmp.Or would evaluate them all, destination string included).
 func compareSinkHits(a, b SinkHit) int {
-	return cmp.Or(
-		compareBool(len(a.Guards) == 0, len(b.Guards) == 0),
-		-cmp.Compare(a.Conf, b.Conf),
-		comparePath(a.Path, b.Path),
-		cmp.Compare(a.Rule, b.Rule),
-		comparePos(a.Sink, b.Sink),
-		cmp.Compare(a.Func, b.Func),
-		cmp.Compare(a.Call, b.Call),
-		cmp.Compare(a.Field, b.Field),
-		compareStrings(a.Xf, b.Xf),
-		compareStrings(a.Guards, b.Guards),
-		cmp.Compare(a.Lang, b.Lang),
-		cmp.Compare(a.Dest.Kind+"|"+a.Dest.Host+"|"+a.Dest.Vendor, b.Dest.Kind+"|"+b.Dest.Host+"|"+b.Dest.Vendor),
-	)
+	if c := compareBool(len(a.Guards) == 0, len(b.Guards) == 0); c != 0 {
+		return c
+	}
+	if c := -cmp.Compare(a.Conf, b.Conf); c != 0 {
+		return c
+	}
+	if c := comparePath(a.Path, b.Path); c != 0 {
+		return c
+	}
+	if c := cmp.Compare(a.Rule, b.Rule); c != 0 {
+		return c
+	}
+	if c := comparePos(a.Sink, b.Sink); c != 0 {
+		return c
+	}
+	if c := cmp.Or(cmp.Compare(a.Func, b.Func), cmp.Compare(a.Call, b.Call), cmp.Compare(a.Field, b.Field)); c != 0 {
+		return c
+	}
+	if c := cmp.Or(compareStrings(a.Xf, b.Xf), compareStrings(a.Guards, b.Guards), cmp.Compare(a.Lang, b.Lang)); c != 0 {
+		return c
+	}
+	return cmp.Compare(a.Dest.Kind+"|"+a.Dest.Host+"|"+a.Dest.Vendor, b.Dest.Kind+"|"+b.Dest.Host+"|"+b.Dest.Vendor)
 }
 
 // capped adds x to a list holding at most n entries, keeping the n best by

@@ -198,3 +198,10 @@ func parseInterspersed(fs *flag.FlagSet, args []string) ([]string, error) {
 	}
 	return append(pos, fs.Args()...), nil
 }
+
+// warn prints each warning on stderr.
+func (a *App) warn(warnings []string) {
+	for _, w := range warnings {
+		fmt.Fprintf(a.Stderr, "warning: %s\n", w)
+	}
+}

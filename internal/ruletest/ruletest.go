@@ -33,6 +33,7 @@ import (
 	"fmt"
 	"io/fs"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -224,7 +225,7 @@ func findings(r *rules.Rule, file string, line int, flows []*finding.Flow, viola
 		case rules.KindSource:
 			hit = f.DataType == r.DataType && f.Source.File == file && f.Source.Line == line
 		case rules.KindTransform:
-			hit = contains(f.Transforms, r.Transform) && onPath(f, file, line)
+			hit = slices.Contains(f.Transforms, r.Transform) && onPath(f, file, line)
 		default:
 			hit = f.SinkRule == r.ID && f.Sink.File == file && f.Sink.Line == line
 		}
@@ -238,15 +239,6 @@ func findings(r *rules.Rule, file string, line int, flows []*finding.Flow, viola
 func onPath(f *finding.Flow, file string, line int) bool {
 	for _, p := range f.Path {
 		if p.File == file && p.Line == line {
-			return true
-		}
-	}
-	return false
-}
-
-func contains(xs []string, x string) bool {
-	for _, y := range xs {
-		if y == x {
 			return true
 		}
 	}

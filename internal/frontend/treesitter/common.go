@@ -45,13 +45,12 @@ func (f *srcFile) text(n *Node) string {
 }
 
 type classInfo struct {
-	name     string // qualified
-	short    string
-	file     *srcFile
-	fields   map[string]string // field -> declared type (resolved when possible)
-	methods  map[string]string // method name -> function ID
-	supers   []string
-	isStatic bool // Kotlin object / companion: members called without receiver
+	name    string // qualified
+	short   string
+	file    *srcFile
+	fields  map[string]string // field -> declared type (resolved when possible)
+	methods map[string]string // method name -> function ID
+	supers  []string
 }
 
 type program struct {
@@ -238,6 +237,21 @@ func (p *program) addClass(c *classInfo) {
 }
 
 // resolveType maps a type name as written in f to a qualified name.
+// resolveClassTypes resolves the declared types of every class's fields,
+// and of its supertypes when supers is set, in the file declaring it.
+func (p *program) resolveClassTypes(supers bool) {
+	for _, c := range p.classes {
+		for k, t := range c.fields {
+			c.fields[k] = p.resolveType(c.file, t)
+		}
+		if supers {
+			for i, s := range c.supers {
+				c.supers[i] = p.resolveType(c.file, s)
+			}
+		}
+	}
+}
+
 func (p *program) resolveType(f *srcFile, t string) string {
 	t = strings.TrimSpace(t)
 	t = strings.TrimSuffix(t, "?")
@@ -563,8 +577,12 @@ func (b *builder) pos(n *Node) ir.Pos {
 	if n == nil {
 		return ir.Pos{File: b.f.rel}
 	}
+	return posOf(b.f, n)
+}
+
+func posOf(f *srcFile, n *Node) ir.Pos {
 	sp := n.StartPoint()
-	return ir.Pos{File: b.f.rel, Line: int(sp.Row) + 1, Col: int(sp.Column) + 1}
+	return ir.Pos{File: f.rel, Line: int(sp.Row) + 1, Col: int(sp.Column) + 1}
 }
 
 func (b *builder) text(n *Node) string { return b.f.text(n) }
@@ -609,15 +627,12 @@ func (b *builder) declare(name, typ string, n *Node) ir.VarID {
 // closure assigning a variable it captured writes the enclosing
 // function's variable, which may be read at any time: the capture is a
 // cell and the assignment a weak update of it.
-func (b *builder) redefine(name string, old ir.VarID, typ string, n *Node) ir.VarID {
+func (b *builder) redefine(name string, old ir.VarID, n *Node) ir.VarID {
 	if old == b.this || b.isCapture(old) {
 		b.cell(old)
 		return old
 	}
-	if typ == "" {
-		typ = b.fn.Vars[old].Type
-	}
-	v := b.fn.Named(name, typ, b.pos(n))
+	v := b.fn.Named(name, b.fn.Vars[old].Type, b.pos(n))
 	b.scope[name] = v
 	return v
 }
@@ -715,6 +730,28 @@ type loopSpec struct {
 	// (do-while, repeat-while): the end of the body branches on it back
 	// to the header or out of the loop, and the header has no exit.
 	post func() ir.VarID
+}
+
+// whileLoop lowers a while loop, or with isDo a do-while loop, whose
+// condition eval lowers: a while loop on a false constant evaluates its
+// condition only. before, if set, runs just before the loop is built.
+func (b *builder) whileLoop(n, cond *Node, isDo bool, eval func(*Node) ir.VarID, body, before func()) {
+	v, known := b.truth(cond)
+	if known && !v && !isDo {
+		eval(cond) // while (false): the body never runs
+		return
+	}
+	test := func() ir.VarID { return eval(cond) }
+	spec := loopSpec{infinite: known && v, body: body}
+	if isDo {
+		spec.post = test
+	} else {
+		spec.cond = test
+	}
+	if before != nil {
+		before()
+	}
+	b.loopWith(n, spec)
 }
 
 // loopWith lowers a loop. A header block, which the end of the body and
@@ -1007,6 +1044,18 @@ func (b *builder) matches(n *Node, subject ir.VarID, values ...ir.VarID) ir.VarI
 	any := b.temp(n)
 	b.fn.Compute(any, b.pos(n), "||", tests...)
 	return any
+}
+
+// ifStmt lowers an if statement with condition, consequence and
+// alternative fields (Java, JavaScript).
+func (b *builder) ifStmt(n *Node, expr, stmt func(*Node) ir.VarID) {
+	cond := n.ChildByFieldName("condition")
+	c := expr(cond)
+	var els func()
+	if alt := n.ChildByFieldName("alternative"); alt != nil {
+		els = func() { stmt(alt) }
+	}
+	b.ifElse(n, cond, c, func() { stmt(n.ChildByFieldName("consequence")) }, els)
 }
 
 // ifElse lowers an if statement whose condition was already lowered to c:
@@ -1371,6 +1420,13 @@ func (b *builder) operator(n *Node) string {
 	return op
 }
 
+// loadStatic loads field of the class or module at path, written by obj
+// (Config.API_KEY, settings.SECRET_KEY): the object is a variable named
+// after it, typed by its path.
+func (b *builder) loadStatic(obj *Node, path, field string, n *Node) ir.VarID {
+	return b.load(b.fn.Named(shortName(path), path, b.pos(obj)), field, path, n)
+}
+
 func (b *builder) load(obj ir.VarID, field, owner string, n *Node) ir.VarID {
 	if id := b.p.getter(owner, field); id != "" && obj != ir.NoVar {
 		// A computed property: reading it runs its getter.
@@ -1717,9 +1773,8 @@ func (b *builder) noteReflect(c *ir.Call, args []ir.VarID, dst ir.VarID) {
 	}
 }
 
-func (b *builder) finish() *ir.Func {
+func (b *builder) finish() {
 	b.p.mod.Funcs = append(b.p.mod.Funcs, b.fn)
-	return b.fn
 }
 
 // classTable is the class table of the program: every class, interface,

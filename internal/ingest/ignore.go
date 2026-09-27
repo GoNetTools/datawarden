@@ -35,6 +35,21 @@ type ignoreRule struct {
 	re      *regexp.Regexp
 	negate  bool
 	dirOnly bool
+	// Most patterns are an extension (*.png) or a name (node_modules)
+	// anywhere in the tree: they are matched as a suffix or a last path
+	// element instead of by re, which is nil then.
+	suffix, name string
+}
+
+// matches reports whether the rule's pattern matches the relative path.
+func (r ignoreRule) matches(rel string) bool {
+	switch {
+	case r.suffix != "":
+		return strings.HasSuffix(rel, r.suffix)
+	case r.name != "":
+		return rel == r.name || strings.HasSuffix(rel, "/"+r.name)
+	}
+	return r.re.MatchString(rel)
 }
 
 // Matcher implements gitignore-style matching.
@@ -93,11 +108,18 @@ func (m *Matcher) add(line string) {
 	if line == "" {
 		return
 	}
-	re, err := regexp.Compile(globRegexp(line, anchored))
-	if err != nil {
-		return
+	switch {
+	case !anchored && !strings.ContainsAny(line, `*?[\`):
+		r.name = line
+	case !anchored && len(line) > 1 && line[0] == '*' && !strings.ContainsAny(line[1:], `*?[\/`):
+		r.suffix = line[1:]
+	default:
+		re, err := regexp.Compile(globRegexp(line, anchored))
+		if err != nil {
+			return
+		}
+		r.re = re
 	}
-	r.re = re
 	m.rules = append(m.rules, r)
 }
 
@@ -148,17 +170,18 @@ func globRegexp(p string, anchored bool) string {
 }
 
 // matchOne applies rules to a single path (not its ancestors).
-func (m *Matcher) matchOne(rel string, isDir bool) (ignored, decided bool) {
+// The last matching rule decides.
+func (m *Matcher) matchOne(rel string, isDir bool) bool {
 	for i := len(m.rules) - 1; i >= 0; i-- {
 		r := m.rules[i]
 		if r.dirOnly && !isDir {
 			continue
 		}
-		if r.re.MatchString(rel) {
-			return !r.negate, true
+		if r.matches(rel) {
+			return !r.negate
 		}
 	}
-	return false, false
+	return false
 }
 
 // Ignored reports whether the slash-separated relative path is ignored,
@@ -170,23 +193,20 @@ func (m *Matcher) Ignored(rel string, isDir bool) bool {
 	}
 	parts := strings.Split(rel, "/")
 	for i := 1; i < len(parts); i++ {
-		if ig, _ := m.matchOne(strings.Join(parts[:i], "/"), true); ig {
+		if m.matchOne(strings.Join(parts[:i], "/"), true) {
 			return true
 		}
 	}
-	ig, _ := m.matchOne(rel, isDir)
-	return ig
+	return m.matchOne(rel, isDir)
 }
 
 // IgnoredDir is the fast path used while walking: ancestors were already
 // checked by the walker.
 func (m *Matcher) IgnoredDir(rel string) bool {
-	ig, _ := m.matchOne(rel, true)
-	return ig
+	return m.matchOne(rel, true)
 }
 
 // IgnoredFile is the fast path used while walking.
 func (m *Matcher) IgnoredFile(rel string) bool {
-	ig, _ := m.matchOne(rel, false)
-	return ig
+	return m.matchOne(rel, false)
 }

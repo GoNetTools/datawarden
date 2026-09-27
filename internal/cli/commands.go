@@ -10,6 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -197,9 +198,7 @@ func (a *App) runBaseline(ctx context.Context, args []string) error {
 	}
 	rel, _ := filepath.Rel(s.root, path)
 	fmt.Fprintf(a.Stdout, "datawarden: wrote %d accepted finding(s) to %s — commit it so CI only reports new ones\n", entries, filepath.ToSlash(rel))
-	for _, w := range res.Warnings {
-		fmt.Fprintf(a.Stderr, "warning: %s\n", w)
-	}
+	a.warn(res.Warnings)
 	return nil
 }
 
@@ -228,9 +227,7 @@ func (a *App) runMap(ctx context.Context, args []string) error {
 		return err
 	}
 	m := a.DataMapper.Build(datamap.Input{Flows: flows, Literals: lits, Schema: res.Schema, Commit: res.Commit, Now: a.Clock(), Catalog: a.Catalog})
-	for _, wn := range res.Warnings {
-		fmt.Fprintf(a.Stderr, "warning: %s\n", wn)
-	}
+	a.warn(res.Warnings)
 	if *out == "" {
 		return a.DataMapper.Write(a.Stdout, *format, m)
 	}
@@ -263,7 +260,7 @@ func (a *App) runRules(args []string) error {
 		if *kind != "" && r.Kind != *kind {
 			continue
 		}
-		if *langFlag != "" && !contains(r.Lang, lang.Normalize(*langFlag)) {
+		if *langFlag != "" && !slices.Contains(r.Lang, lang.Normalize(*langFlag)) {
 			continue
 		}
 		extra := ""
@@ -281,15 +278,6 @@ func (a *App) runRules(args []string) error {
 		fmt.Fprintf(a.Stdout, "%-40s %-9s %-24s %-28s %s\n", r.ID, r.Kind, strings.Join(r.Lang, ","), extra, r.Origin)
 	}
 	return nil
-}
-
-func contains(xs []string, x string) bool {
-	for _, y := range xs {
-		if y == x {
-			return true
-		}
-	}
-	return false
 }
 
 func (a *App) runInit(args []string) error {

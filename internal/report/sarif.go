@@ -6,7 +6,8 @@ package report
 import (
 	"encoding/json"
 	"io"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/GoNetTools/datawarden/internal/finding"
@@ -20,10 +21,9 @@ type sarifLog struct {
 }
 
 type sarifRun struct {
-	Tool               sarifTool                  `json:"tool"`
-	OriginalURIBaseIDs map[string]json.RawMessage `json:"originalUriBaseIds,omitempty"`
-	Results            []sarifResult              `json:"results"`
-	Properties         map[string]any             `json:"properties,omitempty"`
+	Tool       sarifTool      `json:"tool"`
+	Results    []sarifResult  `json:"results"`
+	Properties map[string]any `json:"properties,omitempty"`
 }
 
 type sarifTool struct {
@@ -229,11 +229,7 @@ func SARIF(w io.Writer, r *Report) error {
 			},
 		})
 	}
-	ids := make([]string, 0, len(ruleMeta))
-	for id := range ruleMeta {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
+	ids := slices.Sorted(maps.Keys(ruleMeta))
 	driver := sarifDriver{
 		Name:           r.Tool,
 		Version:        r.Version,

@@ -8,6 +8,7 @@ package treesitter
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	sitter "github.com/tree-sitter/go-tree-sitter"
@@ -47,11 +48,7 @@ func (fe *swFrontend) Lower(ctx context.Context, files []string) (*ir.Module, er
 	for _, f := range sp.files {
 		sp.collect(f, f.root, "")
 	}
-	for _, c := range sp.classes {
-		for k, t := range c.fields {
-			c.fields[k] = sp.resolveType(c.file, t)
-		}
-	}
+	sp.resolveClassTypes(false)
 	for _, td := range sp.decls {
 		if len(td.Fields) > 0 {
 			sp.mod.Types = append(sp.mod.Types, td)
@@ -257,7 +254,7 @@ func (sp *swProgram) collectClass(f *srcFile, d *Node, outer string) {
 	}
 	attrs := td.Annotations
 	switch {
-	case containsStr(attrs, "Model") || containsStr(attrs, "objc") && anyIn(supers, swEntityBases):
+	case slices.Contains(attrs, "Model") || slices.Contains(attrs, "objc") && anyIn(supers, swEntityBases):
 		td.Kind = "entity"
 	case anyIn(supers, swEntityBases):
 		td.Kind = "entity"
@@ -300,15 +297,6 @@ func (sp *swProgram) codingKeys(f *srcFile, owner string, body *Node) {
 			}
 		}
 	}
-}
-
-func containsStr(xs []string, s string) bool {
-	for _, x := range xs {
-		if x == s {
-			return true
-		}
-	}
-	return false
 }
 
 func anyIn(xs []string, set map[string]bool) bool {
@@ -771,7 +759,7 @@ func (sb *swBuilder) assignment(n *Node) ir.VarID {
 			return v
 		}
 		if old, ok := sb.lookup(name); ok {
-			sb.assign(sb.redefine(name, old, "", target), n, v)
+			sb.assign(sb.redefine(name, old, target), n, v)
 			return v
 		}
 		if sb.cls != nil && sb.this != ir.NoVar {
@@ -890,7 +878,7 @@ func (sb *swBuilder) expr(n *Node) ir.VarID {
 		obj := n.ChildByFieldName("target")
 		field := swSuffix(sb.f, n)
 		if p := sb.staticPath(obj); p != "" {
-			return sb.load(sb.fn.Named(shortName(p), p, sb.pos(obj)), field, p, n)
+			return sb.loadStatic(obj, p, field, n)
 		}
 		if obj == nil {
 			return sb.constVar(field, n) // .someCase

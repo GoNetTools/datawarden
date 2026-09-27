@@ -4,8 +4,8 @@
 package analysis
 
 import (
+	"maps"
 	"slices"
-	"sort"
 	"strings"
 
 	"github.com/GoNetTools/datawarden/internal/ir"
@@ -36,11 +36,7 @@ func newHierarchy(classes []*ir.Class) *hierarchy {
 		s := shortClass(c.Name)
 		h.byShort[s] = append(h.byShort[s], c)
 	}
-	names := make([]string, 0, len(h.classes))
-	for n := range h.classes {
-		names = append(names, n)
-	}
-	sort.Strings(names)
+	names := slices.Sorted(maps.Keys(h.classes))
 	for _, n := range names {
 		c := h.classes[n]
 		for _, s := range c.Supers {

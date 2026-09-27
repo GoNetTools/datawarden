@@ -12,8 +12,8 @@ package cache
 
 import (
 	"encoding/json"
+	"maps"
 	"slices"
-	"sort"
 	"sync"
 
 	"github.com/GoNetTools/datawarden/internal/analysis"
@@ -69,6 +69,9 @@ type Store struct {
 	doc       document
 	persister Persister
 	hasher    Hasher
+	// callers maps each function to the functions calling it, sorted;
+	// built on first use from doc.Funcs and dropped when that changes.
+	callers map[string][]string
 }
 
 // Open loads the cache through p. A missing, corrupt or incompatible cache
@@ -119,14 +122,25 @@ func (s *Store) Lookup(id string) *analysis.Summary {
 // CallersOf returns the functions that called id when the cache was
 // written.
 func (s *Store) CallersOf(id string) []string {
-	var out []string
-	for caller, f := range s.doc.Funcs {
-		if slices.Contains(f.Callees, id) {
-			out = append(out, caller)
+	return slices.Clone(s.reverse()[id])
+}
+
+// reverse returns the callers of each function.
+func (s *Store) reverse() map[string][]string {
+	if s.callers == nil {
+		s.callers = map[string][]string{}
+		for id, f := range s.doc.Funcs {
+			for _, c := range f.Callees {
+				if !slices.Contains(s.callers[c], id) {
+					s.callers[c] = append(s.callers[c], id)
+				}
+			}
+		}
+		for _, ids := range s.callers {
+			slices.Sort(ids)
 		}
 	}
-	sort.Strings(out)
-	return out
+	return s.callers
 }
 
 // Callers returns the files containing (transitive, up to depth) callers of
@@ -136,12 +150,7 @@ func (s *Store) Callers(files []string, depth int) []string {
 	for _, f := range files {
 		inFiles[f] = true
 	}
-	rev := map[string][]string{}
-	for id, f := range s.doc.Funcs {
-		for _, c := range f.Callees {
-			rev[c] = append(rev[c], id)
-		}
-	}
+	rev := s.reverse()
 	var frontier []string
 	seen := map[string]bool{}
 	for id, f := range s.doc.Funcs {
@@ -167,11 +176,7 @@ func (s *Store) Callers(files []string, depth int) []string {
 		}
 		frontier = next
 	}
-	res := make([]string, 0, len(out))
-	for f := range out {
-		res = append(res, f)
-	}
-	sort.Strings(res)
+	res := slices.Sorted(maps.Keys(out))
 	return res
 }
 
@@ -179,6 +184,7 @@ func (s *Store) Callers(files []string, depth int) []string {
 // previous content is replaced; otherwise functions from re-lowered files
 // are replaced and everything else is kept.
 func (s *Store) Update(funcs []*ir.Func, res *analysis.Result, loweredFiles []string, full bool) {
+	s.callers = nil
 	if full {
 		s.doc.Funcs = map[string]*Func{}
 	} else {
@@ -236,11 +242,7 @@ func (s *Store) Classes(skip map[string]bool) []*ir.Class {
 // unchanged lists, in file order, the schema entries of files not in skip
 // whose content still has the cached hash.
 func (s *Store) unchanged(skip map[string]bool) []*SchemaFile {
-	var files []string
-	for f := range s.doc.Schema {
-		files = append(files, f)
-	}
-	sort.Strings(files)
+	files := slices.Sorted(maps.Keys(s.doc.Schema))
 	var out []*SchemaFile
 	for _, f := range files {
 		if skip[f] {
@@ -265,7 +267,7 @@ func (s *Store) Save() error {
 	return s.persister.Save(b)
 }
 
-// Memory is an in-memory Persister (tests, --no-cache).
+// Memory is an in-memory Persister, for tests.
 type Memory struct {
 	mu   sync.Mutex
 	Data []byte

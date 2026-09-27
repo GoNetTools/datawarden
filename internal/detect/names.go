@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // Match is the result of classifying an identifier, key, or field.
@@ -102,6 +103,14 @@ type Classifier struct {
 	patterns []compiledPattern
 	values   []compiledValue
 	vocab    map[string]bool
+	// idents remembers what Ident answered for a name (identMatch): the
+	// analysis asks about the same names on every pass.
+	idents sync.Map
+}
+
+type identMatch struct {
+	m  Match
+	ok bool
 }
 
 // compiledValue is a data type's value pattern, ready to scan with.
@@ -217,7 +226,13 @@ func findSeq(toks, pat []string) int {
 // Ident classifies an identifier such as a variable, parameter, field,
 // column, or JSON key.
 func (c *Classifier) Ident(name string) (Match, bool) {
-	return c.Tokens(Tokenize(name))
+	if v, ok := c.idents.Load(name); ok {
+		r := v.(identMatch)
+		return r.m, r.ok
+	}
+	m, ok := c.Tokens(Tokenize(name))
+	c.idents.Store(name, identMatch{m, ok})
+	return m, ok
 }
 
 // Tokens classifies an already tokenized identifier.

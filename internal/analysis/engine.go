@@ -39,24 +39,13 @@ import (
 	"github.com/GoNetTools/datawarden/internal/rules"
 )
 
-// Options configures an analysis run.
+// Options configures an analysis run: the per-run Input, and the name
+// classifier and threshold.
 type Options struct {
-	Rules  RuleMatcher
-	Schema SchemaIndex
-	Names  NameClassifier
-	// Lookup returns a cached summary for a function that is not part of
-	// this run (PR mode), or nil.
-	Lookup func(id string) *Summary
-	// FirstPartyDomains turns network sinks to matching hosts first-party.
-	FirstPartyDomains []string
+	Input
+	Names NameClassifier
 	// MinConf drops facts and flows below this confidence.
 	MinConf float64
-	// Classes is the class table that dynamically dispatched calls are
-	// resolved against.
-	Classes []*ir.Class
-	// Callers returns the callers of a function known from earlier runs,
-	// when only part of the program is analysed (PR mode), or is nil.
-	Callers func(id string) []string
 }
 
 // RuleMatcher finds sink, source and transform rules for a call, and
@@ -101,12 +90,19 @@ type NameClassifier interface {
 
 // Input is the per-run part of Options, supplied by the scanner.
 type Input struct {
-	Rules             RuleMatcher
-	Schema            SchemaIndex
-	Lookup            func(id string) *Summary
+	Rules  RuleMatcher
+	Schema SchemaIndex
+	// Lookup returns a cached summary for a function that is not part of
+	// this run (PR mode), or nil.
+	Lookup func(id string) *Summary
+	// FirstPartyDomains turns network sinks to matching hosts first-party.
 	FirstPartyDomains []string
-	Classes           []*ir.Class
-	Callers           func(id string) []string
+	// Classes is the class table that dynamically dispatched calls are
+	// resolved against.
+	Classes []*ir.Class
+	// Callers returns the callers of a function known from earlier runs,
+	// when only part of the program is analysed (PR mode), or is nil.
+	Callers func(id string) []string
 }
 
 // Engine is the analysis service. Its name classifier and threshold are
@@ -118,7 +114,7 @@ type Engine struct {
 
 // Analyze runs the analysis for one scan.
 func (e Engine) Analyze(ctx context.Context, funcs []*ir.Func, in Input) (*Result, error) {
-	return Analyze(ctx, funcs, Options{Rules: in.Rules, Schema: in.Schema, Names: e.Names, Lookup: in.Lookup, FirstPartyDomains: in.FirstPartyDomains, MinConf: e.MinConf, Classes: in.Classes, Callers: in.Callers})
+	return Analyze(ctx, funcs, Options{Input: in, Names: e.Names, MinConf: e.MinConf})
 }
 
 // Result is the output of Analyze.
@@ -495,11 +491,7 @@ func mergeXf(a []string, extra ...string) []string {
 	if !changed {
 		return a
 	}
-	out := make([]string, 0, len(set))
-	for x := range set {
-		out = append(out, x)
-	}
-	sort.Strings(out)
+	out := slices.Sorted(maps.Keys(set))
 	return out
 }
 
@@ -592,6 +584,11 @@ func Analyze(ctx context.Context, funcs []*ir.Func, opts Options) (*Result, erro
 				}
 			}
 		}
+		if !recursive {
+			// One pass: nothing it calls depends on it.
+			a.summaries[scc[0].ID] = a.analyzeFunc(scc[0])
+			continue
+		}
 		for iter := 0; iter < 8; iter++ {
 			changed := false
 			for _, fn := range scc {
@@ -603,17 +600,13 @@ func Analyze(ctx context.Context, funcs []*ir.Func, opts Options) (*Result, erro
 					changed = true
 				}
 			}
-			if !recursive || !changed {
+			if !changed {
 				break
 			}
 		}
 	}
 	res := &Result{Summaries: a.summaries, CallGraph: cg}
-	keys := make([]string, 0, len(a.flows))
-	for k := range a.flows {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
+	keys := slices.Sorted(maps.Keys(a.flows))
 	for _, k := range keys {
 		res.Flows = append(res.Flows, a.flows[k])
 	}
@@ -1543,13 +1536,13 @@ func (a *analyzer) call(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 		if cf := a.funcs[cl.fn]; cf != nil {
 			last = len(cf.Params) - cf.Captures - 1
 		}
-		ok, ch := a.invoke(st, fn, in, cl, in.Args[first:], func(i int) []*fact {
+		ok, ch := a.runClosure(st, fn, in, cl, in.Args[first:], func(i int) []*fact {
 			var out []*fact
 			for j := first + i; j < len(in.Args) && (j == first+i || i == last); j++ {
 				out = append(out, factsOf(j)...)
 			}
 			return out
-		}, sum)
+		}, st.of, sum)
 		invoked, changed = invoked || ok, changed || ch
 	}
 	for i, arg := range in.Args {
@@ -1768,15 +1761,11 @@ func (a *analyzer) call(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 	return changed
 }
 
-// invoke applies the summary of closure cl at a call that runs it. The
+// runClosure applies the summary of closure cl at a call that runs it. The
 // closure's parameters are its inputs, then its captures: inputAt(i) is
 // what input i receives (argVars[i] the variable passed, when known), and
-// each capture receives the variable the closure bound. It reports
-// whether the closure's summary was known.
-func (a *analyzer) invoke(st *state, fn *ir.Func, in *ir.Instr, cl closure, argVars []ir.VarID, inputAt func(int) []*fact, sum *Summary) (bool, bool) {
-	return a.runClosure(st, fn, in, cl, argVars, inputAt, st.of, sum)
-}
-
+// each capture receives captured(v) of the variable v the closure bound.
+// It reports whether the closure's summary was known.
 func (a *analyzer) runClosure(st *state, fn *ir.Func, in *ir.Instr, cl closure, argVars []ir.VarID, inputAt func(int) []*fact, captured func(ir.VarID) []*fact, sum *Summary) (bool, bool) {
 	cf := a.funcs[cl.fn]
 	s := a.summaryFor(cl.fn)
@@ -2029,7 +2018,7 @@ func (a *analyzer) emit(f *fact, h SinkHit, via []ir.Pos) {
 	xf := mergeXf(f.xf, h.Xf...)
 	fl := &finding.Flow{
 		DataType: f.dt, Source: f.src, Sink: h.Sink, SinkRule: h.Rule, Dest: h.Dest, Path: path,
-		Transforms: xf, Confidence: round2(conf), Function: h.Func, Lang: h.Lang, SourceDesc: f.desc, SinkCall: h.Call,
+		Transforms: xf, Confidence: finding.RoundConfidence(conf), Function: h.Func, Lang: h.Lang, SourceDesc: f.desc, SinkCall: h.Call,
 		Guards: h.Guards,
 	}
 	k := strings.Join([]string{f.dt, h.Rule, h.Func, h.Sink.String(), xfKey(xf)}, "|")
@@ -2040,13 +2029,6 @@ func (a *analyzer) emit(f *fact, h SinkHit, via []ir.Pos) {
 		return
 	}
 	a.flows[k] = fl
-}
-
-func round2(f float64) float64 {
-	if f > 1 {
-		f = 1
-	}
-	return float64(int(f*100+0.5)) / 100
 }
 
 // requestMethods send a request through an HTTP client and return its

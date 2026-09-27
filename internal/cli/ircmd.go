@@ -8,7 +8,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -61,9 +63,7 @@ analysis reads (docs/IR.md) and prints it.
 	if err != nil {
 		return ExitError, err
 	}
-	for _, w := range m.Warnings {
-		fmt.Fprintf(a.Stderr, "warning: %s\n", w)
-	}
+	a.warn(m.Warnings)
 	var funcs []*ir.Func
 	for _, f := range m.Funcs {
 		if re == nil || re.MatchString(f.ID) {
@@ -116,11 +116,7 @@ analysis reads (docs/IR.md) and prints it.
 					fmt.Fprintf(a.Stdout, " : %s", strings.Join(cl.Supers, ", "))
 				}
 				fmt.Fprintln(a.Stdout)
-				names := make([]string, 0, len(cl.Methods))
-				for n := range cl.Methods {
-					names = append(names, n)
-				}
-				sort.Strings(names)
+				names := slices.Sorted(maps.Keys(cl.Methods))
 				for _, n := range names {
 					fmt.Fprintf(a.Stdout, "  %s -> %s\n", n, cl.Methods[n])
 				}

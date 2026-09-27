@@ -71,11 +71,7 @@ func (f *Frontend) Lower(ctx context.Context, files []string) (*ir.Module, error
 		}
 		groups[mod] = append(groups[mod], rel)
 	}
-	mods := make([]string, 0, len(groups))
-	for m := range groups {
-		mods = append(mods, m)
-	}
-	sort.Strings(mods)
+	mods := slices.Sorted(maps.Keys(groups))
 	for _, m := range mods {
 		if err := ctx.Err(); err != nil {
 			return out, err
@@ -240,11 +236,7 @@ func (f *Frontend) lowerModule(ctx context.Context, modRel string, rels []string
 			}
 		}
 	}
-	keys := make([]string, 0, len(l.seenTypes))
-	for k := range l.seenTypes {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
+	keys := slices.Sorted(maps.Keys(l.seenTypes))
 	for _, k := range keys {
 		if td := l.typeDecl(l.seenTypes[k]); td != nil {
 			mod.Types = append(mod.Types, td)

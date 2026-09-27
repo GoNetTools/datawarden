@@ -6,6 +6,7 @@ package ingest
 import (
 	"context"
 	"errors"
+	"regexp"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -132,5 +133,54 @@ func TestGitWithFakeRunner(t *testing.T) {
 	}
 	if _, err := (NoVCS{}).ChangedFiles(context.Background(), "main"); !errors.Is(err, ErrNoVCS) {
 		t.Error("NoVCS")
+	}
+}
+
+// Names and extensions matched without a regexp agree with gitignore.
+func TestIgnoreFastPaths(t *testing.T) {
+	m := &Matcher{}
+	for _, l := range []string{"*.png", "node_modules", "*", "!keep.png"} {
+		m.add(l)
+	}
+	for rel, want := range map[string]bool{
+		"a.png": true, "img/a.png": true, "keep.png": false, "x/node_modules": true, "node_modules": true,
+		"anything": true, "src/a.go": true,
+	} {
+		if got := m.Ignored(rel, false); got != want {
+			t.Errorf("Ignored(%q) = %v, want %v", rel, got, want)
+		}
+	}
+	m = &Matcher{}
+	for _, l := range []string{"*.png", "vendor", "!img/keep.png"} {
+		m.add(l)
+	}
+	for rel, want := range map[string]bool{
+		"a.png": true, "img/a.png": true, "img/keep.png": false, "a.pngx": false, "vendor": true, "x/vendor": true,
+		"myvendor": false, "vendor2": false,
+	} {
+		if got := m.Ignored(rel, false); got != want {
+			t.Errorf("Ignored(%q) = %v, want %v", rel, got, want)
+		}
+	}
+}
+
+// Every default pattern matches the same paths with and without its
+// fast path.
+func TestIgnoreFastPathsAgreeWithRegexp(t *testing.T) {
+	paths := []string{"a.png", "x/y/a.png", "a.png.txt", "node_modules", "src/node_modules", "src/node_modules/x.js",
+		"vendor", "a/vendor/b.go", "build", "dist/app.min.js", "Pods", "x.lock", "go.sum", "a/b/c.jar", "README.md"}
+	for _, p := range DefaultIgnore {
+		m := NewMatcher([]string{p})
+		r := m.rules[0]
+		if r.re != nil {
+			continue
+		}
+		line := strings.TrimPrefix(strings.TrimRight(p, "/"), "!")
+		re := regexp.MustCompile(globRegexp(line, false))
+		for _, rel := range paths {
+			if got, want := r.matches(rel), re.MatchString(rel); got != want {
+				t.Errorf("%q on %q: fast path %v, regexp %v", p, rel, got, want)
+			}
+		}
 	}
 }
