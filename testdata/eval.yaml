@@ -130,6 +130,7 @@ cases:
       - {data_type: dob, sink_rule: net.py.http, function: "views:recommendations"}
       - {data_type: email, sink_rule: log.py.print, function: "views:debug_attempt", note: "the caller's email reaches a parameter named user"}
       - {data_type: password, sink_rule: log.py.print, function: "views:debug_attempt"}
+      - {data_type: request_data, sink_rule: log.py.logging, function: "views:feedback", note: "the whole form, read with no key"}
       - {data_type: email, sink_rule: storage.py.file, function: "store:save_profile", note: "the whole Shopper dataclass is pickled"}
       - {data_type: phone, sink_rule: storage.py.file, function: "store:save_profile"}
       - {data_type: dob, sink_rule: storage.py.file, function: "store:save_profile"}

@@ -38,7 +38,7 @@ import (
 // Version is the version of the IR described in docs/IR.md. It changes
 // whenever the meaning of the IR changes, so that anything derived from
 // it (cached summaries) is recomputed.
-const Version = 2
+const Version = 3
 
 // Pos is a source position. File is slash-separated and relative to the
 // repository root; Line and Col are 1-based.
@@ -82,7 +82,11 @@ type Var struct {
 	// assigns), and each definition is a weak update that adds to what it
 	// holds instead of replacing it.
 	Cell bool `json:"cell,omitempty"`
-	Pos  Pos  `json:"pos"`
+	// Annotations are a parameter's annotations or decorators, each
+	// "Name" or, given a key as their first argument, "Name:key"
+	// (@RequestBody -> "RequestBody", @Body("email") -> "Body:email").
+	Annotations []string `json:"annotations,omitempty"`
+	Pos         Pos      `json:"pos"`
 }
 
 // IsConst reports whether the variable is a literal.

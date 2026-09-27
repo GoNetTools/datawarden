@@ -4,6 +4,20 @@ All notable changes to datawarden are documented here. The format follows [Keep 
 
 ## [Unreleased]
 
+### Added
+
+- Web request data is a source (#43). A new data type, `request_data` (class `pii`), covers what a client sends to a web handler:
+  - Go: `net/http` bodies and forms, and gin, echo and chi. `json.NewDecoder(r.Body).Decode(&v)` fills `v`.
+  - Python: Flask, Django and Django REST framework.
+  - TypeScript: Express, Koa, Next.js route handlers and NestJS `@Body()`.
+  - Java and Kotlin: Spring `@RequestBody` and servlet parameters.
+
+  A value read under a constant key or field name (`request.form["ssn"]`, `req.body.page`, `@RequestParam("page")`) is described by that name instead, so only data read as a whole, or under a computed key, is request data. These sources have a moderate confidence.
+
+  On 16 real applications, other violations are unchanged. The only new violations are two on OWASP Juice Shop, caused by an existing call-resolution bug (#55).
+- Source rules can match a field read (`field`), a parameter annotation (`param_annotation`) or the argument a call fills (`arg`), and set a `confidence`. A data type can be `rules_only`, with no identifier patterns.
+- `datawarden ir` shows parameter annotations. The IR is version 3 (`Var.Annotations`), and the cache format changes.
+
 ### Changed
 
 - tree-sitter now comes from its official, maintained Go bindings (`github.com/tree-sitter/go-tree-sitter`), replacing the unmaintained `smacker/go-tree-sitter` (#52). The grammars come from their own repositories:

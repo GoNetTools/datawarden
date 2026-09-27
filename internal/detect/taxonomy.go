@@ -31,7 +31,8 @@ type DataType struct {
 	// Class is the id of the data type's class (pii, phi, pci, credential).
 	Class string `json:"class" yaml:"class"`
 	// Category groups types for the data map: contact, identity, financial,
-	// location, device, demographic, health, biometric, online, secret.
+	// location, device, demographic, health, biometric, online, secret,
+	// request.
 	Category string `json:"category" yaml:"category"`
 	// Sensitive marks special-category data (GDPR art. 9 and similar
 	// "sensitive personal data" definitions: health, biometrics,
@@ -51,6 +52,9 @@ type DataType struct {
 	// Values recognise committed values of the type by their shape
 	// (a cloud access key, a private key block).
 	Values []ValuePattern `json:"values,omitempty" yaml:"values"`
+	// RulesOnly marks a type that only source rules produce (request
+	// data): it has no identifier patterns or values.
+	RulesOnly bool `json:"rules_only,omitempty" yaml:"rules_only"`
 }
 
 // ValuePattern recognises committed values of a data type.
@@ -126,7 +130,10 @@ func (t Taxonomy) Validate() error {
 		if d.Severity != "" && d.Severity != "high" {
 			errs = append(errs, fmt.Errorf("%s: severity must be empty or high", where))
 		}
-		if len(d.Patterns)+len(d.Weak)+len(d.Values) == 0 {
+		if d.RulesOnly && len(d.Patterns)+len(d.Weak)+len(d.Values) > 0 {
+			errs = append(errs, fmt.Errorf("%s: a rules_only type has no patterns or values", where))
+		}
+		if !d.RulesOnly && len(d.Patterns)+len(d.Weak)+len(d.Values) == 0 {
 			errs = append(errs, fmt.Errorf("%s needs patterns, weak patterns or values", where))
 		}
 		for _, p := range append(append([]string(nil), d.Patterns...), d.Weak...) {

@@ -320,7 +320,10 @@ func (jb *jvBuilder) params(ps *Node) {
 			if typ == "" {
 				typ = javaTypeText(jb.f, firstOf(p, "type_identifier", "generic_type", "scoped_type_identifier"))
 			}
-			jb.param(jb.text(nameNode), jb.jp.resolveType(jb.f, typ), nameNode)
+			v := jb.param(jb.text(nameNode), jb.jp.resolveType(jb.f, typ), nameNode)
+			if tags, names, _ := javaAnnotations(jb.f, firstOf(p, "modifiers")); len(names) > 0 {
+				jb.annotate(v, tags, names)
+			}
 		}
 	}
 }

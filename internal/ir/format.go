@@ -22,6 +22,9 @@ func Format(f *Func) string {
 		if i > 0 {
 			sb.WriteString(", ")
 		}
+		for _, a := range f.Vars[p].Annotations {
+			sb.WriteString("@" + a + " ")
+		}
 		sb.WriteString(varName(f, p))
 	}
 	sb.WriteString(")")

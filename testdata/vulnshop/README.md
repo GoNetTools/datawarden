@@ -69,12 +69,13 @@ Or on GitHub: **Actions → demo → Run workflow**. The job summary shows the f
 | 49 | Email in UserDefaults | `CheckoutViewModel.placeOrder` | `storage.swift.user_defaults` |
 | 50 | Card number on the general pasteboard | `CheckoutViewModel.copyCard` | `ipc.swift.pasteboard` |
 | 51 | Email sent to a mailing vendor | `CheckoutViewModel.sendReceipt` | `net.swift.urlsession` |
+| 52 | A whole submitted form in the recommender log | `views:feedback` | `log.py.logging` (source `src.py.flask_request`) |
 
-Traps that must stay quiet: database inserts (first party), customer and order IDs, the nickname, a field tagged `pii:"-"`, masked email/card/phone, `len(email)`, cart sizes, a SHA-256 of the password (hashing is a safe transform for credentials), an API key in an `Authorization` header and a token sent to the API that issued it (credentials are meant for the services they unlock), the login request's response, email sent to the shop's own API (`first_party_domains` in `.datawarden.yaml`), the AWS documentation key `AKIAIOSFODNN7EXAMPLE`, the shopper id, nickname and masked email in the recommender, its own SQLite database, a unified-log message whose email is redacted by default, and the placeholder row in the CSV (`0123456789`, `test@example.com`, `4111 1111 1111 1111`).
+Traps that must stay quiet: database inserts (first party), customer and order IDs, the nickname, a field tagged `pii:"-"`, masked email/card/phone, `len(email)`, cart sizes, a SHA-256 of the password (hashing is a safe transform for credentials), an API key in an `Authorization` header and a token sent to the API that issued it (credentials are meant for the services they unlock), the login request's response, email sent to the shop's own API (`first_party_domains` in `.datawarden.yaml`), the AWS documentation key `AKIAIOSFODNN7EXAMPLE`, the shopper id, nickname and masked email in the recommender, a single query parameter (`request.args.get("page")`), its own SQLite database, a unified-log message whose email is redacted by default, and the placeholder row in the CSV (`0123456789`, `test@example.com`, `4111 1111 1111 1111`).
 
 ## Known results
 
-datawarden finds 48 of the 51 leaks with one false positive (precision 0.98, recall 0.94):
+datawarden finds 49 of the 52 leaks with one false positive (precision 0.98, recall 0.94):
 
 - **Missed #24:** Kotlin's property syntax `telephony.line1Number` is not matched by the source rule for `getLine1Number()`.
 - **Missed #28 and #30:** phone and national ID numbers are found through identifier names and schema hints, not as committed values, so the ones in the seed CSV are not reported.

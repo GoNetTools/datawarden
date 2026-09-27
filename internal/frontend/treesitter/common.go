@@ -577,6 +577,18 @@ func (b *builder) addThis(typ string, n *Node) {
 	b.this = b.fn.AddParam("this", typ, b.pos(n))
 }
 
+// annotate records a parameter's annotations: each name, with its key
+// ("Body:email") when it was given one (@Body("email")).
+func (b *builder) annotate(v ir.VarID, tags map[string]string, names []string) {
+	for _, name := range names {
+		a := name
+		if key := tags["@"+name]; key != "" {
+			a += ":" + key
+		}
+		b.fn.Vars[v].Annotations = append(b.fn.Vars[v].Annotations, a)
+	}
+}
+
 func (b *builder) param(name, typ string, n *Node) ir.VarID {
 	v := b.fn.AddParam(name, typ, b.pos(n))
 	if name != "" {

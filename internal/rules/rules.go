@@ -139,6 +139,19 @@ type Rule struct {
 	HostArg *int `yaml:"host_arg,omitempty" json:"host_arg,omitempty"`
 	// DataType is produced by source rules.
 	DataType string `yaml:"data_type,omitempty" json:"data_type,omitempty"`
+	// Field lists field reads that are sources, as "Type.field" ('*'
+	// matches any run of characters in the type): r.Body of a
+	// net/http.Request, req.body in Express. When the object's type is not
+	// known, Receiver is matched against the object as written (req,
+	// ctx.request).
+	Field StringList `yaml:"field,omitempty" json:"field,omitempty"`
+	// ParamAnnotation lists parameter annotations or decorators that make
+	// the parameter a source (@RequestBody, @Body()). One given a key
+	// (@Body("email")) is described by that key instead.
+	ParamAnnotation StringList `yaml:"param_annotation,omitempty" json:"param_annotation,omitempty"`
+	// Confidence scales the confidence of what a source rule produces
+	// (default 1): request data is personal data often, not always.
+	Confidence float64 `yaml:"confidence,omitempty" json:"confidence,omitempty"`
 	// Transform is applied by transform rules ("sha256", "masked").
 	Transform   string `yaml:"transform,omitempty" json:"transform,omitempty"`
 	Category    string `yaml:"category,omitempty" json:"category,omitempty"`
@@ -149,6 +162,7 @@ type Rule struct {
 	Origin string `yaml:"-" json:"origin"`
 
 	callRes  []*regexp.Regexp
+	fields   []fieldPattern
 	recvRe   *regexp.Regexp
 	names    []string // last segment of each call pattern
 	typeSegs []string // second-to-last segment of each call pattern
@@ -337,6 +351,12 @@ func (r *Rule) compile() error {
 		if r.DataType == "" {
 			return fmt.Errorf("source rule needs data_type")
 		}
+		if r.Confidence < 0 || r.Confidence > 1 {
+			return fmt.Errorf("confidence %v must be between 0 and 1", r.Confidence)
+		}
+		if r.Confidence == 0 {
+			r.Confidence = 1
+		}
 	case KindTransform:
 		if r.Transform == "" {
 			return fmt.Errorf("transform rule needs transform")
@@ -344,8 +364,11 @@ func (r *Rule) compile() error {
 	default:
 		return fmt.Errorf("unknown kind %q", r.Kind)
 	}
-	if len(r.Call) == 0 {
-		return fmt.Errorf("call is required")
+	if (len(r.Field) > 0 || len(r.ParamAnnotation) > 0) && r.Kind != KindSource {
+		return fmt.Errorf("field and param_annotation are for source rules")
+	}
+	if len(r.Call) == 0 && len(r.Field) == 0 && len(r.ParamAnnotation) == 0 {
+		return fmt.Errorf("call is required (or, for a source, field or param_annotation)")
 	}
 	if len(r.Lang) == 0 {
 		return fmt.Errorf("lang is required")
@@ -379,6 +402,23 @@ func (r *Rule) compile() error {
 		}
 		r.typeSegs = append(r.typeSegs, ts)
 	}
+	r.fields = nil
+	for _, f := range r.Field {
+		i := strings.LastIndexByte(f, '.')
+		if i <= 0 || i == len(f)-1 {
+			return fmt.Errorf("field %q must be Type.field", f)
+		}
+		re, err := globToRegexp(f[:i])
+		if err != nil {
+			return err
+		}
+		r.fields = append(r.fields, fieldPattern{owner: re, name: f[i+1:]})
+	}
+	for _, a := range r.ParamAnnotation {
+		if strings.ContainsAny(a, "@() ") {
+			return fmt.Errorf("param_annotation %q: give the bare name (RequestBody, Body)", a)
+		}
+	}
 	if r.Receiver != "" {
 		re, err := regexp.Compile(r.Receiver)
 		if err != nil {
@@ -387,6 +427,11 @@ func (r *Rule) compile() error {
 		r.recvRe = re
 	}
 	return nil
+}
+
+type fieldPattern struct {
+	owner *regexp.Regexp
+	name  string
 }
 
 func globToRegexp(g string) (*regexp.Regexp, error) {
