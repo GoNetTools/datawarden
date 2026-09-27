@@ -244,3 +244,15 @@ export function unrelatedRender(view: any, email: string) {
   view.render(email);
   return formatter;
 }
+
+declare function sql<T>(strings: TemplateStringsArray, ...values: unknown[]): T;
+
+export function taggedTemplateTypeArguments(email: string) {
+  // Type arguments on a tagged template (a Kysely query) do not stop the
+  // parser from reading the call.
+  const q = sql<{
+    id: string;
+  }>`SELECT id FROM users WHERE email = ${email}`;
+  // ruleid: log.ts.console
+  console.log(q);
+}

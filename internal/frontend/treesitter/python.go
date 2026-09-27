@@ -10,13 +10,15 @@ import (
 	"path"
 	"strings"
 
-	sitter "github.com/smacker/go-tree-sitter"
-	"github.com/smacker/go-tree-sitter/python"
+	sitter "github.com/tree-sitter/go-tree-sitter"
+	tspython "github.com/tree-sitter/tree-sitter-python/bindings/go"
 
 	"github.com/GoNetTools/datawarden/internal/frontend"
 	"github.com/GoNetTools/datawarden/internal/ir"
 	"github.com/GoNetTools/datawarden/internal/lang"
 )
+
+var pyLanguage = sitter.NewLanguage(tspython.Language())
 
 // NewPython returns the Python frontend.
 func NewPython(o frontend.Options) frontend.Frontend { return &pyFrontend{opts: o} }
@@ -40,12 +42,13 @@ type pyProgram struct {
 
 type pyAnnotation struct {
 	f *srcFile
-	n *sitter.Node
+	n *Node
 }
 
 func (fe *pyFrontend) Lower(ctx context.Context, files []string) (*ir.Module, error) {
 	pp := &pyProgram{program: newProgram(lang.Python, fe.opts), static: map[string]bool{}, rets: map[string]string{}, retDefs: map[string]pyAnnotation{}}
-	pp.parse(ctx, files, python.GetLanguage())
+	defer pp.close()
+	pp.parse(ctx, files, pyLanguage)
 	for _, f := range pp.files {
 		f.pkg = pyModuleID(f.rel)
 		pp.modules[f.pkg] = true
@@ -86,7 +89,7 @@ func pyModuleID(rel string) string {
 
 // resolveModule maps a module name as written in an import to a module
 // id, handling relative imports (from .models import User).
-func (pp *pyProgram) resolveModule(f *srcFile, n *sitter.Node) string {
+func (pp *pyProgram) resolveModule(f *srcFile, n *Node) string {
 	if n == nil {
 		return ""
 	}
@@ -161,7 +164,7 @@ func pyParent(mod string) string {
 }
 
 // pyChildIndex is the child index of a named child, for FieldNameForChild.
-func pyChildIndex(parent, child *sitter.Node) int {
+func pyChildIndex(parent, child *Node) int {
 	for i := 0; i < int(parent.ChildCount()); i++ {
 		if parent.Child(i).Equal(child) {
 			return i
@@ -171,8 +174,8 @@ func pyChildIndex(parent, child *sitter.Node) int {
 }
 
 // pyDefs yields the definitions in a block, unwrapping decorators.
-func pyDefs(n *sitter.Node) []*sitter.Node {
-	var out []*sitter.Node
+func pyDefs(n *Node) []*Node {
+	var out []*Node
 	for _, c := range named(n) {
 		if c.Type() == "decorated_definition" {
 			if d := c.ChildByFieldName("definition"); d != nil {
@@ -187,7 +190,7 @@ func pyDefs(n *sitter.Node) []*sitter.Node {
 
 // pyDecorators returns the decorator names of a definition (dataclass,
 // staticmethod, app.route).
-func pyDecorators(f *srcFile, def *sitter.Node) []string {
+func pyDecorators(f *srcFile, def *Node) []string {
 	p := def.Parent()
 	if p == nil || p.Type() != "decorated_definition" {
 		return nil
@@ -209,7 +212,7 @@ func pyDecorators(f *srcFile, def *sitter.Node) []string {
 
 // pyTypeName reduces an annotation to the type it holds: Optional[User],
 // Optional["User"], User | None and "User" are User; list[User] is list.
-func pyTypeName(f *srcFile, n *sitter.Node) string {
+func pyTypeName(f *srcFile, n *Node) string {
 	if n == nil {
 		return ""
 	}
@@ -251,7 +254,7 @@ func (pp *pyProgram) collect(f *srcFile) {
 	}
 }
 
-func (pp *pyProgram) collectClass(f *srcFile, d *sitter.Node) {
+func (pp *pyProgram) collectClass(f *srcFile, d *Node) {
 	short := f.text(d.ChildByFieldName("name"))
 	if short == "" {
 		return
@@ -344,7 +347,7 @@ func (pp *pyProgram) collectClass(f *srcFile, d *sitter.Node) {
 
 // initFields records the fields __init__ assigns (self.email = email),
 // typed from their annotation or the parameter they come from.
-func (pp *pyProgram) initFields(f *srcFile, ci *classInfo, td *ir.TypeDecl, init *sitter.Node) {
+func (pp *pyProgram) initFields(f *srcFile, ci *classInfo, td *ir.TypeDecl, init *Node) {
 	ptypes := map[string]string{}
 	for _, p := range named(init.ChildByFieldName("parameters")) {
 		if p.Type() == "typed_parameter" || p.Type() == "typed_default_parameter" {
@@ -355,8 +358,8 @@ func (pp *pyProgram) initFields(f *srcFile, ci *classInfo, td *ir.TypeDecl, init
 			ptypes[f.text(name)] = pyTypeName(f, p.ChildByFieldName("type"))
 		}
 	}
-	var walk func(n *sitter.Node)
-	walk = func(n *sitter.Node) {
+	var walk func(n *Node)
+	walk = func(n *Node) {
 		for _, c := range named(n) {
 			switch c.Type() {
 			case "function_definition", "class_definition", "lambda":
@@ -383,7 +386,7 @@ func (pp *pyProgram) initFields(f *srcFile, ci *classInfo, td *ir.TypeDecl, init
 
 // pyIsFieldCall reports ORM and schema field constructors:
 // models.EmailField(), Column(String), mapped_column(), Field(...).
-func pyIsFieldCall(f *srcFile, n *sitter.Node) bool {
+func pyIsFieldCall(f *srcFile, n *Node) bool {
 	if n == nil || n.Type() != "call" {
 		return false
 	}
@@ -394,7 +397,7 @@ func pyIsFieldCall(f *srcFile, n *sitter.Node) bool {
 // pyFieldTags reads schema hints from a field constructor: the column
 // name (Django db_column, SQLAlchemy Column("name", ...)) and the
 // serialized name (Pydantic alias).
-func pyFieldTags(f *srcFile, n *sitter.Node) map[string]string {
+func pyFieldTags(f *srcFile, n *Node) map[string]string {
 	if !pyIsFieldCall(f, n) {
 		return nil
 	}
@@ -426,7 +429,7 @@ func pyFieldTags(f *srcFile, n *sitter.Node) map[string]string {
 }
 
 // pyString is the value of a string literal without interpolations.
-func pyString(f *srcFile, n *sitter.Node) string {
+func pyString(f *srcFile, n *Node) string {
 	var sb strings.Builder
 	for _, c := range named(n) {
 		if c.Type() == "string_content" {
@@ -438,7 +441,7 @@ func pyString(f *srcFile, n *sitter.Node) string {
 
 func (pp *pyProgram) lowerFile(f *srcFile) {
 	var init *pyBuilder
-	getInit := func(n *sitter.Node) *pyBuilder {
+	getInit := func(n *Node) *pyBuilder {
 		if init == nil {
 			init = &pyBuilder{builder: pp.newBuilder(f, nil, f.pkg+":<init>", "<init>", n), pp: pp}
 		}
@@ -461,7 +464,7 @@ func (pp *pyProgram) lowerFile(f *srcFile) {
 	}
 }
 
-func (pp *pyProgram) lowerClass(f *srcFile, d *sitter.Node) {
+func (pp *pyProgram) lowerClass(f *srcFile, d *Node) {
 	short := f.text(d.ChildByFieldName("name"))
 	ci := pp.classes[f.pkg+"."+short]
 	if ci == nil || ci.file != f {
@@ -476,7 +479,7 @@ func (pp *pyProgram) lowerClass(f *srcFile, d *sitter.Node) {
 	}
 }
 
-func (pp *pyProgram) lowerFunction(f *srcFile, cls *classInfo, id, name string, n *sitter.Node, static bool) {
+func (pp *pyProgram) lowerFunction(f *srcFile, cls *classInfo, id, name string, n *Node, static bool) {
 	b := pp.newBuilder(f, cls, id, name, n)
 	pb := &pyBuilder{builder: b, pp: pp}
 	params := named(n.ChildByFieldName("parameters"))
@@ -493,7 +496,7 @@ func (pp *pyProgram) lowerFunction(f *srcFile, cls *classInfo, id, name string, 
 }
 
 // pyParamName is the name a parameter binds (email, *args, **kwargs).
-func pyParamName(f *srcFile, p *sitter.Node) string {
+func pyParamName(f *srcFile, p *Node) string {
 	switch p.Type() {
 	case "identifier":
 		return f.text(p)
@@ -514,14 +517,14 @@ type pyBuilder struct {
 
 // emitCall types the result of a call of a function of the program by
 // its return annotation.
-func (pb *pyBuilder) emitCall(n *sitter.Node, c *ir.Call, args []ir.VarID, resultType string) ir.VarID {
+func (pb *pyBuilder) emitCall(n *Node, c *ir.Call, args []ir.VarID, resultType string) ir.VarID {
 	if resultType == "" && c.Target != "" {
 		resultType = pb.pp.rets[c.Target]
 	}
 	return pb.builder.emitCall(n, c, args, resultType)
 }
 
-func (pb *pyBuilder) stmt(n *sitter.Node) ir.VarID {
+func (pb *pyBuilder) stmt(n *Node) ir.VarID {
 	if n == nil {
 		return ir.NoVar
 	}
@@ -530,9 +533,9 @@ func (pb *pyBuilder) stmt(n *sitter.Node) ir.VarID {
 		// if/elif/else is a chain of ifs, each elif in the else branch of
 		// the one before. A clause whose condition is constant false is
 		// dropped; one that is constant true ends the chain.
-		type clause struct{ cond, body *sitter.Node }
+		type clause struct{ cond, body *Node }
 		clauses := []clause{{n.ChildByFieldName("condition"), n.ChildByFieldName("consequence")}}
-		var elseBody *sitter.Node
+		var elseBody *Node
 		for _, alt := range fieldChildren(n, "alternative") {
 			if alt.Type() == "else_clause" {
 				elseBody = alt.ChildByFieldName("body")
@@ -575,7 +578,7 @@ func (pb *pyBuilder) stmt(n *sitter.Node) ir.VarID {
 		return ir.NoVar
 	case "try_statement":
 		var handlers []func()
-		var elseBody, finally *sitter.Node
+		var elseBody, finally *Node
 		for _, c := range named(n) {
 			switch c.Type() {
 			case "except_clause":
@@ -694,7 +697,7 @@ func (pb *pyBuilder) stmt(n *sitter.Node) ir.VarID {
 }
 
 // bind assigns v to the names a target binds: x, (a, b), [a, *b], obj.attr.
-func (pb *pyBuilder) bind(t *sitter.Node, v ir.VarID) {
+func (pb *pyBuilder) bind(t *Node, v ir.VarID) {
 	if t == nil {
 		return
 	}
@@ -741,7 +744,7 @@ func (pb *pyBuilder) bind(t *sitter.Node, v ir.VarID) {
 	}
 }
 
-func (pb *pyBuilder) assignment(n *sitter.Node) ir.VarID {
+func (pb *pyBuilder) assignment(n *Node) ir.VarID {
 	right := n.ChildByFieldName("right")
 	v := ir.NoVar
 	if right != nil {
@@ -773,7 +776,7 @@ func (pb *pyBuilder) assignment(n *sitter.Node) ir.VarID {
 	return v
 }
 
-func (pb *pyBuilder) expr(n *sitter.Node) ir.VarID {
+func (pb *pyBuilder) expr(n *Node) ir.VarID {
 	if n == nil {
 		return ir.NoVar
 	}
@@ -929,8 +932,8 @@ func (pb *pyBuilder) expr(n *sitter.Node) ir.VarID {
 }
 
 // lambdaFn lowers a lambda or a nested function inline.
-func (pb *pyBuilder) lambdaFn(params, body, n *sitter.Node) ir.VarID {
-	var nodes []*sitter.Node
+func (pb *pyBuilder) lambdaFn(params, body, n *Node) ir.VarID {
+	var nodes []*Node
 	var names []string
 	for _, p := range named(params) {
 		if name := pyParamName(pb.f, p); name != "" {
@@ -951,7 +954,7 @@ func (pb *pyBuilder) lambdaFn(params, body, n *sitter.Node) ir.VarID {
 // args lowers call arguments: positional ones in order, then each keyword
 // argument as a value named after its keyword (email=x), so the keyword
 // labels the value the way a dictionary key does.
-func (pb *pyBuilder) args(n *sitter.Node) []ir.VarID {
+func (pb *pyBuilder) args(n *Node) []ir.VarID {
 	var out, kw []ir.VarID
 	for _, a := range named(n) {
 		switch a.Type() {
@@ -969,7 +972,7 @@ func (pb *pyBuilder) args(n *sitter.Node) []ir.VarID {
 // staticPath resolves module references: logging.info is "logging.info",
 // sentry_sdk.set_user is "sentry_sdk.set_user", rq.post (import requests
 // as rq) is "requests.post".
-func (pb *pyBuilder) staticPath(n *sitter.Node) string {
+func (pb *pyBuilder) staticPath(n *Node) string {
 	if n == nil {
 		return ""
 	}
@@ -993,7 +996,7 @@ func (pb *pyBuilder) staticPath(n *sitter.Node) string {
 	return ""
 }
 
-func (pb *pyBuilder) typeOf(n *sitter.Node) string {
+func (pb *pyBuilder) typeOf(n *Node) string {
 	if n == nil {
 		return ""
 	}
@@ -1026,7 +1029,7 @@ func (pb *pyBuilder) typeOf(n *sitter.Node) string {
 	return ""
 }
 
-func (pb *pyBuilder) call(n *sitter.Node) ir.VarID {
+func (pb *pyBuilder) call(n *Node) ir.VarID {
 	fn := n.ChildByFieldName("function")
 	argsNode := n.ChildByFieldName("arguments")
 	if argsNode != nil && argsNode.Type() == "generator_expression" {
@@ -1037,7 +1040,7 @@ func (pb *pyBuilder) call(n *sitter.Node) ir.VarID {
 	return pb.callWith(n, fn, nil)
 }
 
-func (pb *pyBuilder) callWith(n, fn *sitter.Node, pre []ir.VarID) ir.VarID {
+func (pb *pyBuilder) callWith(n, fn *Node, pre []ir.VarID) ir.VarID {
 	args := func() []ir.VarID {
 		if pre != nil {
 			return pre
@@ -1116,6 +1119,6 @@ func (pb *pyBuilder) callWith(n, fn *sitter.Node, pre []ir.VarID) ir.VarID {
 
 // construct lowers Class(...): like a constructor in the JVM frontends,
 // the new object carries its arguments.
-func (pb *pyBuilder) construct(n *sitter.Node, c *classInfo, args []ir.VarID) ir.VarID {
+func (pb *pyBuilder) construct(n *Node, c *classInfo, args []ir.VarID) ir.VarID {
 	return pb.newObject(n, c.name, args, c.name)
 }

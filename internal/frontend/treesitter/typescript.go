@@ -11,13 +11,17 @@ import (
 	"sort"
 	"strings"
 
-	sitter "github.com/smacker/go-tree-sitter"
-	"github.com/smacker/go-tree-sitter/typescript/tsx"
-	"github.com/smacker/go-tree-sitter/typescript/typescript"
+	sitter "github.com/tree-sitter/go-tree-sitter"
+	tstypescript "github.com/tree-sitter/tree-sitter-typescript/bindings/go"
 
 	"github.com/GoNetTools/datawarden/internal/frontend"
 	"github.com/GoNetTools/datawarden/internal/ir"
 	"github.com/GoNetTools/datawarden/internal/lang"
+)
+
+var (
+	tsLanguage  = sitter.NewLanguage(tstypescript.LanguageTypescript())
+	tsxLanguage = sitter.NewLanguage(tstypescript.LanguageTSX())
 )
 
 // NewTypeScript returns the typescript frontend.
@@ -54,8 +58,10 @@ func (fe *tsFrontend) Lower(ctx context.Context, files []string) (*ir.Module, er
 			tsxFiles = append(tsxFiles, f)
 		}
 	}
-	tp.parse(ctx, tsFiles, typescript.GetLanguage())
-	tp.parse(ctx, tsxFiles, tsx.GetLanguage())
+	defer tp.close()
+	tp.normalize = tsNormalize
+	tp.parse(ctx, tsFiles, tsLanguage)
+	tp.parse(ctx, tsxFiles, tsxLanguage)
 	for _, f := range tp.files {
 		f.pkg = tsModuleID(f.rel)
 		tp.modules[f.pkg] = true
@@ -102,7 +108,7 @@ func (tp *tsProgram) resolveModule(from, spec string) string {
 	return p
 }
 
-func stringValue(f *srcFile, n *sitter.Node) string {
+func stringValue(f *srcFile, n *Node) string {
 	if n == nil {
 		return ""
 	}
@@ -181,8 +187,8 @@ func (tp *tsProgram) header(f *srcFile) {
 }
 
 // topDecls yields top-level declarations, unwrapping export statements.
-func topDecls(root *sitter.Node) []*sitter.Node {
-	var out []*sitter.Node
+func topDecls(root *Node) []*Node {
+	var out []*Node
 	for _, c := range named(root) {
 		if c.Type() == "export_statement" {
 			if d := c.ChildByFieldName("declaration"); d != nil {
@@ -202,7 +208,7 @@ func topDecls(root *sitter.Node) []*sitter.Node {
 	return out
 }
 
-func isFuncValue(n *sitter.Node) bool {
+func isFuncValue(n *Node) bool {
 	if n == nil {
 		return false
 	}
@@ -213,7 +219,7 @@ func isFuncValue(n *sitter.Node) bool {
 	return false
 }
 
-func tsDecorators(f *srcFile, n *sitter.Node) (map[string]string, []string) {
+func tsDecorators(f *srcFile, n *Node) (map[string]string, []string) {
 	tags := map[string]string{}
 	var names []string
 	for _, d := range allOf(n, "decorator") {
@@ -251,7 +257,7 @@ func tsDecorators(f *srcFile, n *sitter.Node) (map[string]string, []string) {
 	return tags, names
 }
 
-func tsTypeName(f *srcFile, ann *sitter.Node) string {
+func tsTypeName(f *srcFile, ann *Node) string {
 	if ann == nil {
 		return ""
 	}
@@ -275,7 +281,7 @@ func tsTypeName(f *srcFile, ann *sitter.Node) string {
 // tsObjectTypeName names an inline object type ({ email: string }) by its
 // property names, so values annotated with it get the schema's hints for
 // those properties (a PII-named property makes the value hold PII).
-func tsObjectTypeName(f *srcFile, n *sitter.Node) string {
+func tsObjectTypeName(f *srcFile, n *Node) string {
 	var props []string
 	for _, ps := range allOf(n, "property_signature") {
 		props = append(props, unquote(f.text(ps.ChildByFieldName("name"))))
@@ -288,7 +294,7 @@ func tsObjectTypeName(f *srcFile, n *sitter.Node) string {
 }
 
 // collectObjectTypes declares the inline object types used in f.
-func (tp *tsProgram) collectObjectTypes(f *srcFile, n *sitter.Node, seen map[string]bool) {
+func (tp *tsProgram) collectObjectTypes(f *srcFile, n *Node, seen map[string]bool) {
 	for _, c := range named(n) {
 		if c.Type() == "object_type" {
 			if name := tsObjectTypeName(f, c); name != "" && !seen[name] {
@@ -353,7 +359,7 @@ func (tp *tsProgram) collect(f *srcFile) {
 	}
 }
 
-func (tp *tsProgram) collectClass(f *srcFile, d *sitter.Node) {
+func (tp *tsProgram) collectClass(f *srcFile, d *Node) {
 	name := f.text(d.ChildByFieldName("name"))
 	if name == "" {
 		return
@@ -427,7 +433,7 @@ func (tp *tsProgram) collectClass(f *srcFile, d *sitter.Node) {
 
 func (tp *tsProgram) lowerFile(f *srcFile) {
 	var init *tsBuilder
-	getInit := func(n *sitter.Node) *tsBuilder {
+	getInit := func(n *Node) *tsBuilder {
 		if init == nil {
 			init = &tsBuilder{builder: tp.newBuilder(f, nil, f.pkg+":<init>", "<init>", n), tp: tp}
 		}
@@ -463,7 +469,7 @@ func (tp *tsProgram) lowerFile(f *srcFile) {
 	}
 }
 
-func (tp *tsProgram) lowerClass(f *srcFile, d *sitter.Node) {
+func (tp *tsProgram) lowerClass(f *srcFile, d *Node) {
 	name := f.text(d.ChildByFieldName("name"))
 	ci := tp.classes[name]
 	if ci == nil || ci.file != f {
@@ -501,7 +507,7 @@ func (tp *tsProgram) lowerClass(f *srcFile, d *sitter.Node) {
 	}
 }
 
-func (tp *tsProgram) lowerFunction(f *srcFile, cls *classInfo, id, name string, n *sitter.Node, static bool) {
+func (tp *tsProgram) lowerFunction(f *srcFile, cls *classInfo, id, name string, n *Node, static bool) {
 	b := tp.newBuilder(f, cls, id, name, n)
 	tb := &tsBuilder{builder: b, tp: tp}
 	if cls != nil && !static {
@@ -530,7 +536,7 @@ type tsBuilder struct {
 	tp *tsProgram
 }
 
-func (tb *tsBuilder) paramNode(p *sitter.Node, ctor bool) {
+func (tb *tsBuilder) paramNode(p *Node, ctor bool) {
 	switch p.Type() {
 	case "required_parameter", "optional_parameter":
 		pat := p.ChildByFieldName("pattern")
@@ -558,7 +564,7 @@ func (tb *tsBuilder) paramNode(p *sitter.Node, ctor bool) {
 }
 
 // destructure declares the names bound by an object/array pattern.
-func (tb *tsBuilder) destructure(pat *sitter.Node, src ir.VarID, owner string) {
+func (tb *tsBuilder) destructure(pat *Node, src ir.VarID, owner string) {
 	switch pat.Type() {
 	case "identifier":
 		dst := tb.declare(tb.text(pat), "", pat)
@@ -604,7 +610,7 @@ func (tb *tsBuilder) destructure(pat *sitter.Node, src ir.VarID, owner string) {
 	}
 }
 
-func (tb *tsBuilder) declarator(vd *sitter.Node) {
+func (tb *tsBuilder) declarator(vd *Node) {
 	name := vd.ChildByFieldName("name")
 	var v ir.VarID = ir.NoVar
 	typ := tb.tp.resolveType(tb.f, tsTypeName(tb.f, vd.ChildByFieldName("type")))
@@ -629,7 +635,7 @@ func (tb *tsBuilder) declarator(vd *sitter.Node) {
 	tb.destructure(name, src, typ)
 }
 
-func (tb *tsBuilder) stmt(n *sitter.Node) ir.VarID {
+func (tb *tsBuilder) stmt(n *Node) ir.VarID {
 	if n == nil {
 		return ir.NoVar
 	}
@@ -769,7 +775,7 @@ func (tb *tsBuilder) stmt(n *sitter.Node) ir.VarID {
 
 var tsCompare = map[string]bool{"==": true, "===": true, "!=": true, "!==": true, "<": true, ">": true, "<=": true, ">=": true, "instanceof": true, "in": true}
 
-func (tb *tsBuilder) expr(n *sitter.Node) ir.VarID {
+func (tb *tsBuilder) expr(n *Node) ir.VarID {
 	if n == nil {
 		return ir.NoVar
 	}
@@ -930,8 +936,8 @@ func (tb *tsBuilder) expr(n *sitter.Node) ir.VarID {
 	return dst
 }
 
-func (tb *tsBuilder) lambdaFn(n *sitter.Node) ir.VarID {
-	var patterns []*sitter.Node
+func (tb *tsBuilder) lambdaFn(n *Node) ir.VarID {
+	var patterns []*Node
 	if ps := n.ChildByFieldName("parameters"); ps != nil {
 		for _, p := range named(ps) {
 			if pat := p.ChildByFieldName("pattern"); pat != nil {
@@ -943,9 +949,9 @@ func (tb *tsBuilder) lambdaFn(n *sitter.Node) ir.VarID {
 	} else if p := n.ChildByFieldName("parameter"); p != nil {
 		patterns = append(patterns, p)
 	}
-	var simpleNodes []*sitter.Node
+	var simpleNodes []*Node
 	var simpleNames []string
-	var complexPats []*sitter.Node
+	var complexPats []*Node
 	for _, p := range patterns {
 		if p.Type() == "identifier" {
 			simpleNodes, simpleNames = append(simpleNodes, p), append(simpleNames, tb.text(p))
@@ -968,7 +974,7 @@ func (tb *tsBuilder) lambdaFn(n *sitter.Node) ir.VarID {
 	})
 }
 
-func (tb *tsBuilder) assignment(n *sitter.Node) ir.VarID {
+func (tb *tsBuilder) assignment(n *Node) ir.VarID {
 	left, right := n.ChildByFieldName("left"), n.ChildByFieldName("right")
 	v := tb.expr(right)
 	augmented := n.Type() == "augmented_assignment_expression"
@@ -1016,7 +1022,7 @@ func (tb *tsBuilder) assignment(n *sitter.Node) ir.VarID {
 	return v
 }
 
-func (tb *tsBuilder) args(n *sitter.Node) []ir.VarID {
+func (tb *tsBuilder) args(n *Node) []ir.VarID {
 	var out []ir.VarID
 	for _, a := range named(n) {
 		if a.Type() == "comment" {
@@ -1029,7 +1035,7 @@ func (tb *tsBuilder) args(n *sitter.Node) []ir.VarID {
 
 // staticPath resolves imports and globals: Sentry.setUser -> "@sentry/react",
 // window.localStorage -> "localStorage", mixpanel.people -> "mixpanel-browser.people".
-func (tb *tsBuilder) staticPath(n *sitter.Node) string {
+func (tb *tsBuilder) staticPath(n *Node) string {
 	if n == nil {
 		return ""
 	}
@@ -1066,7 +1072,7 @@ func (tb *tsBuilder) staticPath(n *sitter.Node) string {
 	return ""
 }
 
-func (tb *tsBuilder) typeOf(n *sitter.Node) string {
+func (tb *tsBuilder) typeOf(n *Node) string {
 	if n == nil {
 		return ""
 	}
@@ -1098,7 +1104,7 @@ func (tb *tsBuilder) typeOf(n *sitter.Node) string {
 	return ""
 }
 
-func unwrapCallee(n *sitter.Node) *sitter.Node {
+func unwrapCallee(n *Node) *Node {
 	for n != nil {
 		switch n.Type() {
 		case "await_expression", "parenthesized_expression", "non_null_expression":
@@ -1114,7 +1120,7 @@ func unwrapCallee(n *sitter.Node) *sitter.Node {
 	return n
 }
 
-func (tb *tsBuilder) call(n *sitter.Node) ir.VarID {
+func (tb *tsBuilder) call(n *Node) ir.VarID {
 	fn := unwrapCallee(n.ChildByFieldName("function"))
 	switch fn.Type() {
 	case "identifier":

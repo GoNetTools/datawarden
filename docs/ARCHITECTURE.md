@@ -127,7 +127,7 @@ What each component does:
 |---|---|
 | `frontend` | The `Frontend` interface, the `Registry` of frontends per language, the `Registrar` plugin contract. |
 | `frontend/golang` | Go via `go/packages` and SSA: full type information. |
-| `frontend/treesitter` | Python, Java, Kotlin, Swift, TypeScript via tree-sitter (cgo): syntax plus import and declaration resolution. Grammars come from `smacker/go-tree-sitter`, except Kotlin (`tree-sitter-grammars/tree-sitter-kotlin`, loaded into the same runtime with `sitter.NewLanguage`). A frontend may normalize a file before parsing without moving positions (`program.normalize`; Swift blanks syntax its grammar predates). |
+| `frontend/treesitter` | Python, Java, Kotlin, Swift, TypeScript via tree-sitter (cgo): syntax plus import and declaration resolution. The runtime is the official `github.com/tree-sitter/go-tree-sitter`, wrapped by `node.go` (`*Node`; compare nodes with `Equal`, since each access returns a new value). Each `Lower` closes its trees when done. The grammars come from their own repositories: `tree-sitter/tree-sitter-{java,python,typescript}` and `tree-sitter-grammars/tree-sitter-kotlin`. Swift is vendored in `third_party/tree-sitter-swift`: newer releases parse real code worse, and the release used has no Go bindings. A frontend may normalize a file before parsing without moving positions (`program.normalize`). Swift blanks syntax its grammar predates; TypeScript blanks the type arguments of tagged templates. |
 | `analysis` | The taint engine: sources, propagation, function summaries, flows. |
 | `detect` | Identifier classifier and taxonomy, schema index, literal validators. |
 | `rules` | Loading, validating and matching YAML sink, source and transform rules. |

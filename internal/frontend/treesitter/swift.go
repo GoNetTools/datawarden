@@ -10,13 +10,16 @@ import (
 	"fmt"
 	"strings"
 
-	sitter "github.com/smacker/go-tree-sitter"
-	"github.com/smacker/go-tree-sitter/swift"
+	sitter "github.com/tree-sitter/go-tree-sitter"
+
+	tsswift "github.com/GoNetTools/datawarden/third_party/tree-sitter-swift"
 
 	"github.com/GoNetTools/datawarden/internal/frontend"
 	"github.com/GoNetTools/datawarden/internal/ir"
 	"github.com/GoNetTools/datawarden/internal/lang"
 )
+
+var swLanguage = sitter.NewLanguage(tsswift.Language())
 
 // NewSwift returns the Swift frontend.
 func NewSwift(o frontend.Options) frontend.Frontend { return &swFrontend{opts: o} }
@@ -39,7 +42,8 @@ type swProgram struct {
 func (fe *swFrontend) Lower(ctx context.Context, files []string) (*ir.Module, error) {
 	sp := &swProgram{program: newProgram(lang.Swift, fe.opts), static: map[string]bool{}, lowered: map[string]int{}, decls: map[string]*ir.TypeDecl{}}
 	sp.normalize = swiftNormalize
-	sp.parse(ctx, files, swift.GetLanguage())
+	defer sp.close()
+	sp.parse(ctx, files, swLanguage)
 	for _, f := range sp.files {
 		sp.collect(f, f.root, "")
 	}
@@ -62,7 +66,7 @@ func (fe *swFrontend) Lower(ctx context.Context, files []string) (*ir.Module, er
 
 // swKeyword is the declaration keyword of a class_declaration: class,
 // struct, enum, extension or actor.
-func swKeyword(f *srcFile, d *sitter.Node) string {
+func swKeyword(f *srcFile, d *Node) string {
 	for i := 0; i < int(d.ChildCount()); i++ {
 		c := d.Child(i)
 		if c.IsNamed() {
@@ -78,7 +82,7 @@ func swKeyword(f *srcFile, d *sitter.Node) string {
 
 // swTypeName reduces a type node to the named type it holds: User? and
 // User! are User; [User] and (String) -> Void are not named types.
-func swTypeName(f *srcFile, n *sitter.Node) string {
+func swTypeName(f *srcFile, n *Node) string {
 	if n == nil {
 		return ""
 	}
@@ -103,7 +107,7 @@ func swTypeName(f *srcFile, n *sitter.Node) string {
 	return ""
 }
 
-func swIsType(n *sitter.Node) bool {
+func swIsType(n *Node) bool {
 	switch n.Type() {
 	case "user_type", "optional_type", "implicitly_unwrapped_type", "array_type", "dictionary_type", "function_type", "tuple_type":
 		return true
@@ -112,7 +116,7 @@ func swIsType(n *sitter.Node) bool {
 }
 
 // swAttributes are the attribute names of a declaration (@Model, @objc).
-func swAttributes(f *srcFile, d *sitter.Node) []string {
+func swAttributes(f *srcFile, d *Node) []string {
 	var out []string
 	for _, m := range allOf(d, "modifiers") {
 		for _, a := range allOf(m, "attribute") {
@@ -124,7 +128,7 @@ func swAttributes(f *srcFile, d *sitter.Node) []string {
 	return out
 }
 
-func swHasModifier(f *srcFile, d *sitter.Node, words ...string) bool {
+func swHasModifier(f *srcFile, d *Node, words ...string) bool {
 	for _, m := range allOf(d, "modifiers") {
 		for _, c := range named(m) {
 			for _, w := range words {
@@ -149,7 +153,7 @@ func (sp *swProgram) classFor(name string, f *srcFile) *classInfo {
 }
 
 // collect indexes the declarations of a scope (pass 1).
-func (sp *swProgram) collect(f *srcFile, n *sitter.Node, outer string) {
+func (sp *swProgram) collect(f *srcFile, n *Node, outer string) {
 	for _, d := range named(n) {
 		switch d.Type() {
 		case "function_declaration":
@@ -170,7 +174,7 @@ func (sp *swProgram) collect(f *srcFile, n *sitter.Node, outer string) {
 	}
 }
 
-func (sp *swProgram) collectClass(f *srcFile, d *sitter.Node, outer string) {
+func (sp *swProgram) collectClass(f *srcFile, d *Node, outer string) {
 	kw := swKeyword(f, d)
 	nameNode := d.ChildByFieldName("name")
 	short := f.text(nameNode)
@@ -262,7 +266,7 @@ func (sp *swProgram) collectClass(f *srcFile, d *sitter.Node, outer string) {
 	}
 }
 
-func (sp *swProgram) collectMethod(f *srcFile, ci *classInfo, m *sitter.Node) {
+func (sp *swProgram) collectMethod(f *srcFile, ci *classInfo, m *Node) {
 	mn := f.text(m.ChildByFieldName("name"))
 	id := ci.name + "." + mn
 	sp.funcs[id] = true
@@ -276,7 +280,7 @@ func (sp *swProgram) collectMethod(f *srcFile, ci *classInfo, m *sitter.Node) {
 
 // codingKeys turns `case email = "email_address"` in a CodingKeys enum into
 // the field's serialized name.
-func (sp *swProgram) codingKeys(f *srcFile, owner string, body *sitter.Node) {
+func (sp *swProgram) codingKeys(f *srcFile, owner string, body *Node) {
 	td := sp.decls[owner]
 	if td == nil {
 		return
@@ -317,7 +321,7 @@ func anyIn(xs []string, set map[string]bool) bool {
 }
 
 // swString is the text of a string literal without interpolations.
-func swString(f *srcFile, n *sitter.Node) string {
+func swString(f *srcFile, n *Node) string {
 	var sb strings.Builder
 	for _, c := range named(n) {
 		switch c.Type() {
@@ -361,7 +365,7 @@ func (sp *swProgram) lowerFile(f *srcFile) {
 	}
 }
 
-func (sp *swProgram) lowerClass(f *srcFile, d *sitter.Node, outer string) {
+func (sp *swProgram) lowerClass(f *srcFile, d *Node, outer string) {
 	nameNode := d.ChildByFieldName("name")
 	short := f.text(nameNode)
 	if nameNode != nil && nameNode.Type() == "user_type" {
@@ -415,11 +419,11 @@ func (sp *swProgram) lowerClass(f *srcFile, d *sitter.Node, outer string) {
 	}
 }
 
-func (sp *swProgram) lowerFunction(f *srcFile, cls *classInfo, id, name string, n *sitter.Node, static bool) {
+func (sp *swProgram) lowerFunction(f *srcFile, cls *classInfo, id, name string, n *Node, static bool) {
 	sp.lowerBody(f, cls, id, name, n, n.ChildByFieldName("body"), static)
 }
 
-func (sp *swProgram) lowerBody(f *srcFile, cls *classInfo, id, name string, decl, body *sitter.Node, static bool) {
+func (sp *swProgram) lowerBody(f *srcFile, cls *classInfo, id, name string, decl, body *Node, static bool) {
 	b := sp.newBuilder(f, cls, sp.uniqueID(id), name, decl)
 	sb := &swBuilder{builder: b, sp: sp}
 	if cls != nil && !static {
@@ -439,7 +443,7 @@ func (sp *swProgram) lowerBody(f *srcFile, cls *classInfo, id, name string, decl
 }
 
 // swParam returns a parameter's local name and type.
-func swParam(f *srcFile, p *sitter.Node) (string, string) {
+func swParam(f *srcFile, p *Node) (string, string) {
 	name, typ := "", ""
 	for i := 0; i < int(p.ChildCount()); i++ {
 		c := p.Child(i)
@@ -467,7 +471,7 @@ type swBuilder struct {
 var swLoggerMethods = map[string]bool{"debug": true, "info": true, "notice": true, "warning": true, "error": true, "fault": true,
 	"critical": true, "log": true, "trace": true}
 
-func (sb *swBuilder) stmt(n *sitter.Node) ir.VarID {
+func (sb *swBuilder) stmt(n *Node) ir.VarID {
 	if n == nil {
 		return ir.NoVar
 	}
@@ -577,7 +581,7 @@ func (sb *swBuilder) stmt(n *sitter.Node) ir.VarID {
 				// case .some(let e), case let .user(name, mail): the
 				// bound names take (parts of) the subject.
 				for _, sp := range allOf(e, "switch_pattern") {
-					var bound []*sitter.Node
+					var bound []*Node
 					for _, p := range allOf(sp, "pattern") {
 						swCaseBindings(p, false, false, &bound)
 					}
@@ -592,7 +596,7 @@ func (sb *swBuilder) stmt(n *sitter.Node) ir.VarID {
 		sb.switchCases(n, switchSpec{exhaustive: exhaustive, cases: cases})
 		return ir.NoVar
 	case "do_statement":
-		var body *sitter.Node
+		var body *Node
 		var handlers []func()
 		for _, c := range named(n) {
 			switch c.Type() {
@@ -627,7 +631,7 @@ func (sb *swBuilder) stmt(n *sitter.Node) ir.VarID {
 // swCaseBindings collects the names a case pattern binds: a
 // bound_identifier, or, under let/var, an identifier in a nested pattern
 // (let .some(g), let (a, b)); the enum case name itself is not bound.
-func swCaseBindings(p *sitter.Node, binding, nested bool, out *[]*sitter.Node) {
+func swCaseBindings(p *Node, binding, nested bool, out *[]*Node) {
 	if firstOf(p, "value_binding_pattern") != nil {
 		binding = true
 	}
@@ -651,10 +655,10 @@ func swCaseBindings(p *sitter.Node, binding, nested bool, out *[]*sitter.Node) {
 // binds x to expr for the body. The body and the else branch are
 // alternative paths; a guard's else branch leaves the scope, so only the
 // bindings of its conditions carry on.
-func (sb *swBuilder) conditions(n *sitter.Node) {
-	var pending *sitter.Node // the name of an `if let` binding
-	var then, els *sitter.Node
-	var conds []*sitter.Node
+func (sb *swBuilder) conditions(n *Node) {
+	var pending *Node // the name of an `if let` binding
+	var then, els *Node
+	var conds []*Node
 	var condVals []ir.VarID
 	bound := false
 	afterElse := false
@@ -717,7 +721,7 @@ func (sb *swBuilder) conditions(n *sitter.Node) {
 }
 
 // bindPattern assigns v to the names a pattern binds.
-func (sb *swBuilder) bindPattern(p *sitter.Node, v ir.VarID, typ string) {
+func (sb *swBuilder) bindPattern(p *Node, v ir.VarID, typ string) {
 	if p == nil {
 		return
 	}
@@ -742,7 +746,7 @@ func (sb *swBuilder) bindPattern(p *sitter.Node, v ir.VarID, typ string) {
 	}
 }
 
-func (sb *swBuilder) assignment(n *sitter.Node) ir.VarID {
+func (sb *swBuilder) assignment(n *Node) ir.VarID {
 	v := sb.expr(n.ChildByFieldName("result"))
 	target := n.ChildByFieldName("target")
 	if target != nil && target.Type() == "directly_assignable_expression" {
@@ -802,7 +806,7 @@ func (sb *swBuilder) assignment(n *sitter.Node) ir.VarID {
 }
 
 // swSuffix is the member name of a navigation expression (x.email).
-func swSuffix(f *srcFile, n *sitter.Node) string {
+func swSuffix(f *srcFile, n *Node) string {
 	s := n.ChildByFieldName("suffix")
 	if s == nil {
 		return ""
@@ -814,7 +818,7 @@ func swSuffix(f *srcFile, n *sitter.Node) string {
 }
 
 // isSubscript reports whether a call_expression is a subscript: x["key"].
-func isSubscript(f *srcFile, n *sitter.Node) (*sitter.Node, bool) {
+func isSubscript(f *srcFile, n *Node) (*Node, bool) {
 	suffix := firstOf(n, "call_suffix")
 	if suffix == nil {
 		return nil, false
@@ -828,7 +832,7 @@ func isSubscript(f *srcFile, n *sitter.Node) (*sitter.Node, bool) {
 
 // subscript lowers the base of a subscript and returns the constant key,
 // if any.
-func (sb *swBuilder) subscript(n *sitter.Node) (ir.VarID, string) {
+func (sb *swBuilder) subscript(n *Node) (ir.VarID, string) {
 	args, ok := isSubscript(sb.f, n)
 	if !ok {
 		return sb.expr(n), ""
@@ -846,7 +850,7 @@ func (sb *swBuilder) subscript(n *sitter.Node) (ir.VarID, string) {
 	return base, ""
 }
 
-func (sb *swBuilder) expr(n *sitter.Node) ir.VarID {
+func (sb *swBuilder) expr(n *Node) ir.VarID {
 	if n == nil {
 		return ir.NoVar
 	}
@@ -945,7 +949,7 @@ func (sb *swBuilder) expr(n *sitter.Node) ir.VarID {
 		return dst
 	case "dictionary_literal":
 		var parts []ir.VarID
-		var key *sitter.Node
+		var key *Node
 		for i := 0; i < int(n.ChildCount()); i++ {
 			c := n.Child(i)
 			if !c.IsNamed() {
@@ -1005,8 +1009,8 @@ func (sb *swBuilder) hasField(name string) bool {
 
 // lambdaLit lowers a closure; without declared parameters, $0 and $1
 // stand for its arguments.
-func (sb *swBuilder) lambdaLit(n *sitter.Node) ir.VarID {
-	var nodes []*sitter.Node
+func (sb *swBuilder) lambdaLit(n *Node) ir.VarID {
+	var nodes []*Node
 	var names []string
 	if t := n.ChildByFieldName("type"); t != nil {
 		if ps := firstOf(t, "lambda_function_type_parameters"); ps != nil {
@@ -1018,7 +1022,7 @@ func (sb *swBuilder) lambdaLit(n *sitter.Node) ir.VarID {
 		}
 	}
 	if len(names) == 0 {
-		nodes, names = []*sitter.Node{n, n}, []string{"$0", "$1"}
+		nodes, names = []*Node{n, n}, []string{"$0", "$1"}
 	}
 	return sb.lambda(n, nodes, names, false, func() ir.VarID {
 		return sb.stmt(firstOf(n, "statements"))
@@ -1026,8 +1030,8 @@ func (sb *swBuilder) lambdaLit(n *sitter.Node) ir.VarID {
 }
 
 // closure lowers a nested function inline.
-func (sb *swBuilder) closure(n *sitter.Node, params []*sitter.Node, body *sitter.Node) ir.VarID {
-	var nodes []*sitter.Node
+func (sb *swBuilder) closure(n *Node, params []*Node, body *Node) ir.VarID {
+	var nodes []*Node
 	var names []string
 	for _, p := range params {
 		if pn, _ := swParam(sb.f, p); pn != "" {
@@ -1039,7 +1043,7 @@ func (sb *swBuilder) closure(n *sitter.Node, params []*sitter.Node, body *sitter
 
 // args lowers a call's arguments, a labelled argument as a value named
 // after its label (email: x), and trailing closures.
-func (sb *swBuilder) args(suffix *sitter.Node) []ir.VarID {
+func (sb *swBuilder) args(suffix *Node) []ir.VarID {
 	var out []ir.VarID
 	for _, c := range named(suffix) {
 		switch c.Type() {
@@ -1066,7 +1070,7 @@ func (sb *swBuilder) args(suffix *sitter.Node) []ir.VarID {
 
 // staticPath resolves type and static member references: SentrySDK,
 // UserDefaults.standard, Analytics.shared.
-func (sb *swBuilder) staticPath(n *sitter.Node) string {
+func (sb *swBuilder) staticPath(n *Node) string {
 	if n == nil {
 		return ""
 	}
@@ -1085,7 +1089,7 @@ func (sb *swBuilder) staticPath(n *sitter.Node) string {
 	return ""
 }
 
-func (sb *swBuilder) typeOf(n *sitter.Node) string {
+func (sb *swBuilder) typeOf(n *Node) string {
 	if n == nil {
 		return ""
 	}
@@ -1125,7 +1129,7 @@ func (sb *swBuilder) typeOf(n *sitter.Node) string {
 	return ""
 }
 
-func (sb *swBuilder) call(n *sitter.Node) ir.VarID {
+func (sb *swBuilder) call(n *Node) ir.VarID {
 	k := named(n)
 	if len(k) == 0 {
 		return sb.temp(n)
@@ -1207,7 +1211,7 @@ func (sb *swBuilder) call(n *sitter.Node) ir.VarID {
 
 // swPublic reports whether the interpolation at i is followed by a
 // privacy: .public option.
-func swPublic(f *srcFile, subs []*sitter.Node, i int) bool {
+func swPublic(f *srcFile, subs []*Node, i int) bool {
 	for j := i + 1; j < len(subs) && subs[j].ChildByFieldName("name") != nil; j++ {
 		if f.text(subs[j].ChildByFieldName("name")) == "privacy" && strings.HasSuffix(f.text(subs[j].ChildByFieldName("value")), "public") {
 			return true
@@ -1219,7 +1223,7 @@ func swPublic(f *srcFile, subs []*sitter.Node, i int) bool {
 // osLogArgs lowers os_log(format, args...): arguments are private (redacted
 // in the log) unless the format marks them %{public}, so only then do they
 // reach the log.
-func (sb *swBuilder) osLogArgs(suffix *sitter.Node) []ir.VarID {
+func (sb *swBuilder) osLogArgs(suffix *Node) []ir.VarID {
 	args := sb.args(suffix)
 	vals := allOf(firstOf(suffix, "value_arguments"), "value_argument")
 	if len(vals) > 0 {
