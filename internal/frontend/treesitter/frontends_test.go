@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"testing/fstest"
 
@@ -96,6 +97,32 @@ func TestMissingFileSystemIsAWarning(t *testing.T) {
 	m, err := NewKotlin(frontend.Options{}).Lower(context.Background(), []string{"x.kt"})
 	if err != nil || len(m.Warnings) != 1 {
 		t.Errorf("err=%v warnings=%v", err, m.Warnings)
+	}
+}
+
+// cancelDuring is a context cancelled after its first few Err calls: while
+// a file is being parsed.
+type cancelDuring struct {
+	context.Context
+	calls atomic.Int32
+}
+
+func (c *cancelDuring) Err() error {
+	if c.calls.Add(1) > 2 {
+		return context.Canceled
+	}
+	return nil
+}
+
+func TestCancellationStopsAParse(t *testing.T) {
+	src := strings.Repeat("def f(email):\n    log(email)\n", 20000)
+	ctx := &cancelDuring{Context: context.Background()}
+	m, err := NewPython(frontend.Options{FS: fstest.MapFS{"a.py": {Data: []byte(src)}}}).Lower(ctx, []string{"a.py"})
+	if err == nil && m != nil && (len(m.Funcs) > 0 || len(m.Warnings) > 0) {
+		t.Errorf("a cancelled parse was lowered: %d functions, warnings %v", len(m.Funcs), m.Warnings)
+	}
+	if n := ctx.calls.Load(); n < 3 {
+		t.Errorf("the parser never checked for cancellation (%d checks)", n)
 	}
 }
 

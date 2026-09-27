@@ -32,6 +32,16 @@ cat "$goroot/LICENSE"
 if [ -f "$goroot/PATENTS" ]; then echo; cat "$goroot/PATENTS"; fi
 echo
 
+# Source vendored into this repository (third_party/<name>), with its
+# upstream license next to it.
+for dir in third_party/*/; do
+  rule
+  echo "${dir%/} (vendored, see ${dir}README.md)"
+  rule
+  cat "${dir}LICENSE"
+  echo
+done
+
 if [ -n "$paths" ]; then
   # shellcheck disable=SC2086 # word splitting of module paths is intended
   go mod download $paths

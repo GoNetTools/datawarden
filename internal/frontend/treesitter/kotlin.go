@@ -9,8 +9,8 @@ import (
 	"context"
 	"strings"
 
-	sitter "github.com/smacker/go-tree-sitter"
 	tskotlin "github.com/tree-sitter-grammars/tree-sitter-kotlin/bindings/go"
+	sitter "github.com/tree-sitter/go-tree-sitter"
 
 	"github.com/GoNetTools/datawarden/internal/frontend"
 	"github.com/GoNetTools/datawarden/internal/ir"
@@ -28,7 +28,7 @@ func (fe *ktFrontend) Lang() string { return lang.Kotlin }
 type ktExtra struct {
 	static  map[string]bool   // methods callable without a receiver (object/companion)
 	returns map[string]string // method -> declared return type
-	node    *sitter.Node
+	node    *Node
 }
 
 type ktProgram struct {
@@ -41,6 +41,7 @@ type ktProgram struct {
 
 func (fe *ktFrontend) Lower(ctx context.Context, files []string) (*ir.Module, error) {
 	kp := &ktProgram{program: newProgram(lang.Kotlin, fe.opts), extra: map[string]*ktExtra{}, extRecv: map[string]string{}, topRet: map[string]string{}}
+	defer kp.close()
 	kp.parse(ctx, files, ktLanguage)
 	for _, f := range kp.files {
 		kp.header(f)
@@ -91,7 +92,7 @@ func (kp *ktProgram) header(f *srcFile) {
 	}
 }
 
-func ktTypeText(f *srcFile, n *sitter.Node) string {
+func ktTypeText(f *srcFile, n *Node) string {
 	if n == nil {
 		return ""
 	}
@@ -113,11 +114,11 @@ func ktTypeText(f *srcFile, n *sitter.Node) string {
 // ktTypeNodes are the node types a type is written as.
 var ktTypeNodes = []string{"user_type", "nullable_type", "function_type", "non_nullable_type", "parenthesized_type"}
 
-func ktTypeChild(n *sitter.Node) *sitter.Node {
+func ktTypeChild(n *Node) *Node {
 	return firstOf(n, ktTypeNodes...)
 }
 
-func isKtType(n *sitter.Node) bool {
+func isKtType(n *Node) bool {
 	for _, t := range ktTypeNodes {
 		if n.Type() == t {
 			return true
@@ -128,7 +129,7 @@ func isKtType(n *sitter.Node) bool {
 
 // ktName is the name of a declaration: its name field, or its first
 // identifier.
-func ktName(n *sitter.Node) *sitter.Node {
+func ktName(n *Node) *Node {
 	if n == nil {
 		return nil
 	}
@@ -140,20 +141,20 @@ func ktName(n *sitter.Node) *sitter.Node {
 
 // ktIsProperty reports whether a primary constructor parameter declares a
 // property (val or var).
-func ktIsProperty(f *srcFile, cp *sitter.Node) bool {
+func ktIsProperty(f *srcFile, cp *Node) bool {
 	return hasChildToken(cp, f.src, "val") || hasChildToken(cp, f.src, "var")
 }
 
 // ktAnnotations returns tags ("@Column" -> "email") and bare annotation names.
-func ktAnnotations(f *srcFile, mods *sitter.Node) (map[string]string, []string) {
+func ktAnnotations(f *srcFile, mods *Node) (map[string]string, []string) {
 	tags := map[string]string{}
 	var names []string
 	if mods == nil {
 		return tags, nil
 	}
 	for _, a := range allOf(mods, "annotation") {
-		var tn *sitter.Node
-		var args *sitter.Node
+		var tn *Node
+		var args *Node
 		if ci := firstOf(a, "constructor_invocation"); ci != nil {
 			tn = firstOf(ci, "user_type")
 			args = firstOf(ci, "value_arguments")
@@ -195,7 +196,7 @@ func isEntityAnnotation(names []string) bool {
 }
 
 // collect indexes declarations (pass 1).
-func (kp *ktProgram) collect(f *srcFile, n *sitter.Node, scope string, outer *classInfo) {
+func (kp *ktProgram) collect(f *srcFile, n *Node, scope string, outer *classInfo) {
 	for _, c := range named(n) {
 		switch c.Type() {
 		case "class_declaration", "object_declaration":
@@ -227,12 +228,12 @@ func (kp *ktProgram) collect(f *srcFile, n *sitter.Node, scope string, outer *cl
 
 // ktFuncName returns the function name and, for extension functions, the
 // receiver type.
-func ktFuncName(f *srcFile, fn *sitter.Node) (name, recv string) {
+func ktFuncName(f *srcFile, fn *Node) (name, recv string) {
 	id := fn.ChildByFieldName("name")
 	if id == nil {
 		return "", ""
 	}
-	var lastType *sitter.Node
+	var lastType *Node
 	for _, c := range named(fn) {
 		if c.StartByte() >= id.StartByte() {
 			break
@@ -247,7 +248,7 @@ func ktFuncName(f *srcFile, fn *sitter.Node) (name, recv string) {
 	return f.text(id), recv
 }
 
-func ktReturnType(f *srcFile, fn *sitter.Node) string {
+func ktReturnType(f *srcFile, fn *Node) string {
 	seenParams := false
 	for _, c := range named(fn) {
 		if c.Type() == "function_value_parameters" {
@@ -261,7 +262,7 @@ func ktReturnType(f *srcFile, fn *sitter.Node) string {
 	return ""
 }
 
-func (kp *ktProgram) collectClass(f *srcFile, n *sitter.Node, scope string, isObject bool) {
+func (kp *ktProgram) collectClass(f *srcFile, n *Node, scope string, isObject bool) {
 	nameNode := ktName(n)
 	if nameNode == nil {
 		return
@@ -303,8 +304,8 @@ func (kp *ktProgram) collectClass(f *srcFile, n *sitter.Node, scope string, isOb
 		}
 	}
 	body := firstOf(n, "class_body", "enum_class_body")
-	var walkBody func(body *sitter.Node, static bool)
-	walkBody = func(body *sitter.Node, static bool) {
+	var walkBody func(body *Node, static bool)
+	walkBody = func(body *Node, static bool) {
 		prop := "" // the property a following getter belongs to
 		for _, m := range named(body) {
 			switch m.Type() {
@@ -367,7 +368,7 @@ func (kp *ktProgram) collectClass(f *srcFile, n *sitter.Node, scope string, isOb
 }
 
 // ktCtorType guesses a property type from `= Foo(...)`.
-func ktCtorType(f *srcFile, prop *sitter.Node) string {
+func ktCtorType(f *srcFile, prop *Node) string {
 	ce := firstOf(prop, "call_expression")
 	if ce == nil {
 		return ""
@@ -379,13 +380,13 @@ func ktCtorType(f *srcFile, prop *sitter.Node) string {
 	return ""
 }
 
-func posOf(f *srcFile, n *sitter.Node) ir.Pos {
+func posOf(f *srcFile, n *Node) ir.Pos {
 	sp := n.StartPoint()
 	return ir.Pos{File: f.rel, Line: int(sp.Row) + 1, Col: int(sp.Column) + 1}
 }
 
 // lowerDecls lowers function bodies (pass 2).
-func (kp *ktProgram) lowerDecls(f *srcFile, n *sitter.Node, cls *classInfo) {
+func (kp *ktProgram) lowerDecls(f *srcFile, n *Node, cls *classInfo) {
 	var topInit *builder
 	for _, c := range named(n) {
 		switch c.Type() {
@@ -407,7 +408,7 @@ func (kp *ktProgram) lowerDecls(f *srcFile, n *sitter.Node, cls *classInfo) {
 	}
 }
 
-func (kp *ktProgram) lowerClass(f *srcFile, n *sitter.Node, outer *classInfo) {
+func (kp *ktProgram) lowerClass(f *srcFile, n *Node, outer *classInfo) {
 	nameNode := ktName(n)
 	if nameNode == nil {
 		return
@@ -444,8 +445,8 @@ func (kp *ktProgram) lowerClass(f *srcFile, n *sitter.Node, outer *classInfo) {
 		}
 	}
 	body := firstOf(n, "class_body", "enum_class_body")
-	var walk func(body *sitter.Node, static bool)
-	walk = func(body *sitter.Node, static bool) {
+	var walk func(body *Node, static bool)
+	walk = func(body *Node, static bool) {
 		prop := ""
 		for _, m := range named(body) {
 			switch m.Type() {
@@ -497,7 +498,7 @@ func (kp *ktProgram) lowerClass(f *srcFile, n *sitter.Node, outer *classInfo) {
 // (for reflection), User::email a property handle whose get(obj) reads the
 // field, and Sender::send or sender::send a function value that calls the
 // method with its arguments.
-func (kb *ktBuilder) callableRef(n *sitter.Node) ir.VarID {
+func (kb *ktBuilder) callableRef(n *Node) ir.VarID {
 	kids := named(n)
 	text := kb.text(n)
 	if len(kids) == 1 && strings.HasSuffix(text, "::class") {
@@ -553,7 +554,7 @@ func (kp *ktProgram) noteGetter(ci *classInfo, prop string) {
 }
 
 // lowerGetter lowers a custom property getter (get() = expr, or a block).
-func (kp *ktProgram) lowerGetter(f *srcFile, ci *classInfo, prop string, g *sitter.Node) {
+func (kp *ktProgram) lowerGetter(f *srcFile, ci *classInfo, prop string, g *Node) {
 	id := kp.getters[ci.name+"."+prop]
 	if id == "" {
 		return
@@ -571,7 +572,7 @@ func (kp *ktProgram) lowerGetter(f *srcFile, ci *classInfo, prop string, g *sitt
 	b.finish()
 }
 
-func ktPropValue(prop *sitter.Node) *sitter.Node {
+func ktPropValue(prop *Node) *Node {
 	kids := named(prop)
 	for i := len(kids) - 1; i >= 0; i-- {
 		switch kids[i].Type() {
@@ -589,7 +590,7 @@ func ktPropValue(prop *sitter.Node) *sitter.Node {
 	return nil
 }
 
-func (kp *ktProgram) lowerFunc(f *srcFile, n *sitter.Node, cls *classInfo, static bool) {
+func (kp *ktProgram) lowerFunc(f *srcFile, n *Node, cls *classInfo, static bool) {
 	name, recv := ktFuncName(f, n)
 	if name == "" {
 		return
@@ -631,7 +632,7 @@ type ktBuilder struct {
 	// hoisted is a prefix operator the grammar attached to the receiver
 	// of a call or member chain (!a.b() read as (!a).b()): lowering the
 	// chain sees through it, and the operator applies to the chain.
-	hoisted *sitter.Node
+	hoisted *Node
 }
 
 // ktChains are the expressions a member or call chain is built from.
@@ -641,7 +642,7 @@ var ktChains = map[string]bool{"call_expression": true, "navigation_expression":
 // chain n, when there is one: tree-sitter-kotlin binds a prefix operator
 // tighter than member access, so !consents.hasConsent() is read as
 // (!consents).hasConsent().
-func ktMisboundPrefix(n *sitter.Node) *sitter.Node {
+func ktMisboundPrefix(n *Node) *Node {
 	if !ktChains[n.Type()] {
 		return nil
 	}
@@ -664,14 +665,14 @@ func ktMisboundPrefix(n *sitter.Node) *sitter.Node {
 
 // seeThrough returns n, or the operand of the hoisted prefix operator
 // when n is that operator's expression.
-func (kb *ktBuilder) seeThrough(n *sitter.Node) *sitter.Node {
+func (kb *ktBuilder) seeThrough(n *Node) *Node {
 	if n != nil && kb.hoisted != nil && n.Equal(kb.hoisted) {
 		return n.ChildByFieldName("argument")
 	}
 	return n
 }
 
-func (kb *ktBuilder) params(fvp *sitter.Node) {
+func (kb *ktBuilder) params(fvp *Node) {
 	for _, p := range allOf(fvp, "parameter") {
 		id := firstOf(p, "identifier")
 		if id == nil {
@@ -682,7 +683,7 @@ func (kb *ktBuilder) params(fvp *sitter.Node) {
 }
 
 // block lowers statements and returns the value of the last expression.
-func (kb *ktBuilder) block(n *sitter.Node) ir.VarID {
+func (kb *ktBuilder) block(n *Node) ir.VarID {
 	if n == nil {
 		return ir.NoVar
 	}
@@ -704,7 +705,7 @@ func (kb *ktBuilder) block(n *sitter.Node) ir.VarID {
 // ktBody is the body of a control structure: its block, or the statement
 // written without braces. It is the last named child that is not the
 // condition, a label or a comment.
-func ktBody(n *sitter.Node, skip ...*sitter.Node) *sitter.Node {
+func ktBody(n *Node, skip ...*Node) *Node {
 	kids := named(n)
 	for i := len(kids) - 1; i >= 0; i-- {
 		k := kids[i]
@@ -725,7 +726,7 @@ func ktBody(n *sitter.Node, skip ...*sitter.Node) *sitter.Node {
 }
 
 // ktLabel is the label of a loop (outer@ for ...), without the @.
-func (kb *ktBuilder) ktLabel(n *sitter.Node) string {
+func (kb *ktBuilder) ktLabel(n *Node) string {
 	if l := firstOf(n, "label"); l != nil {
 		return strings.TrimSuffix(kb.text(l), "@")
 	}
@@ -735,7 +736,7 @@ func (kb *ktBuilder) ktLabel(n *sitter.Node) string {
 // ktJump reports whether n is break or continue, possibly labelled
 // (break@outer): the grammar reads them as an identifier, or as a label
 // "break@" applied to the target's name.
-func (kb *ktBuilder) ktJump(n *sitter.Node) (isJump, isContinue bool, label string) {
+func (kb *ktBuilder) ktJump(n *Node) (isJump, isContinue bool, label string) {
 	switch n.Type() {
 	case "identifier":
 		switch kb.text(n) {
@@ -760,7 +761,7 @@ func (kb *ktBuilder) ktJump(n *sitter.Node) (isJump, isContinue bool, label stri
 	return false, false, ""
 }
 
-func (kb *ktBuilder) stmt(n *sitter.Node) ir.VarID {
+func (kb *ktBuilder) stmt(n *Node) ir.VarID {
 	if ok, cont, label := kb.ktJump(n); ok {
 		kb.jump(cont, label)
 		return ir.NoVar
@@ -807,8 +808,8 @@ func (kb *ktBuilder) stmt(n *sitter.Node) ir.VarID {
 		return ir.NoVar
 	case "for_statement":
 		var iter ir.VarID = ir.NoVar
-		var vars []*sitter.Node
-		var iterNode, body *sitter.Node
+		var vars []*Node
+		var iterNode, body *Node
 		for _, c := range named(n) {
 			switch c.Type() {
 			case "variable_declaration":
@@ -855,7 +856,7 @@ func (kb *ktBuilder) stmt(n *sitter.Node) ir.VarID {
 		return ir.NoVar
 	case "function_declaration":
 		// Local function: a closure bound to its name, so calls of it run it.
-		var pnodes []*sitter.Node
+		var pnodes []*Node
 		var pnames []string
 		for _, p := range allOf(firstOf(n, "function_value_parameters"), "parameter") {
 			if id := firstOf(p, "identifier"); id != nil {
@@ -880,7 +881,7 @@ func (kb *ktBuilder) stmt(n *sitter.Node) ir.VarID {
 	return kb.expr(n)
 }
 
-func (kb *ktBuilder) assignment(n *sitter.Node) {
+func (kb *ktBuilder) assignment(n *Node) {
 	target, valNode := n.ChildByFieldName("left"), n.ChildByFieldName("right")
 	if target == nil || valNode == nil {
 		return
@@ -945,8 +946,8 @@ func (kb *ktBuilder) assignment(n *sitter.Node) {
 // expression whose value is interpolated.
 type ktStringPart struct {
 	text string
-	expr *sitter.Node
-	name *sitter.Node // $name, whose node covers the text after the $
+	expr *Node
+	name *Node // $name, whose node covers the text after the $
 	id   string
 }
 
@@ -954,7 +955,7 @@ type ktStringPart struct {
 // tree-sitter-kotlin reads "$name" in a single-line string as a "$"
 // string_content followed by text starting with the name, so a "$" before
 // an identifier is an interpolation of that identifier.
-func (kb *ktBuilder) ktStringParts(n *sitter.Node) []ktStringPart {
+func (kb *ktBuilder) ktStringParts(n *Node) []ktStringPart {
 	var parts []ktStringPart
 	kids := named(n)
 	for i := 0; i < len(kids); i++ {
@@ -999,7 +1000,7 @@ func ktLeadingIdent(s string) string {
 
 // ktStaticString returns the text of a string literal without
 // interpolations.
-func (kb *ktBuilder) ktStaticString(n *sitter.Node) (string, bool) {
+func (kb *ktBuilder) ktStaticString(n *Node) (string, bool) {
 	var sb strings.Builder
 	for _, p := range kb.ktStringParts(n) {
 		if p.expr != nil || p.name != nil {
@@ -1012,7 +1013,7 @@ func (kb *ktBuilder) ktStaticString(n *sitter.Node) (string, bool) {
 
 var ktLiterals = map[string]bool{"true": true, "false": true, "null": true}
 
-func (kb *ktBuilder) expr(n *sitter.Node) ir.VarID {
+func (kb *ktBuilder) expr(n *Node) ir.VarID {
 	if n == nil {
 		return ir.NoVar
 	}
@@ -1246,20 +1247,20 @@ func (kb *ktBuilder) expr(n *sitter.Node) ir.VarID {
 // conditional lowers if, when and try expressions: each arm is a separate
 // path from the scope before it, and the expression's value is the value of
 // whichever arm ran.
-func (kb *ktBuilder) conditional(n *sitter.Node) ir.VarID {
+func (kb *ktBuilder) conditional(n *Node) ir.VarID {
 	return kb.valued(n, func() { kb.conditionalArms(n) })
 }
 
-func (kb *ktBuilder) conditionalArms(n *sitter.Node) {
+func (kb *ktBuilder) conditionalArms(n *Node) {
 	set := kb.setResult
-	arm := func(body *sitter.Node) func() {
+	arm := func(body *Node) func() {
 		return func() { set(kb.block(body)) }
 	}
 	switch n.Type() {
 	case "if_expression":
 		cond := n.ChildByFieldName("condition")
 		cv := kb.expr(cond)
-		var bodies []*sitter.Node
+		var bodies []*Node
 		for _, c := range named(n) {
 			switch {
 			case cond != nil && c.Equal(cond):
@@ -1287,7 +1288,7 @@ func (kb *ktBuilder) conditionalArms(n *sitter.Node) {
 		for _, c := range named(n) {
 			switch c.Type() {
 			case "when_subject":
-				var vd *sitter.Node
+				var vd *Node
 				for _, k := range named(c) {
 					switch k.Type() {
 					case "variable_declaration":
@@ -1347,7 +1348,7 @@ func (kb *ktBuilder) conditionalArms(n *sitter.Node) {
 		}
 		kb.switchCases(n, switchSpec{exhaustive: exhaustive, noBreak: true, cases: arms, tests: tests})
 	case "try_expression":
-		var body *sitter.Node
+		var body *Node
 		var handlers []func()
 		var finally func()
 		for _, c := range named(n) {
@@ -1377,13 +1378,13 @@ func (kb *ktBuilder) conditionalArms(n *sitter.Node) {
 	}
 }
 
-func (kb *ktBuilder) lambdaLit(n *sitter.Node) ir.VarID {
+func (kb *ktBuilder) lambdaLit(n *Node) ir.VarID {
 	if n.Type() == "annotated_lambda" {
 		if l := firstOf(n, "lambda_literal"); l != nil {
 			n = l
 		}
 	}
-	var pnodes []*sitter.Node
+	var pnodes []*Node
 	var pnames []string
 	if lp := firstOf(n, "lambda_parameters"); lp != nil {
 		for _, vd := range named(lp) {
@@ -1417,7 +1418,7 @@ var ktBuiltins = map[string]string{
 
 // classRef resolves an expression that names a class or object (Sentry,
 // android.util.Log, FirebaseCrashlytics) to its qualified name.
-func (kb *ktBuilder) classRef(n *sitter.Node) string {
+func (kb *ktBuilder) classRef(n *Node) string {
 	n = kb.seeThrough(n)
 	switch n.Type() {
 	case "identifier":
@@ -1468,7 +1469,7 @@ func (kb *ktBuilder) classRef(n *sitter.Node) string {
 }
 
 // typeOf returns the best-known static type of an expression.
-func (kb *ktBuilder) typeOf(n *sitter.Node) string {
+func (kb *ktBuilder) typeOf(n *Node) string {
 	n = kb.seeThrough(n)
 	if n == nil {
 		return ""
@@ -1545,7 +1546,7 @@ func (kb *ktBuilder) typeOf(n *sitter.Node) string {
 
 // args lowers the arguments of a call: its value arguments and a
 // trailing lambda.
-func (kb *ktBuilder) args(call *sitter.Node) []ir.VarID {
+func (kb *ktBuilder) args(call *Node) []ir.VarID {
 	var out []ir.VarID
 	for i, c := range named(call) {
 		if i == 0 {
@@ -1573,7 +1574,7 @@ func (kb *ktBuilder) args(call *sitter.Node) []ir.VarID {
 	return out
 }
 
-func (kb *ktBuilder) call(n *sitter.Node) ir.VarID {
+func (kb *ktBuilder) call(n *Node) ir.VarID {
 	kids := named(n)
 	if len(kids) == 0 {
 		return kb.temp(n)

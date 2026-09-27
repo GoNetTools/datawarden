@@ -61,6 +61,7 @@ Within 1.x, an upgrade never breaks a CI setup: baselines keep matching, reports
 - JSON Schemas for the report and config, and a compatibility policy: [#46](https://github.com/GoNetTools/datawarden/issues/46)
 - Fingerprint stability, with tests and `baseline migrate`: [#47](https://github.com/GoNetTools/datawarden/issues/47)
 - Signed releases, provenance and an SBOM: [#48](https://github.com/GoNetTools/datawarden/issues/48)
+- The official, maintained tree-sitter Go bindings instead of the unmaintained smacker/go-tree-sitter: [#52](https://github.com/GoNetTools/datawarden/issues/52)
 - A documentation site: [#49](https://github.com/GoNetTools/datawarden/issues/49)
 
 ## What guides the order

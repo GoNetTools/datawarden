@@ -20,7 +20,7 @@ import (
 	"strconv"
 	"strings"
 
-	sitter "github.com/smacker/go-tree-sitter"
+	sitter "github.com/tree-sitter/go-tree-sitter"
 
 	"github.com/GoNetTools/datawarden/internal/frontend"
 	"github.com/GoNetTools/datawarden/internal/ir"
@@ -31,13 +31,13 @@ type srcFile struct {
 	rel       string
 	src       []byte
 	tree      *sitter.Tree
-	root      *sitter.Node
+	root      *Node
 	pkg       string            // JVM package, or TS module id
 	imports   map[string]string // simple name -> qualified name
 	wildcards []string          // wildcard import prefixes
 }
 
-func (f *srcFile) text(n *sitter.Node) string {
+func (f *srcFile) text(n *Node) string {
 	if n == nil {
 		return ""
 	}
@@ -92,6 +92,13 @@ func (p *program) warnf(format string, args ...any) {
 }
 
 func (p *program) parse(ctx context.Context, rels []string, lang *sitter.Language) {
+	parser := sitter.NewParser()
+	defer parser.Close()
+	if err := parser.SetLanguage(lang); err != nil {
+		p.warnf("%v", err)
+		return
+	}
+	cancelled := &sitter.ParseOptions{ProgressCallback: func(sitter.ParseState) bool { return ctx.Err() != nil }}
 	for _, rel := range rels {
 		if ctx.Err() != nil {
 			return
@@ -108,14 +115,19 @@ func (p *program) parse(ctx context.Context, rels []string, lang *sitter.Languag
 		if p.normalize != nil {
 			src = p.normalize(src)
 		}
-		parser := sitter.NewParser()
-		parser.SetLanguage(lang)
-		tree, err := parser.ParseCtx(ctx, nil, src)
-		if err != nil {
-			p.warnf("%s: parse: %v", rel, err)
+		tree := parser.ParseWithOptions(func(i int, _ sitter.Point) []byte {
+			if i < len(src) {
+				return src[i:]
+			}
+			return nil
+		}, nil, cancelled)
+		if tree == nil {
+			if ctx.Err() == nil {
+				p.warnf("%s: the parser returned no tree", rel)
+			}
 			continue
 		}
-		f := &srcFile{rel: rel, src: src, tree: tree, root: tree.RootNode(), imports: map[string]string{}}
+		f := &srcFile{rel: rel, src: src, tree: tree, root: wrap(tree.RootNode()), imports: map[string]string{}}
 		if n, line := syntaxErrors(f.root); n > 0 {
 			p.warnf("%s:%d: %d syntax error(s) the parser could not read; the code around them is analysed as far as it could be recovered", rel, line, n)
 		}
@@ -124,11 +136,20 @@ func (p *program) parse(ctx context.Context, rels []string, lang *sitter.Languag
 	}
 }
 
+// close frees the syntax trees. Nodes are invalid afterwards, so it runs
+// when lowering is done.
+func (p *program) close() {
+	for _, f := range p.files {
+		f.tree.Close()
+		f.tree, f.root = nil, nil
+	}
+}
+
 // collectConsts records boolean constants: Java final fields, Kotlin val
 // and const val, Swift let, TypeScript const and readonly fields, and
 // Python UPPER_CASE assignments at module or class level, when their value
 // is a boolean literal (static final boolean DEBUG = false).
-func (p *program) collectConsts(f *srcFile, n *sitter.Node) {
+func (p *program) collectConsts(f *srcFile, n *Node) {
 	for _, c := range named(n) {
 		switch c.Type() {
 		case "block", "function_body", "method_declaration", "constructor_declaration", "function_declaration", "function_definition",
@@ -149,7 +170,7 @@ func (p *program) collectConsts(f *srcFile, n *sitter.Node) {
 }
 
 // constDecl returns the name and value of an immutable declaration.
-func (p *program) constDecl(f *srcFile, n *sitter.Node) (string, *sitter.Node) {
+func (p *program) constDecl(f *srcFile, n *Node) (string, *Node) {
 	text := f.text(n)
 	switch p.lang {
 	case lang.Java:
@@ -192,7 +213,7 @@ func (p *program) constDecl(f *srcFile, n *sitter.Node) (string, *sitter.Node) {
 
 // constOwner is the key prefix of a declaration: its enclosing class's
 // short name, or its file for a top-level declaration.
-func constOwner(f *srcFile, n *sitter.Node) string {
+func constOwner(f *srcFile, n *Node) string {
 	for a := n.Parent(); a != nil; a = a.Parent() {
 		switch a.Type() {
 		case "class_declaration", "interface_declaration", "enum_declaration", "record_declaration", "object_declaration",
@@ -468,7 +489,7 @@ func (b *builder) jump(isContinue bool, label string) {
 	}
 }
 
-func (p *program) newBuilder(f *srcFile, cls *classInfo, id, name string, n *sitter.Node) *builder {
+func (p *program) newBuilder(f *srcFile, cls *classInfo, id, name string, n *Node) *builder {
 	b := &builder{p: p, f: f, cls: cls, scope: map[string]ir.VarID{}, this: ir.NoVar, names: map[string]ir.VarID{}, closures: map[ir.VarID]string{},
 		caught: ir.NoVar}
 	b.fn = &ir.Func{ID: id, Name: name, Lang: p.lang, File: f.rel, Pos: b.pos(n)}
@@ -538,7 +559,7 @@ func (b *builder) cell(v ir.VarID) {
 	}
 }
 
-func (b *builder) pos(n *sitter.Node) ir.Pos {
+func (b *builder) pos(n *Node) ir.Pos {
 	if n == nil {
 		return ir.Pos{File: b.f.rel}
 	}
@@ -546,17 +567,17 @@ func (b *builder) pos(n *sitter.Node) ir.Pos {
 	return ir.Pos{File: b.f.rel, Line: int(sp.Row) + 1, Col: int(sp.Column) + 1}
 }
 
-func (b *builder) text(n *sitter.Node) string { return b.f.text(n) }
+func (b *builder) text(n *Node) string { return b.f.text(n) }
 
-func (b *builder) temp(n *sitter.Node) ir.VarID { return b.fn.Temp(b.pos(n)) }
+func (b *builder) temp(n *Node) ir.VarID { return b.fn.Temp(b.pos(n)) }
 
-func (b *builder) constVar(v string, n *sitter.Node) ir.VarID { return b.fn.ConstVar(v, b.pos(n)) }
+func (b *builder) constVar(v string, n *Node) ir.VarID { return b.fn.ConstVar(v, b.pos(n)) }
 
-func (b *builder) addThis(typ string, n *sitter.Node) {
+func (b *builder) addThis(typ string, n *Node) {
 	b.this = b.fn.AddParam("this", typ, b.pos(n))
 }
 
-func (b *builder) param(name, typ string, n *sitter.Node) ir.VarID {
+func (b *builder) param(name, typ string, n *Node) ir.VarID {
 	v := b.fn.AddParam(name, typ, b.pos(n))
 	if name != "" {
 		b.scope[name] = v
@@ -564,7 +585,7 @@ func (b *builder) param(name, typ string, n *sitter.Node) ir.VarID {
 	return v
 }
 
-func (b *builder) declare(name, typ string, n *sitter.Node) ir.VarID {
+func (b *builder) declare(name, typ string, n *Node) ir.VarID {
 	v := b.fn.Named(name, typ, b.pos(n))
 	b.scope[name] = v
 	return v
@@ -576,7 +597,7 @@ func (b *builder) declare(name, typ string, n *sitter.Node) ir.VarID {
 // closure assigning a variable it captured writes the enclosing
 // function's variable, which may be read at any time: the capture is a
 // cell and the assignment a weak update of it.
-func (b *builder) redefine(name string, old ir.VarID, typ string, n *sitter.Node) ir.VarID {
+func (b *builder) redefine(name string, old ir.VarID, typ string, n *Node) ir.VarID {
 	if old == b.this || b.isCapture(old) {
 		b.cell(old)
 		return old
@@ -596,7 +617,7 @@ func (b *builder) snapshot() map[string]ir.VarID { return maps.Clone(b.scope) }
 // versions, or bound on only some paths (Python, JS var and a missed block
 // scope all leave it visible), gets a phi of the versions arriving from
 // each path.
-func (b *builder) join(n *sitter.Node, paths ...exit) {
+func (b *builder) join(n *Node, paths ...exit) {
 	out := map[string]ir.VarID{}
 	names := map[string]bool{}
 	for _, p := range paths {
@@ -639,7 +660,7 @@ func (b *builder) join(n *sitter.Node, paths ...exit) {
 // block after them. An arm that returns is left out of the join; when all
 // of them return, what follows is unreachable. It returns the arms' entry
 // blocks and the join block.
-func (b *builder) branches(n *sitter.Node, skippable bool, arms ...func()) (starts []int32, join int32) {
+func (b *builder) branches(n *Node, skippable bool, arms ...func()) (starts []int32, join int32) {
 	entry, from, dead := b.snapshot(), b.fn.CurBlock(), b.terminated
 	var ends []exit
 	if skippable || len(arms) == 0 {
@@ -665,7 +686,7 @@ func (b *builder) branches(n *sitter.Node, skippable bool, arms ...func()) (star
 }
 
 // loop lowers a loop body that may run zero or more times.
-func (b *builder) loop(n *sitter.Node, body func()) { b.loopWith(n, loopSpec{body: body}) }
+func (b *builder) loop(n *Node, body func()) { b.loopWith(n, loopSpec{body: body}) }
 
 type loopSpec struct {
 	body func()
@@ -689,7 +710,7 @@ type loopSpec struct {
 // a phi at the start of the header merging the value from before the loop
 // with the value at each back edge; reads in the body are rewritten to it.
 // The code after the loop joins the header's exit with every break.
-func (b *builder) loopWith(n *sitter.Node, spec loopSpec) {
+func (b *builder) loopWith(n *Node, spec loopSpec) {
 	entry, dead := b.snapshot(), b.terminated
 	pre := b.fn.CurBlock()
 	t := &jumpTarget{label: b.takeLabel(), loop: true}
@@ -865,7 +886,7 @@ func (b *builder) loopWith(n *sitter.Node, spec loopSpec) {
 //
 // A Kotlin when is not a break target: break inside it leaves the
 // enclosing loop (noBreak).
-func (b *builder) switchCases(n *sitter.Node, s switchSpec) {
+func (b *builder) switchCases(n *Node, s switchSpec) {
 	fallsThrough, exhaustive, cases, tests := s.fallsThrough, s.exhaustive, s.cases, s.tests
 	from, dead := b.fn.CurBlock(), b.terminated
 	// The chain of tests: case i is entered from enter[i].
@@ -951,7 +972,7 @@ type switchSpec struct {
 
 // matches lowers a case test: subject equals one of values. With no
 // subject (a when without one) the value is the condition itself.
-func (b *builder) matches(n *sitter.Node, subject ir.VarID, values ...ir.VarID) ir.VarID {
+func (b *builder) matches(n *Node, subject ir.VarID, values ...ir.VarID) ir.VarID {
 	var tests []ir.VarID
 	for _, v := range values {
 		if v == ir.NoVar {
@@ -980,7 +1001,7 @@ func (b *builder) matches(n *sitter.Node, subject ir.VarID, values ...ir.VarID) 
 // then and els (nil without an else) are alternative paths, and the
 // current block ends with a branch on c. A constant condition (see truth)
 // leaves out the arm that cannot run.
-func (b *builder) ifElse(n, cond *sitter.Node, c ir.VarID, then, els func()) {
+func (b *builder) ifElse(n, cond *Node, c ir.VarID, then, els func()) {
 	v, known := b.truth(cond)
 	from := b.fn.CurBlock()
 	switch {
@@ -1010,7 +1031,7 @@ func (b *builder) branch(from int32, c ir.VarID, ifTrue, ifFalse int32) {
 // literal, a negation or parenthesised form of one, or a local variable
 // whose only definition is such a constant (verbose = false). Anything
 // that depends on data is unknown.
-func (b *builder) truth(n *sitter.Node) (value, known bool) {
+func (b *builder) truth(n *Node) (value, known bool) {
 	for depth := 0; n != nil && depth < 8; depth++ {
 		t := strings.TrimSpace(b.text(n))
 		switch t {
@@ -1120,7 +1141,7 @@ func (b *builder) constTruth(v ir.VarID, depth int) (value, known bool) {
 // points; each handler is a path from it. An empty block before the body
 // is such a point too, for exceptions the runtime raises anywhere in it.
 // The finally block runs after the body or a handler.
-func (b *builder) tryCatch(n *sitter.Node, body func(), handlers []func(), finally func()) {
+func (b *builder) tryCatch(n *Node, body func(), handlers []func(), finally func()) {
 	entry, from, dead := b.snapshot(), b.fn.CurBlock(), b.terminated
 	first := b.newBlock(from)
 	b.newBlock(first)
@@ -1192,7 +1213,7 @@ const resultName = "#result"
 
 // valued lowers a construct whose arms call setResult, and returns the
 // value it has after them.
-func (b *builder) valued(n *sitter.Node, lower func()) ir.VarID {
+func (b *builder) valued(n *Node, lower func()) ir.VarID {
 	saved, had := b.scope[resultName]
 	delete(b.scope, resultName)
 	lower()
@@ -1219,7 +1240,7 @@ func (b *builder) setResult(v ir.VarID) {
 
 // kwarg makes a variable for a keyword or named argument (f(to=x)): the
 // call records its name, so the value reaches the parameter of that name.
-func (b *builder) kwarg(name string, v ir.VarID, n *sitter.Node) ir.VarID {
+func (b *builder) kwarg(name string, v ir.VarID, n *Node) ir.VarID {
 	nv := b.fn.Named(name, "", b.pos(n))
 	b.assign(nv, n, v)
 	if b.kwargs == nil {
@@ -1231,7 +1252,7 @@ func (b *builder) kwarg(name string, v ir.VarID, n *sitter.Node) ir.VarID {
 
 // ident reads an identifier used as a value: a local, a field of this, or
 // an unresolved name (kept as a named variable so name detectors see it).
-func (b *builder) ident(name string, n *sitter.Node) ir.VarID {
+func (b *builder) ident(name string, n *Node) ir.VarID {
 	if v, ok := b.lookup(name); ok {
 		return v
 	}
@@ -1250,7 +1271,7 @@ func (b *builder) ident(name string, n *sitter.Node) ir.VarID {
 	return v
 }
 
-func (b *builder) assign(dst ir.VarID, n *sitter.Node, args ...ir.VarID) {
+func (b *builder) assign(dst ir.VarID, n *Node, args ...ir.VarID) {
 	b.fn.Assign(dst, b.pos(n), args...)
 	b.propagate(dst, args...)
 }
@@ -1281,14 +1302,14 @@ func (b *builder) propagate(dst ir.VarID, args ...ir.VarID) {
 // compute is assign for a new value built from the arguments' current
 // state (concatenation, interpolation, arithmetic), not a reference to
 // them. The operator is read off n.
-func (b *builder) compute(dst ir.VarID, n *sitter.Node, args ...ir.VarID) {
+func (b *builder) compute(dst ir.VarID, n *Node, args ...ir.VarID) {
 	b.fn.Compute(dst, b.pos(n), b.operator(n), args...)
 }
 
 // logic lowers a boolean operation (a comparison, !, &&, ||, not, and,
 // or): its result carries no data of the operands, but the analysis reads
 // consent checks through it.
-func (b *builder) logic(n *sitter.Node, args ...ir.VarID) ir.VarID {
+func (b *builder) logic(n *Node, args ...ir.VarID) ir.VarID {
 	dst := b.temp(n)
 	op := b.operator(n)
 	if !ir.Logical(op) {
@@ -1300,7 +1321,7 @@ func (b *builder) logic(n *sitter.Node, args ...ir.VarID) ir.VarID {
 
 // operator is the operator of an expression node, normalized: "!" for
 // every negation, "&&" and "||" for the boolean connectives.
-func (b *builder) operator(n *sitter.Node) string {
+func (b *builder) operator(n *Node) string {
 	if n == nil {
 		return ""
 	}
@@ -1338,7 +1359,7 @@ func (b *builder) operator(n *sitter.Node) string {
 	return op
 }
 
-func (b *builder) load(obj ir.VarID, field, owner string, n *sitter.Node) ir.VarID {
+func (b *builder) load(obj ir.VarID, field, owner string, n *Node) ir.VarID {
 	if id := b.p.getter(owner, field); id != "" && obj != ir.NoVar {
 		// A computed property: reading it runs its getter.
 		c := &ir.Call{Callee: id, Name: field, Target: id, HasRecv: true, RecvType: owner}
@@ -1356,7 +1377,7 @@ func (b *builder) load(obj ir.VarID, field, owner string, n *sitter.Node) ir.Var
 type literalField struct {
 	name string
 	val  ir.VarID
-	n    *sitter.Node
+	n    *Node
 }
 
 // objectLiteral lowers an object or map literal: a new value holding the
@@ -1364,7 +1385,7 @@ type literalField struct {
 // function-valued field stays merged into the value, so it is called only
 // through that object ({run: () => ...}.run()), not by every method call
 // of that name on an object of unknown type.
-func (b *builder) objectLiteral(n *sitter.Node, parts []ir.VarID, fields []literalField) ir.VarID {
+func (b *builder) objectLiteral(n *Node, parts []ir.VarID, fields []literalField) ir.VarID {
 	var data []literalField
 	for _, f := range fields {
 		if _, fn := b.closures[f.val]; fn {
@@ -1385,14 +1406,14 @@ func (b *builder) objectLiteral(n *sitter.Node, parts []ir.VarID, fields []liter
 	return dst
 }
 
-func (b *builder) store(obj ir.VarID, field, owner string, val ir.VarID, n *sitter.Node) {
+func (b *builder) store(obj ir.VarID, field, owner string, val ir.VarID, n *Node) {
 	if obj == ir.NoVar || val == ir.NoVar {
 		return
 	}
 	b.fn.Emit(ir.Instr{Op: ir.OpStore, Dst: ir.NoVar, Args: []ir.VarID{obj, val}, Field: field, Owner: owner, Pos: b.pos(n)})
 }
 
-func (b *builder) ret(n *sitter.Node, vals ...ir.VarID) {
+func (b *builder) ret(n *Node, vals ...ir.VarID) {
 	b.fn.Return(b.pos(n), vals...)
 	// Whatever follows on this path is unreachable.
 	b.terminated = true
@@ -1401,7 +1422,7 @@ func (b *builder) ret(n *sitter.Node, vals ...ir.VarID) {
 
 // yieldValue lowers a generator's yield: the value is produced to the
 // caller, like a return, but the function goes on.
-func (b *builder) yieldValue(v ir.VarID, n *sitter.Node) {
+func (b *builder) yieldValue(v ir.VarID, n *Node) {
 	if v != ir.NoVar {
 		b.fn.Emit(ir.Instr{Op: ir.OpYield, Dst: ir.NoVar, Args: []ir.VarID{v}, Pos: b.pos(n)})
 	}
@@ -1414,7 +1435,7 @@ func (b *builder) newBlock(preds ...int32) int32 {
 
 // throwValue lowers throw/raise v: the block ends, and the exception goes
 // to the enclosing try's handlers or leaves the function.
-func (b *builder) throwValue(v ir.VarID, n *sitter.Node) {
+func (b *builder) throwValue(v ir.VarID, n *Node) {
 	if v == ir.NoVar {
 		v = b.temp(n)
 	}
@@ -1428,7 +1449,7 @@ func (b *builder) throwValue(v ir.VarID, n *sitter.Node) {
 }
 
 // caughtValue is the value a catch clause binds: what the try body threw.
-func (b *builder) caughtValue(n *sitter.Node) ir.VarID {
+func (b *builder) caughtValue(n *Node) ir.VarID {
 	if b.caught != ir.NoVar {
 		return b.caught
 	}
@@ -1436,7 +1457,7 @@ func (b *builder) caughtValue(n *sitter.Node) ir.VarID {
 }
 
 // emitCall emits a call and returns its result variable.
-func (b *builder) emitCall(n *sitter.Node, c *ir.Call, args []ir.VarID, resultType string) ir.VarID {
+func (b *builder) emitCall(n *Node, c *ir.Call, args []ir.VarID, resultType string) ir.VarID {
 	if v, ok := b.reflectCall(n, c, args); ok {
 		return v
 	}
@@ -1495,7 +1516,7 @@ func hasKey[K comparable, V any](m map[K]V, k K) bool {
 
 // newObject emits the construction of an object of class cls, running its
 // constructor when it is code under analysis.
-func (b *builder) newObject(n *sitter.Node, cls string, args []ir.VarID, resultType string) ir.VarID {
+func (b *builder) newObject(n *Node, cls string, args []ir.VarID, resultType string) ir.VarID {
 	dst := b.fn.Named("", resultType, b.pos(n))
 	c := &ir.Call{Callee: cls, Name: shortName(cls), Target: b.p.ctorID(cls)}
 	for i, a := range args {
@@ -1517,7 +1538,7 @@ func (b *builder) newObject(n *sitter.Node, cls string, args []ir.VarID, resultT
 // body reads from the enclosing function become capture parameters, and
 // the closure binds the enclosing variables to them; this is captured
 // whenever there is one. body returns the value of an expression body.
-func (b *builder) lambda(n *sitter.Node, params []*sitter.Node, paramNames []string, implicitIt bool, body func() ir.VarID) ir.VarID {
+func (b *builder) lambda(n *Node, params []*Node, paramNames []string, implicitIt bool, body func() ir.VarID) ir.VarID {
 	b.p.closureSeq[b.fn.ID]++
 	id := fmt.Sprintf("%s$%d", b.fn.ID, b.p.closureSeq[b.fn.ID])
 	outer := *b
@@ -1601,7 +1622,7 @@ func (b *builder) constString(v ir.VarID) (string, bool) {
 // field.get(obj) reads the field, field.set(obj, v) writes it,
 // method.invoke(obj, args...) calls the method, cls.newInstance() and
 // ctor.newInstance(args...) construct the class.
-func (b *builder) reflectCall(n *sitter.Node, c *ir.Call, args []ir.VarID) (ir.VarID, bool) {
+func (b *builder) reflectCall(n *Node, c *ir.Call, args []ir.VarID) (ir.VarID, bool) {
 	if !c.HasRecv || len(args) == 0 {
 		return ir.NoVar, false
 	}
@@ -1717,12 +1738,12 @@ func (p *program) classTable() []*ir.Class {
 // named returns the named children of n. An ERROR node (syntax the
 // grammar could not parse) is transparent: its children take its place, so
 // declarations and statements inside it are still lowered.
-func named(n *sitter.Node) []*sitter.Node {
+func named(n *Node) []*Node {
 	if n == nil {
 		return nil
 	}
 	cnt := int(n.NamedChildCount())
-	out := make([]*sitter.Node, 0, cnt)
+	out := make([]*Node, 0, cnt)
 	for i := 0; i < cnt; i++ {
 		c := n.NamedChild(i)
 		if c.Type() == "ERROR" {
@@ -1736,9 +1757,9 @@ func named(n *sitter.Node) []*sitter.Node {
 
 // syntaxErrors counts the ERROR and missing nodes under n and returns the
 // first one's line.
-func syntaxErrors(n *sitter.Node) (count, line int) {
-	var walk func(*sitter.Node)
-	walk = func(c *sitter.Node) {
+func syntaxErrors(n *Node) (count, line int) {
+	var walk func(*Node)
+	walk = func(c *Node) {
 		if c.IsError() || c.IsMissing() {
 			if count == 0 {
 				line = int(c.StartPoint().Row) + 1
@@ -1760,8 +1781,8 @@ func syntaxErrors(n *sitter.Node) (count, line int) {
 
 // fieldChildren returns the children of n stored under a field name, for
 // fields that repeat (a for loop's init and update clauses).
-func fieldChildren(n *sitter.Node, field string) []*sitter.Node {
-	var out []*sitter.Node
+func fieldChildren(n *Node, field string) []*Node {
+	var out []*Node
 	if n == nil {
 		return nil
 	}
@@ -1773,7 +1794,7 @@ func fieldChildren(n *sitter.Node, field string) []*sitter.Node {
 	return out
 }
 
-func firstOf(n *sitter.Node, types ...string) *sitter.Node {
+func firstOf(n *Node, types ...string) *Node {
 	for _, c := range named(n) {
 		for _, t := range types {
 			if c.Type() == t {
@@ -1784,8 +1805,8 @@ func firstOf(n *sitter.Node, types ...string) *sitter.Node {
 	return nil
 }
 
-func allOf(n *sitter.Node, types ...string) []*sitter.Node {
-	var out []*sitter.Node
+func allOf(n *Node, types ...string) []*Node {
+	var out []*Node
 	for _, c := range named(n) {
 		for _, t := range types {
 			if c.Type() == t {
@@ -1796,7 +1817,7 @@ func allOf(n *sitter.Node, types ...string) []*sitter.Node {
 	return out
 }
 
-func hasChildToken(n *sitter.Node, src []byte, tok string) bool {
+func hasChildToken(n *Node, src []byte, tok string) bool {
 	for i := 0; i < int(n.ChildCount()); i++ {
 		c := n.Child(i)
 		if !c.IsNamed() && c.Content(src) == tok {

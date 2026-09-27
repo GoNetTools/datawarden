@@ -9,13 +9,15 @@ import (
 	"context"
 	"strings"
 
-	sitter "github.com/smacker/go-tree-sitter"
-	"github.com/smacker/go-tree-sitter/java"
+	sitter "github.com/tree-sitter/go-tree-sitter"
+	tsjava "github.com/tree-sitter/tree-sitter-java/bindings/go"
 
 	"github.com/GoNetTools/datawarden/internal/frontend"
 	"github.com/GoNetTools/datawarden/internal/ir"
 	"github.com/GoNetTools/datawarden/internal/lang"
 )
+
+var javaLanguage = sitter.NewLanguage(tsjava.Language())
 
 // NewJava returns the java frontend.
 func NewJava(o frontend.Options) frontend.Frontend { return &javaFrontend{opts: o} }
@@ -32,7 +34,8 @@ type jvProgram struct {
 
 func (fe *javaFrontend) Lower(ctx context.Context, files []string) (*ir.Module, error) {
 	jp := &jvProgram{program: newProgram(lang.Java, fe.opts), static: map[string]bool{}, returns: map[string]string{}}
-	jp.parse(ctx, files, java.GetLanguage())
+	defer jp.close()
+	jp.parse(ctx, files, javaLanguage)
 	for _, f := range jp.files {
 		jp.header(f)
 		for _, c := range named(f.root) {
@@ -86,7 +89,7 @@ func isTypeDecl(t string) bool {
 	return false
 }
 
-func javaTypeText(f *srcFile, n *sitter.Node) string {
+func javaTypeText(f *srcFile, n *Node) string {
 	if n == nil {
 		return ""
 	}
@@ -98,7 +101,7 @@ func javaTypeText(f *srcFile, n *sitter.Node) string {
 }
 
 // javaAnnotations extracts annotation tags from a modifiers node.
-func javaAnnotations(f *srcFile, mods *sitter.Node) (map[string]string, []string, bool) {
+func javaAnnotations(f *srcFile, mods *Node) (map[string]string, []string, bool) {
 	tags := map[string]string{}
 	var names []string
 	static := false
@@ -135,7 +138,7 @@ func javaAnnotations(f *srcFile, mods *sitter.Node) (map[string]string, []string
 	return tags, names, static
 }
 
-func (jp *jvProgram) collectType(f *srcFile, n *sitter.Node, scope string) {
+func (jp *jvProgram) collectType(f *srcFile, n *Node, scope string) {
 	if !isTypeDecl(n.Type()) {
 		return
 	}
@@ -179,7 +182,7 @@ func (jp *jvProgram) collectType(f *srcFile, n *sitter.Node, scope string) {
 		}
 	}
 	body := n.ChildByFieldName("body")
-	var members []*sitter.Node
+	var members []*Node
 	for _, m := range named(body) {
 		if m.Type() == "enum_body_declarations" {
 			members = append(members, named(m)...)
@@ -224,7 +227,7 @@ func (jp *jvProgram) collectType(f *srcFile, n *sitter.Node, scope string) {
 	}
 }
 
-func (jp *jvProgram) lowerType(f *srcFile, n *sitter.Node, scope string) {
+func (jp *jvProgram) lowerType(f *srcFile, n *Node, scope string) {
 	if !isTypeDecl(n.Type()) {
 		return
 	}
@@ -238,7 +241,7 @@ func (jp *jvProgram) lowerType(f *srcFile, n *sitter.Node, scope string) {
 		return
 	}
 	body := n.ChildByFieldName("body")
-	var members []*sitter.Node
+	var members []*Node
 	for _, m := range named(body) {
 		if m.Type() == "enum_body_declarations" {
 			members = append(members, named(m)...)
@@ -247,7 +250,7 @@ func (jp *jvProgram) lowerType(f *srcFile, n *sitter.Node, scope string) {
 		}
 	}
 	var init *jvBuilder
-	getInit := func(at *sitter.Node) *jvBuilder {
+	getInit := func(at *Node) *jvBuilder {
 		if init == nil {
 			b := jp.newBuilder(f, ci, qual+".<init>", "<init>", at)
 			b.addThis(qual, at)
@@ -300,7 +303,7 @@ type jvBuilder struct {
 	jp *jvProgram
 }
 
-func (jb *jvBuilder) params(ps *sitter.Node) {
+func (jb *jvBuilder) params(ps *Node) {
 	for _, p := range named(ps) {
 		switch p.Type() {
 		case "formal_parameter", "spread_parameter":
@@ -322,7 +325,7 @@ func (jb *jvBuilder) params(ps *sitter.Node) {
 	}
 }
 
-func (jb *jvBuilder) stmt(n *sitter.Node) ir.VarID {
+func (jb *jvBuilder) stmt(n *Node) ir.VarID {
 	if n == nil {
 		return ir.NoVar
 	}
@@ -508,7 +511,7 @@ func (jb *jvBuilder) stmt(n *sitter.Node) ir.VarID {
 
 var jvBool = map[string]bool{"instanceof_expression": true}
 
-func (jb *jvBuilder) expr(n *sitter.Node) ir.VarID {
+func (jb *jvBuilder) expr(n *Node) ir.VarID {
 	if n == nil {
 		return ir.NoVar
 	}
@@ -630,15 +633,15 @@ func (jb *jvBuilder) expr(n *sitter.Node) ir.VarID {
 	return dst
 }
 
-func (jb *jvBuilder) lambdaExpr(n *sitter.Node) ir.VarID {
-	var pnodes []*sitter.Node
+func (jb *jvBuilder) lambdaExpr(n *Node) ir.VarID {
+	var pnodes []*Node
 	var pnames []string
 	if ps := n.ChildByFieldName("parameters"); ps != nil {
 		if ps.Type() == "identifier" {
 			pnodes, pnames = append(pnodes, ps), append(pnames, jb.text(ps))
 		}
 		for _, p := range named(ps) {
-			var id *sitter.Node
+			var id *Node
 			switch p.Type() {
 			case "identifier":
 				id = p
@@ -659,7 +662,7 @@ func (jb *jvBuilder) lambdaExpr(n *sitter.Node) ir.VarID {
 	})
 }
 
-func (jb *jvBuilder) assignment(n *sitter.Node) ir.VarID {
+func (jb *jvBuilder) assignment(n *Node) ir.VarID {
 	left, right := n.ChildByFieldName("left"), n.ChildByFieldName("right")
 	v := jb.expr(right)
 	op := "="
@@ -698,7 +701,7 @@ func (jb *jvBuilder) assignment(n *sitter.Node) ir.VarID {
 	return v
 }
 
-func (jb *jvBuilder) args(n *sitter.Node) []ir.VarID {
+func (jb *jvBuilder) args(n *Node) []ir.VarID {
 	var out []ir.VarID
 	for _, a := range named(n) {
 		out = append(out, jb.expr(a))
@@ -706,7 +709,7 @@ func (jb *jvBuilder) args(n *sitter.Node) []ir.VarID {
 	return out
 }
 
-func (jb *jvBuilder) classRef(n *sitter.Node) string {
+func (jb *jvBuilder) classRef(n *Node) string {
 	if n == nil || n.Type() != "identifier" {
 		return ""
 	}
@@ -724,7 +727,7 @@ func (jb *jvBuilder) classRef(n *sitter.Node) string {
 
 // staticPath resolves a class reference or a static field chain on one
 // (System.out) to a qualified path, or "".
-func (jb *jvBuilder) staticPath(n *sitter.Node) string {
+func (jb *jvBuilder) staticPath(n *Node) string {
 	if n == nil {
 		return ""
 	}
@@ -756,7 +759,7 @@ func (jb *jvBuilder) staticPath(n *sitter.Node) string {
 	return ""
 }
 
-func (jb *jvBuilder) typeOf(n *sitter.Node) string {
+func (jb *jvBuilder) typeOf(n *Node) string {
 	if n == nil {
 		return ""
 	}
@@ -816,7 +819,7 @@ func (jb *jvBuilder) typeOf(n *sitter.Node) string {
 	return ""
 }
 
-func (jb *jvBuilder) call(n *sitter.Node) ir.VarID {
+func (jb *jvBuilder) call(n *Node) ir.VarID {
 	return jb.invoke(n, n.ChildByFieldName("object"), jb.text(n.ChildByFieldName("name")),
 		func() []ir.VarID { return jb.args(n.ChildByFieldName("arguments")) })
 }
@@ -826,7 +829,7 @@ func (jb *jvBuilder) call(n *sitter.Node) ir.VarID {
 // String::trim-style references to an instance method of the argument's
 // own type pass the argument as a plain argument, which carries the same
 // data. Constructor references (User::new) construct the class.
-func (jb *jvBuilder) methodRef(n *sitter.Node) ir.VarID {
+func (jb *jvBuilder) methodRef(n *Node) ir.VarID {
 	k := named(n)
 	if len(k) < 2 {
 		return jb.temp(n)
@@ -844,7 +847,7 @@ func (jb *jvBuilder) methodRef(n *sitter.Node) ir.VarID {
 
 // invoke lowers a call of method m on obj (nil for an unqualified call)
 // with the arguments argsOf lowers.
-func (jb *jvBuilder) invoke(n, obj *sitter.Node, m string, argsOf func() []ir.VarID) ir.VarID {
+func (jb *jvBuilder) invoke(n, obj *Node, m string, argsOf func() []ir.VarID) ir.VarID {
 	if obj == nil {
 		args := argsOf()
 		if jb.cls != nil {
