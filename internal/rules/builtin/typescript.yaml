@@ -13,9 +13,10 @@
   lang: typescript
   call: ["*.Logger.info", "*.Logger.debug", "*.Logger.warn", "*.Logger.error", "*.Logger.fatal", "*.Logger.trace", "*.Logger.log",
          "winston.info", "winston.warn", "winston.error", "winston.debug", "winston.log"]
-  receiver: "(?i)^(this\\.)?_?(log|logger)$"
+  receiver: "(?i)^(this\\.)?_?(log|logger|\\w+Logger)$|^(req|request|reply|ctx|app|fastify|server)\\.log$"
   arg: "*"
   dest: { kind: log, host: application-log }
+  description: Winston, pino and bunyan loggers (logger.info, this.auditLogger.warn), and the request loggers of Fastify and pino-http (req.log.info).
   category: logging
 
 - id: sdk.ts.sentry.set_user
@@ -42,6 +43,24 @@
   arg: "*"
   dest: { host: browser-intake-datadoghq.com, kind: third_party, vendor: Datadog }
   category: monitoring
+
+- id: sdk.ts.bugsnag
+  lang: typescript
+  call: ["@bugsnag/*.setUser", "@bugsnag/*.notify", "@bugsnag/*.leaveBreadcrumb", "@bugsnag/*.addMetadata",
+         "Bugsnag.setUser", "Bugsnag.notify", "Bugsnag.leaveBreadcrumb", "Bugsnag.addMetadata"]
+  arg: "*"
+  dest: { host: notify.bugsnag.com, kind: third_party, vendor: Bugsnag }
+  category: crash_reporting
+
+- id: sdk.ts.rollbar
+  lang: typescript
+  call: ["Rollbar.debug", "Rollbar.info", "Rollbar.warning", "Rollbar.warn", "Rollbar.error", "Rollbar.critical", "Rollbar.log", "Rollbar.configure",
+         "rollbar.debug", "rollbar.info", "rollbar.warning", "rollbar.warn", "rollbar.error", "rollbar.critical", "rollbar.log", "rollbar.configure"]
+  receiver: "(?i)^(this\\.)?_?rollbar$"
+  arg: "*"
+  dest: { host: api.rollbar.com, kind: third_party, vendor: Rollbar }
+  category: crash_reporting
+  description: Messages, their extra data and payload.person (set with configure) are sent to Rollbar.
 
 - id: sdk.ts.logrocket
   lang: typescript
@@ -102,6 +121,29 @@
   arg: "*"
   dest: { host: firebasecrashlytics.googleapis.com, kind: third_party, vendor: Google Firebase }
   category: crash_reporting
+
+- id: sdk.ts.heap
+  lang: typescript
+  call: ["heap.identify", "heap.addUserProperties", "heap.track", "heap.addEventProperties",
+         "@heap/heap-react-native-sdk.Heap.identify", "@heap/heap-react-native-sdk.Heap.addUserProperties", "@heap/heap-react-native-sdk.Heap.track"]
+  arg: "*"
+  dest: { host: heapanalytics.com, kind: third_party, vendor: Heap }
+  category: analytics
+
+- id: sdk.ts.fullstory
+  lang: typescript
+  call: ["FS.identify", "FS.setUserVars", "FS.event", "FS", "@fullstory/browser.FullStory", "@fullstory/browser.identify", "@fullstory/browser.setUserVars",
+         "@fullstory/browser.event", "@fullstory/react-native.identify", "@fullstory/react-native.setUserVars", "@fullstory/react-native.event"]
+  arg: "*"
+  dest: { host: fullstory.com, kind: third_party, vendor: FullStory }
+  category: monitoring
+
+- id: sdk.ts.hotjar
+  lang: typescript
+  call: ["hj", "@hotjar/browser.identify", "@hotjar/browser.event", "@hotjar/browser.Hotjar.identify", "react-hotjar.hotjar.identify", "react-hotjar.hotjar.event"]
+  arg: "*"
+  dest: { host: hotjar.com, kind: third_party, vendor: Hotjar }
+  category: monitoring
 
 - id: sdk.ts.gtag
   lang: typescript

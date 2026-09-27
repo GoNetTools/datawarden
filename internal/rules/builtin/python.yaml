@@ -29,6 +29,30 @@
   dest: { host: sentry.io, kind: third_party, vendor: Sentry }
   category: crash_reporting
 
+- id: sdk.py.rollbar
+  lang: python
+  call: ["rollbar.report_message", "rollbar.report_exc_info"]
+  arg: "*"
+  dest: { host: api.rollbar.com, kind: third_party, vendor: Rollbar }
+  category: crash_reporting
+  description: The message, extra_data and payload_data (including payload_data["person"]) are sent to Rollbar.
+
+- id: sdk.py.bugsnag
+  lang: python
+  call: ["bugsnag.notify", "bugsnag.leave_breadcrumb", "bugsnag.configure_request", "bugsnag.add_metadata_tab", "bugsnag.Client.notify"]
+  arg: "*"
+  dest: { host: notify.bugsnag.com, kind: third_party, vendor: Bugsnag }
+  category: crash_reporting
+
+- id: sdk.py.amplitude
+  lang: python
+  call: ["amplitude.Amplitude.track", "amplitude.Amplitude.identify", "amplitude.Amplitude.set_group", "amplitude.Amplitude.group_identify",
+         "amplitude.BaseEvent", "amplitude.EventOptions"]
+  receiver: "(?i)^(self\\.)?_?(amplitude|amplitude_client)$"
+  arg: "*"
+  dest: { host: api2.amplitude.com, kind: third_party, vendor: Amplitude }
+  category: analytics
+
 - id: sdk.py.segment
   lang: python
   call: ["analytics.track", "analytics.identify", "analytics.page", "segment.analytics.track", "segment.analytics.identify", "segment.analytics.page"]

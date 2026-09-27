@@ -42,3 +42,11 @@ func zerologLogger(phoneNumber string) {
 	// ruleid: log.go.zerolog
 	zlog.Info().Str("to", phoneNumber).Msg("otp sent")
 }
+
+func zapSugared(logger *zap.Logger, email string, orderID int) {
+	// Key/value pairs of the sugared logger: the value after "email".
+	// ruleid: log.go.zap
+	logger.Sugar().Infow("signup", "email", email)
+	// ok: log.go.zap
+	logger.Sugar().Infow("order", "id", orderID)
+}

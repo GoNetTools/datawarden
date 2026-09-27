@@ -6,6 +6,14 @@ All notable changes to datawarden are documented here. The format follows [Keep 
 
 ### Added
 
+- More SDK and logging sink rules (#42), each with an annotated example:
+  - Python: Rollbar, Bugsnag and Amplitude (`amplitude-analytics`).
+  - Android (Kotlin and Java): Rollbar, Datadog RUM and New Relic.
+  - Swift: Bugsnag, Datadog RUM, Segment and Braze.
+  - TypeScript: Bugsnag, Rollbar, Heap, FullStory and Hotjar. The snippet globals (`heap`, `FS`, `hj`, `window.Rollbar`, `window.Bugsnag`) now resolve by name.
+  - The TypeScript logger rule also matches pino and bunyan loggers held in any `*Logger` variable, and request loggers (`req.log.info`, Fastify and pino-http).
+
+  Already covered, now with examples: `structlog` and `loguru`, zap's `Sugar().Infow`, sentry-go's `CaptureMessage(fmt.Sprintf(...))`, and `Log.wtf`/`Log.println`.
 - `datawarden explain <fingerprint | file:line>` explains a finding end to end (#38):
   - why its source is that data type: the name pattern, schema hint or source rule that matched, with its confidence;
   - what happens at each step of its path, with the code line and the IR instruction;

@@ -3,6 +3,7 @@ package examples
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/aws/aws-sdk-go-v2/service/sns"
 	"github.com/getsentry/sentry-go"
@@ -39,4 +40,11 @@ func snsPublish(ctx context.Context, c *sns.Client, phoneNumber string) {
 	msg := "Your code is 123456"
 	// ruleid: sdk.go.aws.sns
 	_, _ = c.Publish(ctx, &sns.PublishInput{PhoneNumber: &phoneNumber, Message: &msg})
+}
+
+func sentryFormattedMessage(email string, orderID int) {
+	// ruleid: sdk.go.sentry.scope
+	sentry.CaptureMessage(fmt.Sprintf("password reset for %s", email))
+	// ok: sdk.go.sentry.scope
+	sentry.CaptureMessage(fmt.Sprintf("order %d failed", orderID))
 }

@@ -61,6 +61,38 @@
   dest: { host: api2.amplitude.com, kind: third_party, vendor: Amplitude }
   category: analytics
 
+- id: sdk.swift.bugsnag
+  lang: swift
+  call: ["Bugsnag.setUser", "Bugsnag.leaveBreadcrumb", "Bugsnag.notify", "Bugsnag.notifyError", "Bugsnag.addMetadata"]
+  arg: "*"
+  dest: { host: notify.bugsnag.com, kind: third_party, vendor: Bugsnag }
+  category: crash_reporting
+
+- id: sdk.swift.datadog
+  lang: swift
+  call: ["Datadog.setUserInfo", "Datadog.addUserExtraInfo", "RUMMonitor.shared().addAction", "RUMMonitor.shared().addAttribute",
+         "RUMMonitor.shared().addError", "RUMMonitor.shared().startView", "RUMMonitor.shared().startAction"]
+  receiver: "(?i)^(self\\.)?_?(rum|rumMonitor)$"
+  arg: "*"
+  dest: { host: browser-intake-datadoghq.com, kind: third_party, vendor: Datadog }
+  category: monitoring
+
+- id: sdk.swift.segment
+  lang: swift
+  call: ["Analytics.shared().track", "Analytics.shared().identify", "Analytics.shared().screen", "Analytics.shared().group"]
+  receiver: "(?i)^(self\\.)?_?(analytics|segment)$"
+  arg: "*"
+  dest: { host: api.segment.io, kind: third_party, vendor: Segment }
+  category: analytics
+
+- id: sdk.swift.braze
+  lang: swift
+  call: ["Braze.changeUser", "Braze.logCustomEvent", "Braze.logPurchase", "Braze.User.set", "Braze.User.setCustomAttribute"]
+  receiver: "(?i)braze"
+  arg: "*"
+  dest: { host: braze.com, kind: third_party, vendor: Braze }
+  category: messaging
+
 - id: storage.swift.user_defaults
   lang: swift
   call: ["UserDefaults.standard.set", "UserDefaults.standard.setValue", "UserDefaults.set", "UserDefaults.setValue"]
