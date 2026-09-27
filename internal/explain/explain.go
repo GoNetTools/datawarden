@@ -432,6 +432,13 @@ func ranHere(r ref, prev string) string {
 	if ins.Op != ir.OpCall || c == nil || prev == "" || prev == r.fn.ID || prev == c.Target || prev == c.Callee {
 		return ""
 	}
+	// A function this one calls by name returned it, even when the path
+	// does not stop at that call.
+	for i := range r.fn.Instrs {
+		if o := r.fn.Instrs[i].Call; o != nil && (o.Target == prev || o.Callee == prev) {
+			return ""
+		}
+	}
 	if name := prev[strings.LastIndexByte(prev, '.')+1:]; name == c.Name {
 		return fmt.Sprintf("calls %s, which implements %s: what it returns or writes comes out here", short(prev), short(label(c)))
 	}
