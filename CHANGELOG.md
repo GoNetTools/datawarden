@@ -6,6 +6,14 @@ All notable changes to datawarden are documented here. The format follows [Keep 
 
 ### Added
 
+- `datawarden explain <fingerprint | file:line>` explains a finding end to end (#38):
+  - why its source is that data type: the name pattern, schema hint or source rule that matched, with its confidence;
+  - what happens at each step of its path, with the code line and the IR instruction;
+  - why the sink rule matched: the resolved callee, or the receiver pattern;
+  - how the policy decided, and which setting would change it (`first_party_domains`, `min_confidence`, `fail_on`, `safe_transforms`, an allow entry);
+  - what would silence it, narrowest first, as ready-to-paste YAML.
+
+  `--report` reads the flows from a saved JSON report instead of scanning, and `--format json` prints the explanation as JSON. The text report and PR comments now show each finding's fingerprint prefix for it.
 - Web request data is a source (#43). A new data type, `request_data` (class `pii`), covers what a client sends to a web handler:
   - Go: `net/http` bodies and forms, and gin, echo and chi. `json.NewDecoder(r.Body).Decode(&v)` fills `v`.
   - Python: Flask, Django and Django REST framework.

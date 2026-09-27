@@ -91,6 +91,8 @@ type App struct {
 	DataMapper DataMapper
 	Grapher    FlowGrapher
 	RuleTester RuleTester
+	// Explainer explains findings (`datawarden explain`); may be nil.
+	Explainer Explainer
 	// Languages lists the available frontends (for `version`).
 	Languages func() []string
 	// Links builds CI source links for Markdown reports; may be nil.
@@ -108,6 +110,7 @@ Usage:
   datawarden graph [paths...]             draw the call graph of the violations (svg, dot, mermaid)
   datawarden rules                        print the effective sink/source/transform rules
   datawarden rules test DIR               check annotated examples in DIR against the rules
+  datawarden explain <fingerprint|file:line>  why a flow was reported, step by step, and what would silence it
   datawarden ir [paths...]                print the IR the analysis reads (--func, --format json, --verify)
   datawarden init                         write .datawarden.yaml and .datawardenignore
   datawarden comment datawarden.md           create/update the PR (GitHub) or MR (GitLab) summary comment
@@ -146,6 +149,8 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		}
 	case "ir":
 		code, err = a.runIR(ctx, args[1:])
+	case "explain":
+		code, err = a.runExplain(ctx, args[1:])
 	case "init":
 		err = a.runInit(args[1:])
 	case "comment":

@@ -92,6 +92,9 @@ func Markdown(w io.Writer, r *Report) error {
 				}
 				fmt.Fprintf(&b, "%d. %s%s\n", i+1, mdLoc(link, p), note)
 			}
+			if f.Fingerprint != "" {
+				fmt.Fprintf(&b, "\nWhy: `datawarden explain %s`\n", shortFP(f.Fingerprint))
+			}
 			if r.ShowCalls && len(f.Calls) > 0 {
 				b.WriteString("\nCall graph:\n\n")
 				for _, c := range f.Calls {

@@ -9,7 +9,7 @@ NEW      high   phone → Sentry / sentry.io (third-party)  [sdk.ts.sentry.set_u
          source  src/api/user.ts:22:32  field User.phoneNumber (field name phoneNumber)
          sink    src/lib/mask.ts:10:3  @sentry/react.addBreadcrumb  in src/lib/mask:logInfo
          path    src/api/user.ts:22 → src/lib/mask.ts:8 → :10
-         confidence 0.90
+         confidence 0.90 · explain: datawarden explain 3f9a1c2b7d40
 ```
 
 | Part | Meaning |
@@ -21,6 +21,7 @@ NEW      high   phone → Sentry / sentry.io (third-party)  [sdk.ts.sentry.set_u
 | `source` | Where the value became personal data, and **why datawarden thinks so**: `identifier "email"` (a name), `field User.phoneNumber (field name phoneNumber)` (a field name or a schema hint), `key "ssn"` (a string key next to the value), `call navigator.geolocation.getCurrentPosition` (a source API), `value of type Customer` (an object whose type has personal fields). |
 | `sink` | The call that sends the data, and the function it is in. |
 | `path` | The lines the value passes through, across files. `--call-graph` shows the same path as the functions it goes through, and who calls the function where it enters. |
+| `explain:` | The command that explains the finding in full: `datawarden explain <fingerprint>` (see below). |
 | `confidence` | How sure the analysis is, from 0 to 1. Names are weaker than schema hints, which are weaker than source APIs, and each step through unknown code lowers it. `policy.min_confidence` (0.55 by default) is the threshold for a violation. |
 | `transforms`, `guarded by` | What was applied to the value on the way (`masked`, `sha256`, ...), and the consent checks the sink runs behind. |
 
@@ -29,6 +30,15 @@ Committed values (literals) are shorter: the data type, the file and line, a mas
 To look at many findings at once, `datawarden graph -o flows.svg` draws them as one picture, and `--function REGEXP` or `--data-type T` narrow it to one area.
 
 ## Is it real?
+
+`datawarden explain <fingerprint>` (or `datawarden explain file:line`) answers the questions below for one finding:
+- why the source is that data type;
+- each step of the path, with the code line and what happened there;
+- why the sink rule matched;
+- how the policy decided, and which setting would change it;
+- what would silence it, from narrowest to broadest.
+
+It is the quickest way to see where a false positive goes wrong. With `--report datawarden.json` it reads the flows from a CI report instead of scanning.
 
 Answer three questions, in this order. The first "no" means it is not a leak.
 

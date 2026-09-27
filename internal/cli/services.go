@@ -10,8 +10,10 @@ import (
 
 	"github.com/GoNetTools/datawarden/internal/config"
 	"github.com/GoNetTools/datawarden/internal/datamap"
+	"github.com/GoNetTools/datawarden/internal/explain"
 	"github.com/GoNetTools/datawarden/internal/finding"
 	"github.com/GoNetTools/datawarden/internal/ir"
+	"github.com/GoNetTools/datawarden/internal/policy"
 	"github.com/GoNetTools/datawarden/internal/report"
 	"github.com/GoNetTools/datawarden/internal/rules"
 	"github.com/GoNetTools/datawarden/internal/ruletest"
@@ -51,6 +53,15 @@ type RuleLoader interface {
 // (policy.Policies).
 type Policy interface {
 	Apply(cfg *config.Config, flows []*finding.Flow, lits []*finding.Literal) ([]*finding.Flow, []*finding.Literal)
+	// Decide says how cfg treats one flow and what would change it.
+	Decide(cfg *config.Config, f *finding.Flow) policy.Decision
+}
+
+// Explainer explains flows end to end and renders the explanations
+// (explain.Explainer).
+type Explainer interface {
+	Explain(in explain.Input) *explain.Explanation
+	Write(w io.Writer, format string, es []*explain.Explanation) error
 }
 
 // BaselineCodec reads and writes baseline documents (baseline.Codec). The
