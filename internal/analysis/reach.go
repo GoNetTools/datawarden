@@ -32,32 +32,28 @@ func newFileDeps(a *analyzer, funcs []*ir.Func) *fileDeps {
 			modules[f.ID[:i]] = f.File
 		}
 	}
-	fileOfFunc := func(id string) string {
-		if f := a.funcs[id]; f != nil {
-			return f.File
-		}
-		return ""
-	}
+	files := map[string]string{} // name -> file declaring it, "" when none
 	fileOfName := func(name string) string {
-		if name == "" {
-			return ""
-		}
-		if file := fileOfFunc(name); file != "" {
+		name = strings.TrimSuffix(strings.TrimLeft(name, "*&"), "?")
+		if file, ok := files[name]; ok {
 			return file
 		}
-		if c := a.cha.class(name); c != nil && c.File != "" {
-			return c.File
-		}
-		// The longest module the name starts with: lib/insecurity.hash,
-		// models/user.UserModel.findOne.
-		for i := len(name) - 1; i > 0; i-- {
-			if name[i] == '.' || name[i] == ':' {
-				if file, ok := modules[name[:i]]; ok {
-					return file
+		file := ""
+		if f := a.funcs[name]; f != nil {
+			file = f.File
+		} else if c := a.cha.class(name); c != nil {
+			file = c.File
+		} else {
+			// The longest module the name starts with: lib/insecurity.hash,
+			// models/user.UserModel.findOne.
+			for i := len(name) - 1; i > 0 && file == ""; i-- {
+				if name[i] == '.' || name[i] == ':' {
+					file = modules[name[:i]]
 				}
 			}
 		}
-		return ""
+		files[name] = file
+		return file
 	}
 	for _, f := range funcs {
 		if f.File == "" {
@@ -65,32 +61,34 @@ func newFileDeps(a *analyzer, funcs []*ir.Func) *fileDeps {
 		}
 		add := func(name string) {
 			if to := fileOfName(name); to != "" && to != f.File {
-				m := d.edges[f.File]
-				if m == nil {
-					m = map[string]bool{}
-					d.edges[f.File] = m
-				}
-				m[to] = true
+				d.addEdge(f.File, to)
 			}
 		}
-		if f.Parent != "" {
-			add(f.Parent)
-		}
+		add(f.Parent)
 		for i := range f.Vars {
-			add(strings.TrimLeft(f.Vars[i].Type, "*&"))
+			add(f.Vars[i].Type)
 		}
 		for i := range f.Instrs {
 			in := &f.Instrs[i]
 			add(in.Func)
-			add(strings.TrimLeft(in.Owner, "*&"))
+			add(in.Owner)
 			if c := in.Call; c != nil {
 				add(c.Target)
 				add(c.Callee)
-				add(strings.TrimLeft(c.RecvType, "*&"))
+				add(c.RecvType)
 			}
 		}
 	}
 	return d
+}
+
+func (d *fileDeps) addEdge(from, to string) {
+	m := d.edges[from]
+	if m == nil {
+		m = map[string]bool{}
+		d.edges[from] = m
+	}
+	m[to] = true
 }
 
 // reaches reports whether code in file from can use code in file to,

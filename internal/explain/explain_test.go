@@ -239,13 +239,29 @@ func TestStepFromAFunctionTheCallRuns(t *testing.T) {
 		}
 	}
 
-	// A function the caller calls by name returned the value, even when
-	// the path goes on at another call.
-	caller.Emit(ir.Instr{Op: ir.OpCall, Dst: caller.Temp(pos(9)), Pos: pos(9), Call: &ir.Call{Name: "login", Target: handler.ID}})
-	fl := &finding.Flow{DataType: "person_name", SinkRule: "log.go.stdlib", Source: pos(2), Sink: pos(8),
-		Path: []ir.Pos{pos(2), pos(6), pos(8)}, Function: caller.ID, Lang: "go", SourceDesc: "value of type app.profile", SinkCall: "log.Println"}
-	e := Explainer{}.Explain(Input{Flow: fl, Funcs: []*ir.Func{handler, caller}, Lines: func(string) []string { return nil }})
-	if len(e.Steps) < 2 || strings.Contains(e.Steps[1].What, "runs") {
-		t.Errorf("steps %+v: a function called by name is not run by another call", e.Steps)
+	// A function the caller calls by name before the step returned the
+	// value there, even when the path goes on at another call; one it calls
+	// after the step did not.
+	for _, before := range []bool{true, false} {
+		c2 := &ir.Func{ID: "app.report2", Lang: "go", File: "main.go"}
+		c2.NewBlock()
+		db := c2.AddParam("db", "gorm.io/gorm.DB", pos(5))
+		login := func() {
+			c2.Emit(ir.Instr{Op: ir.OpCall, Dst: c2.Temp(pos(9)), Pos: pos(9), Call: &ir.Call{Name: "login", Target: handler.ID}})
+		}
+		if before {
+			login()
+		}
+		res := c2.Temp(pos(6))
+		c2.Emit(ir.Instr{Op: ir.OpCall, Dst: res, Args: []ir.VarID{db}, Pos: pos(6), Call: &ir.Call{Callee: "gorm.io/gorm.DB.Where", Name: "Where", HasRecv: true}})
+		if !before {
+			login()
+		}
+		fl := &finding.Flow{DataType: "person_name", SinkRule: "log.go.stdlib", Source: pos(2), Sink: pos(6),
+			Path: []ir.Pos{pos(2), pos(6)}, Function: c2.ID, Lang: "go", SourceDesc: "value of type app.profile", SinkCall: "log.Println"}
+		e := Explainer{}.Explain(Input{Flow: fl, Funcs: []*ir.Func{handler, c2}, Lines: func(string) []string { return nil }})
+		if len(e.Steps) < 2 || strings.Contains(e.Steps[1].What, "runs") == before {
+			t.Errorf("login called by name before the step: %v; steps %+v", before, e.Steps)
+		}
 	}
 }
