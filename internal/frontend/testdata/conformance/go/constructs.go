@@ -214,3 +214,36 @@ func keyedValues(l net.Listener, r *http.Request, note, phone string) {
 	// ruleid: log.go.stdlib
 	log.Println(slog.String("email", phone))
 }
+
+// A value holding closures does not make the fields of a declared type
+// hold them (#32): the handler kept next to the API value is not run by a
+// query on the API's store, so its profile does not reach the error.
+type userStore struct{ conn *sql.DB }
+
+type sessionAPI struct{ users *userStore }
+
+type profile struct {
+	ID   int
+	Name string
+}
+
+func (a *sessionAPI) login(name string) profile {
+	return profile{ID: 1, Name: name}
+}
+
+func routes(a *sessionAPI) []any {
+	return []any{a, a.login}
+}
+
+func (s *userStore) count() error {
+	return s.conn.QueryRow("select count(*) from users").Err()
+}
+
+func handlersBesideFields(a *sessionAPI) {
+	h := routes(a)
+	api := h[0].(*sessionAPI)
+	if err := api.users.count(); err != nil {
+		// ok: log.go.stdlib
+		log.Println(err)
+	}
+}
