@@ -62,6 +62,45 @@
   category: crash_reporting
   description: Messages, their extra data and payload.person (set with configure) are sent to Rollbar.
 
+- id: sdk.ts.otel
+  lang: typescript
+  call: ["@opentelemetry/api*.Span.setAttribute", "@opentelemetry/api*.Span.setAttributes", "@opentelemetry/api*.Span.addEvent",
+         "@opentelemetry/api*.Span.recordException", "@opentelemetry/api*.Span.setStatus", "@opentelemetry/api*.Baggage.setEntry",
+         "@opentelemetry/api*.propagation.createBaggage", "@opentelemetry/api-logs*.Logger.emit",
+         "@opentelemetry/api*.getActiveSpan().setAttribute", "@opentelemetry/api*.getActiveSpan().setAttributes",
+         "@opentelemetry/api*.getActiveSpan().addEvent", "@opentelemetry/api*.getActiveSpan().recordException"]
+  receiver: "(?i)(^|\\.)(_?\\w*span|getActiveSpan\\(\\))$|baggage"
+  arg: "*"
+  dest: { host: otel-collector, kind: third_party, vendor: OpenTelemetry collector }
+  category: tracing
+  description: Span attributes and events, baggage (propagated to downstream services) and log records are exported to the tracing backend.
+
+- id: sdk.ts.datadog.trace
+  lang: typescript
+  call: ["dd-trace.setUser", "dd-trace.appsec.setUser", "dd-trace.appsec.trackUserLoginSuccessEvent", "dd-trace.appsec.trackCustomEvent",
+         "dd-trace.Span.setTag", "dd-trace.Span.addTags"]
+  receiver: "(?i)(^|\\.)(_?\\w*span|active\\(\\))$"
+  arg: "*"
+  dest: { host: datadoghq.com, kind: third_party, vendor: Datadog }
+  category: tracing
+
+- id: sdk.ts.newrelic
+  lang: typescript
+  call: ["newrelic.addCustomAttribute", "newrelic.addCustomAttributes", "newrelic.addCustomSpanAttribute", "newrelic.addCustomSpanAttributes",
+         "newrelic.recordCustomEvent", "newrelic.setUserID", "newrelic.recordLogEvent", "newrelic.noticeError",
+         "newrelic.setCustomAttribute", "newrelic.setUserId", "newrelic.addPageAction"]
+  arg: "*"
+  dest: { host: collector.newrelic.com, kind: third_party, vendor: New Relic }
+  category: tracing
+  description: The Node agent (import newrelic from "newrelic") and the browser agent (window.newrelic).
+
+- id: sdk.ts.honeycomb
+  lang: typescript
+  call: ["honeycomb-beeline.addContext", "honeycomb-beeline.addTraceContext", "honeycomb-beeline.customContext.add"]
+  arg: "*"
+  dest: { host: api.honeycomb.io, kind: third_party, vendor: Honeycomb }
+  category: tracing
+
 - id: sdk.ts.logrocket
   lang: typescript
   call: ["logrocket.identify", "logrocket.track", "logrocket.log", "logrocket-react-native.identify"]

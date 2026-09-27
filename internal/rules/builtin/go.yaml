@@ -63,6 +63,44 @@
   dest: { kind: third_party, host: sentry.io, vendor: Sentry }
   category: crash_reporting
 
+- id: sdk.go.otel
+  lang: go
+  call: ["go.opentelemetry.io/otel/trace.Span.SetAttributes", "go.opentelemetry.io/otel/trace.Span.AddEvent", "go.opentelemetry.io/otel/trace.Span.RecordError",
+         "go.opentelemetry.io/otel/trace.Span.SetStatus", "go.opentelemetry.io/otel/baggage.NewMember", "go.opentelemetry.io/otel/baggage.NewKeyValueProperty",
+         "go.opentelemetry.io/otel/log.Record.SetBody", "go.opentelemetry.io/otel/log.Record.AddAttributes"]
+  arg: "*"
+  dest: { kind: third_party, host: otel-collector, vendor: OpenTelemetry collector }
+  category: tracing
+  description: Span attributes, events and statuses, baggage (propagated to every downstream service in request headers) and log records are exported to the tracing backend. A collector you run yourself can be declared first party in first_party_domains.
+
+- id: sdk.go.datadog.trace
+  lang: go
+  call: ["gopkg.in/DataDog/dd-trace-go.v1/ddtrace.Span.SetTag", "gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer.SetUser",
+         "gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer.StartSpan", "gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer.StartSpanFromContext",
+         "github.com/DataDog/dd-trace-go/v2/ddtrace/tracer.Span.SetTag", "github.com/DataDog/dd-trace-go/v2/ddtrace/tracer.SetUser",
+         "github.com/DataDog/dd-trace-go/v2/ddtrace/tracer.StartSpan", "github.com/DataDog/dd-trace-go/v2/ddtrace/tracer.StartSpanFromContext"]
+  arg: "*"
+  dest: { kind: third_party, host: datadoghq.com, vendor: Datadog }
+  category: tracing
+  description: Span tags (SetTag, tracer.Tag options) and the user set with tracer.SetUser are sent to Datadog APM.
+
+- id: sdk.go.newrelic
+  lang: go
+  call: ["github.com/newrelic/go-agent/v3/newrelic.Transaction.AddAttribute", "github.com/newrelic/go-agent/v3/newrelic.Transaction.SetUserID",
+         "github.com/newrelic/go-agent/v3/newrelic.Segment.AddAttribute", "github.com/newrelic/go-agent/v3/newrelic.Application.RecordCustomEvent",
+         "github.com/newrelic/go-agent/v3/newrelic.Application.RecordLog", "github.com/newrelic/go-agent/v3/newrelic.Transaction.RecordLog"]
+  arg: "*"
+  dest: { kind: third_party, host: collector.newrelic.com, vendor: New Relic }
+  category: tracing
+
+- id: sdk.go.honeycomb
+  lang: go
+  call: ["github.com/honeycombio/libhoney-go.Event.AddField", "github.com/honeycombio/libhoney-go.Event.Add", "github.com/honeycombio/libhoney-go.Builder.AddField",
+         "github.com/honeycombio/beeline-go.AddField", "github.com/honeycombio/beeline-go.AddFieldToTrace", "github.com/honeycombio/beeline-go/trace.Span.AddField"]
+  arg: "*"
+  dest: { kind: third_party, host: api.honeycomb.io, vendor: Honeycomb }
+  category: tracing
+
 - id: net.go.http_body
   lang: go
   call: ["net/http.Post", "net/http.Client.Post"]

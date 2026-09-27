@@ -6,6 +6,11 @@ All notable changes to datawarden are documented here. The format follows [Keep 
 
 ### Added
 
+- Tracing and APM sinks (#41), each with an annotated example. They use a new category, `tracing`.
+  - **OpenTelemetry** (`sdk.*.otel`) in Go, Python, Java/Kotlin, TypeScript and Swift covers span attributes, events and statuses, recorded exceptions, baggage, and log records. The destination is `third_party` with host `otel-collector`. Declare a collector you run yourself in `first_party_domains`.
+  - **Datadog APM** (`sdk.*.datadog.trace`) in Go, Python, Java, TypeScript and Swift covers span tags and user info (`tracer.SetUser`, `set_user`, `tracer.setUser`). Datadog RUM was already covered.
+  - **New Relic** in Go, Python, Java (the server agent, `sdk.newrelic.agent`), TypeScript (Node and browser agents) and Swift covers custom attributes, custom events and `setUserId`.
+  - **Honeycomb** in Go, Python and TypeScript covers libhoney fields and Beeline context.
 - More SDK and logging sink rules (#42), each with an annotated example:
   - Python: Rollbar, Bugsnag and Amplitude (`amplitude-analytics`).
   - Android (Kotlin and Java): Rollbar, Datadog RUM and New Relic.

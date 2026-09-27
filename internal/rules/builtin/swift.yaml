@@ -93,6 +93,31 @@
   dest: { host: braze.com, kind: third_party, vendor: Braze }
   category: messaging
 
+- id: sdk.swift.otel
+  lang: swift
+  call: ["Span.setAttribute", "Span.addEvent", "Span.recordException", "SpanBuilder.setAttribute", "BaggageBuilder.put"]
+  receiver: "(?i)(^|\\.)(_?\\w*span|baggageBuilder\\(\\))$"
+  arg: "*"
+  dest: { host: otel-collector, kind: third_party, vendor: OpenTelemetry collector }
+  category: tracing
+  description: Span attributes and events, and baggage (propagated to downstream services), are exported to the tracing backend.
+
+- id: sdk.swift.datadog.trace
+  lang: swift
+  call: ["OTSpan.setTag", "OTSpan.setBaggageItem", "OTSpan.log"]
+  receiver: "(?i)(^|\\.)_?\\w*span$"
+  arg: "*"
+  dest: { host: datadoghq.com, kind: third_party, vendor: Datadog }
+  category: tracing
+
+- id: sdk.swift.newrelic
+  lang: swift
+  call: ["NewRelic.setUserId", "NewRelic.setAttribute", "NewRelic.recordCustomEvent", "NewRelic.recordBreadcrumb", "NewRelic.recordHandledException",
+         "NewRelic.logInfo", "NewRelic.logWarning", "NewRelic.logError", "NewRelic.logAttributes"]
+  arg: "*"
+  dest: { host: mobile-collector.newrelic.com, kind: third_party, vendor: New Relic }
+  category: tracing
+
 - id: storage.swift.user_defaults
   lang: swift
   call: ["UserDefaults.standard.set", "UserDefaults.standard.setValue", "UserDefaults.set", "UserDefaults.setValue"]

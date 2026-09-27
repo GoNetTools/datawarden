@@ -3,6 +3,11 @@ module example.com/ruleexamples
 go 1.22
 
 require (
+	github.com/honeycombio/beeline-go v0.0.0
+	github.com/honeycombio/libhoney-go v0.0.0
+	github.com/newrelic/go-agent/v3 v3.0.0
+	go.opentelemetry.io/otel v0.0.0
+	gopkg.in/DataDog/dd-trace-go.v1 v1.0.0
 	github.com/gin-gonic/gin v0.0.0
 	github.com/go-chi/chi/v5 v5.0.0
 	github.com/labstack/echo/v4 v4.0.0
@@ -19,6 +24,11 @@ require (
 )
 
 replace (
+	github.com/honeycombio/beeline-go => ../../gostubs/beeline
+	github.com/honeycombio/libhoney-go => ../../gostubs/libhoney
+	github.com/newrelic/go-agent/v3 => ../../gostubs/newrelic
+	go.opentelemetry.io/otel => ../../gostubs/otel
+	gopkg.in/DataDog/dd-trace-go.v1 => ../../gostubs/ddtrace
 	github.com/gin-gonic/gin => ../../gostubs/gin
 	github.com/go-chi/chi/v5 => ../../gostubs/chi
 	github.com/labstack/echo/v4 => ../../gostubs/echo
