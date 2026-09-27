@@ -17,8 +17,14 @@ import (
 var consentWords = []string{"consent", "optedin", "optin", "trackingallowed", "trackingenabled", "trackingauthorized", "allowtracking",
 	"cantrack", "analyticsenabled", "analyticsallowed", "gdpr"}
 
+// foldName lower-cases a name and drops its separators: has_consent and
+// hasConsent both read hasconsent.
+func foldName(name string) string { return strings.ToLower(separators.Replace(name)) }
+
+var separators = strings.NewReplacer("_", "", "-", "")
+
 func consentName(name string) bool {
-	n := strings.ToLower(strings.NewReplacer("_", "", "-", "").Replace(name))
+	n := foldName(name)
 	for _, w := range consentWords {
 		if strings.Contains(n, w) {
 			return true

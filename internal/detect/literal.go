@@ -13,6 +13,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/GoNetTools/datawarden/internal/finding"
 )
 
 // LiteralHit is a PII value found verbatim in a file (e.g. a real card
@@ -111,7 +113,7 @@ func (s *LiteralScanner) Scan(content []byte) []LiteralHit {
 			if conf < minConf {
 				return
 			}
-			hits = append(hits, LiteralHit{DataType: dt, Line: lineNo, Col: start + 1, Masked: MaskValue(dt, raw), Hash: valueHash(dt, raw), Conf: round2(conf), Detector: det})
+			hits = append(hits, LiteralHit{DataType: dt, Line: lineNo, Col: start + 1, Masked: MaskValue(dt, raw), Hash: valueHash(dt, raw), Conf: finding.RoundConfidence(conf), Detector: det})
 		}
 		taken := make([][2]int, 0, 2)
 		overlaps := func(a, b int) bool {
@@ -182,13 +184,6 @@ func (s *LiteralScanner) Scan(content []byte) []LiteralHit {
 		}
 	}
 	return hits
-}
-
-func round2(f float64) float64 {
-	if f > 1 {
-		f = 1
-	}
-	return float64(int(f*100+0.5)) / 100
 }
 
 func looksBinary(b []byte) bool {
@@ -457,7 +452,7 @@ func (c *Classifier) scanValues(hits []LiteralHit, line string, lineNo int, minC
 				continue
 			}
 			hits = append(hits, LiteralHit{DataType: v.dt.ID, Line: lineNo, Col: start + 1, Masked: maskSecret(val),
-				Hash: valueHash(v.dt.ID, val), Conf: round2(v.Confidence), Detector: v.Name})
+				Hash: valueHash(v.dt.ID, val), Conf: finding.RoundConfidence(v.Confidence), Detector: v.Name})
 		}
 	}
 	return hits

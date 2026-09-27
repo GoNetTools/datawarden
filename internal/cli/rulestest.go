@@ -73,9 +73,7 @@ Every violation in DIR must be annotated. Go examples need a go.mod in DIR.
 	if err != nil {
 		return ExitError, err
 	}
-	for _, w := range res.Warnings {
-		fmt.Fprintf(a.Stderr, "warning: %s\n", w)
-	}
+	a.warn(res.Warnings)
 	flows, _ := a.Policy.Apply(s.cfg, res.Flows, res.Literals)
 	out := a.RuleTester.Check(s.rules, anns, flows)
 	for _, k := range out.Known {

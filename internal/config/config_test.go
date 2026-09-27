@@ -4,8 +4,6 @@
 package config
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 	"testing/fstest"
 )
@@ -33,12 +31,7 @@ func TestLoad(t *testing.T) {
 	}
 }
 
-func TestAbsAndLoader(t *testing.T) {
-	// \repo is not absolute on Windows; the temp directory's volume makes it so.
-	root := filepath.Join(filepath.VolumeName(os.TempDir())+string(filepath.Separator), "repo")
-	if Abs(root, "") != "" || Abs(root, root) != root || Abs(root, "a/b") != filepath.Join(root, "a", "b") {
-		t.Error("Abs")
-	}
+func TestLoader(t *testing.T) {
 	var l Loader
 	c, err := l.Parse([]byte("languages: [kt, golang]\npolicy:\n  min_confidence: 0.7\n"), "x.yaml")
 	if err != nil || c.Policy.MinConfidence != 0.7 || len(c.Languages) != 2 {

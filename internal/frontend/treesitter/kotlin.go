@@ -28,7 +28,6 @@ func (fe *ktFrontend) Lang() string { return lang.Kotlin }
 type ktExtra struct {
 	static  map[string]bool   // methods callable without a receiver (object/companion)
 	returns map[string]string // method -> declared return type
-	node    *Node
 }
 
 type ktProgram struct {
@@ -47,14 +46,7 @@ func (fe *ktFrontend) Lower(ctx context.Context, files []string) (*ir.Module, er
 		kp.header(f)
 		kp.collect(f, f.root, f.pkg, nil)
 	}
-	for _, c := range kp.classes {
-		for k, t := range c.fields {
-			c.fields[k] = kp.resolveType(c.file, t)
-		}
-		for i, s := range c.supers {
-			c.supers[i] = kp.resolveType(c.file, s)
-		}
-	}
+	kp.resolveClassTypes(true)
 	for _, f := range kp.files {
 		kp.lowerDecls(f, f.root, nil)
 	}
@@ -271,8 +263,8 @@ func (kp *ktProgram) collectClass(f *srcFile, n *Node, scope string, isObject bo
 	if scope != "" {
 		qual = scope + "." + qual
 	}
-	ci := &classInfo{name: qual, short: f.text(nameNode), file: f, fields: map[string]string{}, methods: map[string]string{}, isStatic: isObject}
-	ex := &ktExtra{static: map[string]bool{}, returns: map[string]string{}, node: n}
+	ci := &classInfo{name: qual, short: f.text(nameNode), file: f, fields: map[string]string{}, methods: map[string]string{}}
+	ex := &ktExtra{static: map[string]bool{}, returns: map[string]string{}}
 	kp.extra[qual] = ex
 	mods := firstOf(n, "modifiers")
 	_, annNames := ktAnnotations(f, mods)
@@ -378,11 +370,6 @@ func ktCtorType(f *srcFile, prop *Node) string {
 		return f.text(callee[0])
 	}
 	return ""
-}
-
-func posOf(f *srcFile, n *Node) ir.Pos {
-	sp := n.StartPoint()
-	return ir.Pos{File: f.rel, Line: int(sp.Row) + 1, Col: int(sp.Column) + 1}
 }
 
 // lowerDecls lowers function bodies (pass 2).
@@ -852,20 +839,7 @@ func (kb *ktBuilder) stmt(n *Node) ir.VarID {
 	case "while_statement", "do_while_statement":
 		cond := n.ChildByFieldName("condition")
 		body := ktBody(n, cond)
-		v, known := kb.truth(cond)
-		if known && !v && n.Type() == "while_statement" {
-			kb.expr(cond) // while (false): the body never runs
-			return ir.NoVar
-		}
-		test := func() ir.VarID { return kb.expr(cond) }
-		spec := loopSpec{infinite: known && v, body: func() { kb.block(body) }}
-		if n.Type() == "do_while_statement" {
-			spec.post = test
-		} else {
-			spec.cond = test
-		}
-		kb.label = kb.ktLabel(n)
-		kb.loopWith(n, spec)
+		kb.whileLoop(n, cond, n.Type() == "do_while_statement", kb.expr, func() { kb.block(body) }, func() { kb.label = kb.ktLabel(n) })
 		return ir.NoVar
 	case "function_declaration":
 		// Local function: a closure bound to its name, so calls of it run it.
@@ -905,7 +879,7 @@ func (kb *ktBuilder) assignment(n *Node) {
 	case "identifier":
 		name := kb.text(target)
 		if old, ok := kb.lookup(name); ok {
-			dst := kb.redefine(name, old, "", target)
+			dst := kb.redefine(name, old, target)
 			if augmented {
 				kb.assign(dst, n, old, v)
 			} else {
@@ -1102,8 +1076,7 @@ func (kb *ktBuilder) expr(n *Node) ir.VarID {
 		}
 		if q := kb.classRef(kids[0]); q != "" {
 			// Static field / enum constant: Build.SERIAL, R.string.x
-			obj := kb.fn.Named(shortName(q), q, kb.pos(kids[0]))
-			return kb.load(obj, kb.text(fieldNode), q, n)
+			return kb.loadStatic(kids[0], q, kb.text(fieldNode), n)
 		}
 		owner := kb.typeOf(kids[0])
 		obj := kb.expr(kids[0])
@@ -1331,29 +1304,7 @@ func (kb *ktBuilder) conditionalArms(n *Node) {
 				tests = append(tests, func() ir.VarID {
 					var vs []ir.VarID
 					for _, k := range conds {
-						switch k.Type() {
-						case "range_test", "type_test":
-							v := ir.NoVar
-							for _, x := range named(k) {
-								if !isKtType(x) {
-									v = kb.expr(x)
-								}
-							}
-							t := kb.temp(k)
-							op := "in"
-							if k.Type() == "type_test" {
-								op = "is"
-								v = kb.constVar(ktTypeText(kb.f, ktTypeChild(k)), k)
-							}
-							if subject != ir.NoVar && v != ir.NoVar {
-								kb.fn.Compute(t, kb.pos(k), op, subject, v)
-							} else {
-								t = ir.NoVar
-							}
-							vs = append(vs, t)
-						default:
-							vs = append(vs, kb.expr(k))
-						}
+						vs = append(vs, kb.whenCondition(k, subject))
 					}
 					return kb.matches(c, subject, vs...)
 				})
@@ -1389,6 +1340,31 @@ func (kb *ktBuilder) conditionalArms(n *Node) {
 			}
 		}, handlers, finally)
 	}
+}
+
+// whenCondition lowers one condition of a when entry: `in range` and
+// `is Type` test the subject, anything else is a value compared with it.
+func (kb *ktBuilder) whenCondition(k *Node, subject ir.VarID) ir.VarID {
+	if k.Type() != "range_test" && k.Type() != "type_test" {
+		return kb.expr(k)
+	}
+	v := ir.NoVar
+	for _, x := range named(k) {
+		if !isKtType(x) {
+			v = kb.expr(x)
+		}
+	}
+	t := kb.temp(k)
+	op := "in"
+	if k.Type() == "type_test" {
+		op = "is"
+		v = kb.constVar(ktTypeText(kb.f, ktTypeChild(k)), k)
+	}
+	if subject == ir.NoVar || v == ir.NoVar {
+		return ir.NoVar
+	}
+	kb.fn.Compute(t, kb.pos(k), op, subject, v)
+	return t
 }
 
 func (kb *ktBuilder) lambdaLit(n *Node) ir.VarID {

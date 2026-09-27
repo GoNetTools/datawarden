@@ -47,7 +47,7 @@ var piiDetectors = []string{"containspii", "haspii", "ispii", "lookslikepii", "d
 // checkKind classifies a predicate by name. It returns the check and
 // whether it holds when the predicate returns true.
 func (a *analyzer) checkKind(name string, pos ir.Pos) (check, bool, bool) {
-	n := strings.ToLower(strings.NewReplacer("_", "", "-", "").Replace(name))
+	n := foldName(name)
 	for _, p := range []string{"is", "was", "hasbeen", "has"} {
 		if rest, ok := strings.CutPrefix(n, p); ok {
 			if xf, ok := transformChecks[rest]; ok {

@@ -78,3 +78,11 @@ func (f *Flow) IsNew() bool { return f.Violation && !f.Baselined }
 
 // IsNew reports whether the finding is a violation not in the baseline.
 func (l *Literal) IsNew() bool { return l.Violation && !l.Baselined }
+
+// RoundConfidence caps a confidence at 1 and rounds it to two decimals.
+func RoundConfidence(f float64) float64 {
+	if f > 1 {
+		f = 1
+	}
+	return float64(int(f*100+0.5)) / 100
+}

@@ -4,6 +4,7 @@
 package analysis
 
 import (
+	"maps"
 	"slices"
 	"strings"
 
@@ -179,7 +180,7 @@ func (cf *closureFlow) field(owner, field string, fn *ir.Func) []closure {
 		}
 	}
 	if owner == "" {
-		for _, k := range sortedKeys(m) {
+		for _, k := range slices.Sorted(maps.Keys(m)) {
 			add(m[k])
 		}
 		return out
@@ -188,15 +189,6 @@ func (cf *closureFlow) field(owner, field string, fn *ir.Func) []closure {
 	for _, o := range cf.a.cha.ancestors(owner) {
 		add(m[o])
 	}
-	return out
-}
-
-func sortedKeys[V any](m map[string]V) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	slices.Sort(out)
 	return out
 }
 

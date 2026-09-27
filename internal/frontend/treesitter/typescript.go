@@ -72,11 +72,7 @@ func (fe *tsFrontend) Lower(ctx context.Context, files []string) (*ir.Module, er
 		tp.header(f)
 		tp.collect(f)
 	}
-	for _, c := range tp.classes {
-		for k, t := range c.fields {
-			c.fields[k] = tp.resolveType(c.file, t)
-		}
-	}
+	tp.resolveClassTypes(false)
 	for _, f := range tp.files {
 		tp.lowerFile(f)
 	}
@@ -678,13 +674,7 @@ func (tb *tsBuilder) stmt(n *Node) ir.VarID {
 		})
 		return ir.NoVar
 	case "if_statement":
-		cond := n.ChildByFieldName("condition")
-		c := tb.expr(cond)
-		var els func()
-		if alt := n.ChildByFieldName("alternative"); alt != nil {
-			els = func() { tb.stmt(alt) }
-		}
-		tb.ifElse(n, cond, c, func() { tb.stmt(n.ChildByFieldName("consequence")) }, els)
+		tb.ifStmt(n, tb.expr, tb.stmt)
 		return ir.NoVar
 	case "for_statement":
 		tb.stmt(n.ChildByFieldName("initializer"))
@@ -698,20 +688,7 @@ func (tb *tsBuilder) stmt(n *Node) ir.VarID {
 		}})
 		return ir.NoVar
 	case "while_statement", "do_statement":
-		cond := n.ChildByFieldName("condition")
-		v, known := tb.truth(cond)
-		if known && !v && n.Type() == "while_statement" {
-			tb.stmt(cond) // while (false): the body never runs
-			return ir.NoVar
-		}
-		test := func() ir.VarID { return tb.stmt(cond) }
-		spec := loopSpec{infinite: known && v, body: func() { tb.stmt(n.ChildByFieldName("body")) }}
-		if n.Type() == "do_statement" {
-			spec.post = test
-		} else {
-			spec.cond = test
-		}
-		tb.loopWith(n, spec)
+		tb.whileLoop(n, n.ChildByFieldName("condition"), n.Type() == "do_statement", tb.stmt, func() { tb.stmt(n.ChildByFieldName("body")) }, nil)
 		return ir.NoVar
 	case "try_statement":
 		var handlers []func()
@@ -823,8 +800,7 @@ func (tb *tsBuilder) expr(n *Node) ir.VarID {
 		obj := n.ChildByFieldName("object")
 		prop := tb.text(n.ChildByFieldName("property"))
 		if p := tb.staticPath(obj); p != "" {
-			o := tb.fn.Named(shortName(p), p, tb.pos(obj))
-			return tb.load(o, prop, p, n)
+			return tb.loadStatic(obj, p, prop, n)
 		}
 		owner := tb.typeOf(obj)
 		return tb.load(tb.expr(obj), prop, owner, n)
@@ -992,7 +968,7 @@ func (tb *tsBuilder) assignment(n *Node) ir.VarID {
 			tb.assign(dst, n, v)
 			return dst
 		}
-		dst := tb.redefine(name, old, "", left)
+		dst := tb.redefine(name, old, left)
 		if augmented {
 			tb.assign(dst, n, old, v)
 		} else {

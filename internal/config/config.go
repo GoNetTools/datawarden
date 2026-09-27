@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io/fs"
 	"maps"
-	"path/filepath"
 	"slices"
 	"strings"
 
@@ -184,14 +183,6 @@ func (c *Config) validate() error {
 		}
 	}
 	return nil
-}
-
-// Abs resolves a config-relative path against root.
-func Abs(root, p string) string {
-	if p == "" || filepath.IsAbs(p) {
-		return p
-	}
-	return filepath.Join(root, filepath.FromSlash(p))
 }
 
 // Template is written by `datawarden init`.

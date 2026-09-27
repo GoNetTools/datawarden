@@ -10,7 +10,8 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
-	"sort"
+	"maps"
+	"slices"
 	"sync"
 
 	"github.com/GoNetTools/datawarden/internal/ir"
@@ -111,10 +112,6 @@ func (r *Registry) Unavailable() map[string]string {
 func (r *Registry) Languages() []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	out := make([]string, 0, len(r.factories))
-	for l := range r.factories {
-		out = append(out, l)
-	}
-	sort.Strings(out)
+	out := slices.Sorted(maps.Keys(r.factories))
 	return out
 }

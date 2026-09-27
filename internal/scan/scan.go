@@ -12,8 +12,10 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"math"
 	"path"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -36,7 +38,7 @@ const (
 	ModeLiterals = "literals"
 )
 
-// VCS answers version-control questions (ingest.Git, ingest.NoVCS).
+// VCS answers version-control questions (ingest.Git).
 type VCS interface {
 	ChangedFiles(ctx context.Context, base string) ([]string, error)
 	StagedFiles(ctx context.Context) ([]string, error)
@@ -134,7 +136,6 @@ type Result struct {
 	Mode          string
 	Flows         []*finding.Flow
 	Literals      []*finding.Literal
-	FilesWalked   int
 	FilesScanned  int
 	FilesAnalyzed map[string]int
 	Functions     int
@@ -175,7 +176,6 @@ func (s *Scanner) Run(ctx context.Context, req Request) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	res.FilesWalked = len(all)
 	byRel := map[string]ingest.File{}
 	for _, f := range all {
 		byRel[f.Rel] = f
@@ -442,11 +442,7 @@ func (s *Scanner) lower(ctx context.Context, req Request, targets []ingest.File,
 	}
 	prog := &ir.Module{}
 	var lowered []string
-	langNames := make([]string, 0, len(groups))
-	for l := range groups {
-		langNames = append(langNames, l)
-	}
-	sort.Strings(langNames)
+	langNames := slices.Sorted(maps.Keys(groups))
 	for _, name := range langNames {
 		files := groups[name]
 		fe, err := s.Frontends.Frontend(name, fopts)

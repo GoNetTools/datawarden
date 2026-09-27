@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/GoNetTools/datawarden/internal/finding"
@@ -27,7 +28,7 @@ func Text(w io.Writer, r *Report) error {
 	}
 	fmt.Fprintf(&b, "%s · %d files", head, r.FilesScanned)
 	if len(langs) > 0 {
-		sortStrings(langs)
+		slices.Sort(langs)
 		fmt.Fprintf(&b, " (%s)", strings.Join(langs, " "))
 	}
 	if r.Functions > 0 {
@@ -152,14 +153,6 @@ func shortPath(p []ir.Pos) string {
 		}
 	}
 	return strings.Join(parts, " → ")
-}
-
-func sortStrings(s []string) {
-	for i := 1; i < len(s); i++ {
-		for j := i; j > 0 && s[j] < s[j-1]; j-- {
-			s[j], s[j-1] = s[j-1], s[j]
-		}
-	}
 }
 
 // JSON renders the full report as JSON.

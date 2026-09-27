@@ -42,14 +42,7 @@ func (fe *javaFrontend) Lower(ctx context.Context, files []string) (*ir.Module, 
 			jp.collectType(f, c, f.pkg)
 		}
 	}
-	for _, c := range jp.classes {
-		for k, t := range c.fields {
-			c.fields[k] = jp.resolveType(c.file, t)
-		}
-		for i, s := range c.supers {
-			c.supers[i] = jp.resolveType(c.file, s)
-		}
-	}
+	jp.resolveClassTypes(true)
 	for _, f := range jp.files {
 		for _, c := range named(f.root) {
 			jp.lowerType(f, c, f.pkg)
@@ -378,29 +371,10 @@ func (jb *jvBuilder) stmt(n *Node) ir.VarID {
 		})
 		return ir.NoVar
 	case "if_statement":
-		cond := n.ChildByFieldName("condition")
-		c := jb.expr(cond)
-		var els func()
-		if alt := n.ChildByFieldName("alternative"); alt != nil {
-			els = func() { jb.stmt(alt) }
-		}
-		jb.ifElse(n, cond, c, func() { jb.stmt(n.ChildByFieldName("consequence")) }, els)
+		jb.ifStmt(n, jb.expr, jb.stmt)
 		return ir.NoVar
 	case "while_statement", "do_statement":
-		cond := n.ChildByFieldName("condition")
-		v, known := jb.truth(cond)
-		if known && !v && n.Type() == "while_statement" {
-			jb.stmt(cond) // while (false): the body never runs
-			return ir.NoVar
-		}
-		test := func() ir.VarID { return jb.expr(cond) }
-		spec := loopSpec{infinite: known && v, body: func() { jb.stmt(n.ChildByFieldName("body")) }}
-		if n.Type() == "do_statement" {
-			spec.post = test
-		} else {
-			spec.cond = test
-		}
-		jb.loopWith(n, spec)
+		jb.whileLoop(n, n.ChildByFieldName("condition"), n.Type() == "do_statement", jb.expr, func() { jb.stmt(n.ChildByFieldName("body")) }, nil)
 		return ir.NoVar
 	case "for_statement":
 		for _, c := range fieldChildren(n, "init") {
@@ -549,8 +523,7 @@ func (jb *jvBuilder) expr(n *Node) ir.VarID {
 		obj := n.ChildByFieldName("object")
 		field := jb.text(n.ChildByFieldName("field"))
 		if path := jb.staticPath(obj); path != "" {
-			o := jb.fn.Named(shortName(path), path, jb.pos(obj))
-			return jb.load(o, field, path, n)
+			return jb.loadStatic(obj, path, field, n)
 		}
 		owner := jb.typeOf(obj)
 		return jb.load(jb.expr(obj), field, owner, n)
@@ -676,7 +649,7 @@ func (jb *jvBuilder) assignment(n *Node) ir.VarID {
 	case "identifier":
 		name := jb.text(left)
 		if old, ok := jb.lookup(name); ok {
-			dst := jb.redefine(name, old, "", left)
+			dst := jb.redefine(name, old, left)
 			if op != "=" {
 				jb.assign(dst, n, old, v)
 			} else {

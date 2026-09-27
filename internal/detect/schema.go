@@ -4,6 +4,7 @@
 package detect
 
 import (
+	"slices"
 	"sort"
 	"strings"
 
@@ -156,7 +157,7 @@ func BuildSchema(c *Classifier, types []*ir.TypeDecl) *Schema {
 		}
 		for _, k := range typeKeys(t.Name) {
 			for dt := range declDTs[t] {
-				if !contains(s.typePII[k], dt) {
+				if !slices.Contains(s.typePII[k], dt) {
 					s.typePII[k] = append(s.typePII[k], dt)
 				}
 			}
@@ -341,15 +342,6 @@ func (s *Schema) KnownType(typ string) bool {
 	}
 	for _, k := range typeKeys(typ) {
 		if s.known[k] {
-			return true
-		}
-	}
-	return false
-}
-
-func contains(xs []string, x string) bool {
-	for _, y := range xs {
-		if y == x {
 			return true
 		}
 	}

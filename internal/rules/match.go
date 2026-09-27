@@ -107,7 +107,7 @@ func (r *Rule) match(c *ir.Call) (Hit, bool) {
 			}
 			continue
 		}
-		if !nameMatches(r.names[i], c.Name) {
+		if !r.nameMatches(i, c.Name) {
 			continue
 		}
 		ts := r.typeSegs[i]
@@ -130,15 +130,14 @@ func (r *Rule) match(c *ir.Call) (Hit, bool) {
 	return best, best.Rule != nil
 }
 
-func nameMatches(pattern, name string) bool {
+// nameMatches reports whether the method name of call pattern i matches
+// name.
+func (r *Rule) nameMatches(i int, name string) bool {
+	pattern := r.names[i]
 	if pattern == name || pattern == "*" {
 		return true
 	}
-	if strings.Contains(pattern, "*") {
-		re, err := globToRegexp(pattern)
-		return err == nil && re.MatchString(name)
-	}
-	return false
+	return r.nameRes[i] != nil && r.nameRes[i].MatchString(name)
 }
 
 func maxHit(a, b Hit) Hit {

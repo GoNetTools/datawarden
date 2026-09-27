@@ -7,7 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 	"text/tabwriter"
 )
@@ -84,7 +85,7 @@ func WriteText(w io.Writer, r *Result) error {
 	}{{"data type", o.ByDataType}, {"sink", o.BySink}} {
 		b.printf("\nby %s\n", sec.title)
 		b.printf("%s\tTP\tFP\tFN\tprecision\trecall\t\n", sec.title)
-		for _, k := range sortedKeys(sec.m) {
+		for _, k := range slices.Sorted(maps.Keys(sec.m)) {
 			c := sec.m[k]
 			b.printf("%s\t%d\t%d\t%d\t%.2f\t%.2f\t\n", k, c.TP, c.FP, c.FN, c.Precision(), c.Recall())
 		}
@@ -133,7 +134,7 @@ func WriteMarkdown(w io.Writer, r *Result) error {
 		m     map[string]Counts
 	}{{"Data type", o.ByDataType}, {"Sink", o.BySink}} {
 		b.printf("| %s | TP | FP | FN | Precision | Recall |\n|---|--:|--:|--:|--:|--:|\n", sec.title)
-		for _, k := range sortedKeys(sec.m) {
+		for _, k := range slices.Sorted(maps.Keys(sec.m)) {
 			c := sec.m[k]
 			b.printf("| `%s` | %d | %d | %d | %.2f | %.2f |\n", k, c.TP, c.FP, c.FN, c.Precision(), c.Recall())
 		}
@@ -180,15 +181,6 @@ func ms(v float64) string {
 
 func round3(f float64) float64 {
 	return float64(int(f*1000+0.5)) / 1000
-}
-
-func sortedKeys(m map[string]Counts) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
 }
 
 // errWriter keeps the first write error so the report code stays linear.
