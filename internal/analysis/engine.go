@@ -258,7 +258,7 @@ func (s *state) addThrown(i int, f *fact) bool {
 		s.thrown[i] = m
 	}
 	k := f.key()
-	if old, ok := m[k]; ok && old.conf >= f.conf {
+	if old, ok := m[k]; ok && !betterFact(f, old) {
 		return false
 	}
 	m[k] = f
@@ -392,7 +392,7 @@ func (s *state) add(v ir.VarID, f *fact) bool {
 		s.facts[v] = m
 	}
 	k := f.key()
-	if old, ok := m[k]; ok && old.conf >= f.conf {
+	if old, ok := m[k]; ok && !betterFact(f, old) {
 		return false
 	}
 	m[k] = f
@@ -414,7 +414,7 @@ func (s *state) addStore(obj ir.VarID, field string, f *fact) bool {
 		fm[field] = m
 	}
 	k := f.key()
-	if old, ok := m[k]; ok && old.conf >= f.conf {
+	if old, ok := m[k]; ok && !betterFact(f, old) {
 		return false
 	}
 	m[k] = f
@@ -1675,6 +1675,10 @@ func (a *analyzer) call(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 	if dataFreeCalls[lname] {
 		return changed
 	}
+	// A data loader (AppByTokenLoader(ctx).load(token), GraphQL's
+	// DataLoader pattern) answers with the value stored under the key it
+	// is given, not with the key.
+	lookup := recvOff == 1 && loaderMethods[lname] && strings.Contains(strings.ToLower(c.RecvText+"|"+c.RecvType+"|"+c.Callee), "loader")
 	if dst, ok := decodeInto[c.Callee]; ok && dst < len(in.Args) {
 		// A decoder fills the value it is given with what it reads:
 		// json.NewDecoder(r.Body).Decode(&v), json.Unmarshal(b, &v).
@@ -1703,6 +1707,9 @@ func (a *analyzer) call(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 			}
 			if i == 0 && recvOff == 1 && f.dt == requestData && keyedRead {
 				// request.form.get("page"): the key says what it is.
+				continue
+			}
+			if lookup && i >= recvOff {
 				continue
 			}
 			changed = st.add(in.Dst, derive(f, in.Pos, 0.95, nameXf)) || changed
@@ -2024,13 +2031,11 @@ func (a *analyzer) emit(f *fact, h SinkHit, via []ir.Pos) {
 		Guards: h.Guards,
 	}
 	k := strings.Join([]string{f.dt, h.Rule, h.Func, h.Sink.String(), xfKey(xf)}, "|")
-	if old, ok := a.flows[k]; ok {
+	if old, ok := a.flows[k]; ok && compareFlows(fl, old) >= 0 {
 		// An unguarded path to the sink outweighs a guarded one; among
-		// equally guarded ones the more confident wins.
-		og, ng := len(old.Guards) > 0, len(fl.Guards) > 0
-		if (!og && ng) || (og == ng && old.Confidence >= fl.Confidence) {
-			return
-		}
+		// equally guarded ones the more confident wins, then the one
+		// compareFlows puts first, whatever order they were found in.
+		return
 	}
 	a.flows[k] = fl
 }
@@ -2048,6 +2053,9 @@ var requestMethods = map[string]bool{
 	"send_request": true, "sendrequest": true, "request": true, "urlopen": true, "fetch": true,
 	"post": true, "patch": true, "post_json": true, "postjson": true,
 }
+
+// loaderMethods look a value up by key on a data loader.
+var loaderMethods = map[string]bool{"load": true, "load_many": true, "loadmany": true}
 
 // dataFreeCalls return a size, a count, a flag or a type, not the data
 // they are given.

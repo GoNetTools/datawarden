@@ -37,6 +37,12 @@ All notable changes to datawarden are documented here. The format follows [Keep 
 
 ### Fixed
 
+- Scanning the same code twice gives the same report (#53). The analysis keeps one fact per data type in each variable and caps some lists. At equal confidence it kept whichever candidate arrived first, and the arrival order followed Go's randomised map iteration. So a flow's source, its path, and on large projects whether some flows were reported at all changed from run to run: saleor gave 597 to 600 flows. Every such choice now follows a fixed order: higher confidence, then an unguarded path, a fact seeded by the variable's own name, the earliest source, the shortest path. A full list keeps its best entries instead of its first ones. As a result:
+  - gotify/server gains two violations of a kind already reported one line earlier (a username in a zerolog warning).
+  - A data loader's `load(key)` no longer counts as returning its key (`AppByTokenLoader(ctx).load(token)` is an app), which removes a credential false positive on saleor (an auth token that seemed to reach a tax-calculation log) and two more that keeping the best entries would have surfaced.
+
+  Eval scores are unchanged, and the cache format changes.
+
 - Kotlin and Swift files that failed to parse on real code are read in full (#44). Kotlin now uses tree-sitter-kotlin 1.1 (tree-sitter-grammars), which parses `fun interface`, trailing commas in `when` conditions, function types with qualified receivers, `in` conditions, `as?` on a continuation line and assignments to properties of call results: 0 of 363 real-world Kotlin files fail to parse (8 before). Two quirks of that grammar are corrected while lowering: `"$name"` in a one-line string is an interpolation, and `!a.b()` negates the call rather than `a`. Swift keeps its grammar, the best of the available versions on real code; syntax newer than it that moves no data (typed `throws(E)`, `consuming`/`borrowing`/`sending`, `~Copyable`, `@unchecked`, `await`, `case .x():` and `#Preview { }` blocks) is blanked before parsing without moving any position. The parse warnings on Now in Android and immich are gone. The cache format changes.
 
 ## [0.1.0] - 2026-09-26

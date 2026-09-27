@@ -105,16 +105,13 @@ func (s *Summary) addParamParam(dst, src int, t Transfer) {
 func mergeTransfer(list []Transfer, t Transfer) []Transfer {
 	for i := range list {
 		if xfKey(list[i].Xf) == xfKey(t.Xf) && list[i].Field == t.Field && list[i].DstField == t.DstField {
-			if t.Conf > list[i].Conf {
+			if compareTransfer(t, list[i]) < 0 {
 				list[i] = t
 			}
 			return list
 		}
 	}
-	if len(list) >= maxPerSlot {
-		return list
-	}
-	return append(list, t)
+	return capped(list, t, maxPerSlot, compareTransfer)
 }
 
 func (s *Summary) addParamSink(i int, h SinkHit) {
@@ -125,32 +122,26 @@ func (s *Summary) addParamSink(i int, h SinkHit) {
 	for j := range list {
 		if o := &list[j]; o.Rule == h.Rule && o.Sink == h.Sink && o.Field == h.Field && slices.Equal(o.Xf, h.Xf) {
 			// An unguarded path outweighs a guarded one.
-			og, ng := len(list[j].Guards) > 0, len(h.Guards) > 0
-			if (og && !ng) || (og == ng && h.Conf > list[j].Conf) {
+			if compareSinkHits(h, list[j]) < 0 {
 				list[j] = h
 			}
 			return
 		}
 	}
-	if len(list) < maxPerSlot*2 {
-		s.ParamSink[i] = append(list, h)
-	}
+	s.ParamSink[i] = capped(list, h, maxPerSlot*2, compareSinkHits)
 }
 
 func mergeReal(list []RealFact, f RealFact) []RealFact {
 	k := f.DataType + "|" + xfKey(f.Xf) + "|" + f.DstField
 	for i := range list {
 		if list[i].DataType+"|"+xfKey(list[i].Xf)+"|"+list[i].DstField == k {
-			if f.Conf > list[i].Conf {
+			if compareReal(f, list[i]) < 0 {
 				list[i] = f
 			}
 			return list
 		}
 	}
-	if len(list) >= maxPerSlot {
-		return list
-	}
-	return append(list, f)
+	return capped(list, f, maxPerSlot, compareReal)
 }
 
 func (s *Summary) addParamOut(i int, f RealFact) {

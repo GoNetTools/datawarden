@@ -212,3 +212,27 @@ func TestDiffResolvesOverridesFromCachedClasses(t *testing.T) {
 		t.Errorf("the override in an unchanged file was not resolved: %+v", r.Flows)
 	}
 }
+
+// Scanning the same code twice gives the same report: the same flows,
+// sources, paths and confidences. Before #53 fixed it, which of two equally
+// good sources a flow reported depended on Go's randomised map iteration.
+func TestScansAreDeterministic(t *testing.T) {
+	var first string
+	for i := 0; i < 8; i++ {
+		_, r := scanJSON(t, "testdata/determinism")
+		if len(r.Flows) == 0 {
+			t.Fatal("the fixture reports no flows")
+		}
+		b, err := json.Marshal(r.Flows)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if i == 0 {
+			first = string(b)
+			continue
+		}
+		if string(b) != first {
+			t.Fatalf("scan %d differs from the first:\n%s\n---\n%s", i+1, b, first)
+		}
+	}
+}
