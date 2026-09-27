@@ -4,6 +4,7 @@
 package policy
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -129,5 +130,56 @@ func TestSeverityComesFromCatalog(t *testing.T) {
 	got, _ := Evaluator{Config: config.Default(), Catalog: fakeCatalog{"loyalty_card": true}}.Apply([]*finding.Flow{f}, nil)
 	if got[0].Severity != High {
 		t.Errorf("sensitive custom type should be high, got %s", got[0].Severity)
+	}
+}
+
+// Decide says why the policy treats a flow as it does and what would
+// change it, and agrees with Apply on every flow.
+func TestDecide(t *testing.T) {
+	c := config.Default()
+	c.Policy.Allow = []config.Allow{{Sink: "log.partner", Reason: "DPA"}}
+	c.Policy.IgnoreDataTypes = []string{"pii.gender"}
+	c.FirstPartyDomains = []string{"api.example.com"}
+	flow := func(dt, rule, kind, host string, conf float64) *finding.Flow {
+		return &finding.Flow{DataType: dt, SinkRule: rule, Dest: finding.Destination{Kind: kind, Host: host}, Confidence: conf}
+	}
+	own := flow("pii.email", "net.http", "network", "api.example.com", 0.9)
+	own.Dest.FirstParty = true
+	hashed := flow("credential.password", "log.x", "log", "", 0.9)
+	hashed.Transforms = []string{"sha256"}
+	for _, tc := range []struct {
+		f       *finding.Flow
+		status  string
+		reason  string
+		changes []string
+	}{
+		{flow("pii.email", "net.http", "network", "tracker.example", 0.9), StatusViolation, "network is in policy.fail_on",
+			[]string{"`first_party_domains: [tracker.example]`", "removing network from `policy.fail_on`"}},
+		{flow("pii.email", "log.x", "log", "", 0.6), StatusViolation, "confidence 0.60 is at least", []string{"`policy.min_confidence` above 0.60"}},
+		{flow("pii.email", "log.x", "log", "", 0.5), StatusInfo, "below policy.min_confidence 0.55", []string{"`policy.min_confidence: 0.50` or lower"}},
+		{flow("pii.email", "x.ipc", "first_party", "", 0.9), StatusInfo, "first_party is not in policy.fail_on", []string{"adding first_party to `policy.fail_on`"}},
+		{own, StatusInfo, "api.example.com is a first-party host", []string{"removing api.example.com from `first_party_domains`"}},
+		{flow("pii.email", "log.partner", "log", "", 0.9), StatusAllowed, "a `policy.allow` entry matches it: {sink: log.partner, reason: \"DPA\"}", []string{"removing that `policy.allow` entry"}},
+		{hashed, StatusAllowed, "transformed (sha256)", []string{"removing sha256 from `policy.classes.credential.safe_transforms`"}},
+		{flow("pii.gender", "log.x", "log", "", 0.9), StatusDropped, "policy.ignore_data_types lists pii.gender", nil},
+		{flow("pii.email", "log.x", "log", "", 0.1), StatusDropped, "below min_confidence", nil},
+	} {
+		e := Evaluator{Config: c, Catalog: classCatalog{}}
+		d := e.Decide(tc.f)
+		if d.Status != tc.status || !strings.Contains(d.Reason, tc.reason) {
+			t.Errorf("%s → %s: got %s %q, want %s containing %q", tc.f.DataType, tc.f.SinkRule, d.Status, d.Reason, tc.status, tc.reason)
+		}
+		for _, want := range tc.changes {
+			if !slices.ContainsFunc(d.Changes, func(c string) bool { return strings.Contains(c, want) }) {
+				t.Errorf("%s → %s: changes %q lack %q", tc.f.DataType, tc.f.SinkRule, d.Changes, want)
+			}
+		}
+		kept, _ := e.Apply([]*finding.Flow{tc.f}, nil)
+		switch {
+		case d.Status == StatusDropped && len(kept) != 0, d.Status != StatusDropped && len(kept) != 1:
+			t.Errorf("%s: Apply kept %d flows, Decide says %s", tc.f.DataType, len(kept), d.Status)
+		case len(kept) == 1 && (kept[0].Violation != (d.Status == StatusViolation) || kept[0].Allowed != d.Allowed):
+			t.Errorf("%s: Apply says violation=%v allowed=%q, Decide says %s %q", tc.f.DataType, kept[0].Violation, kept[0].Allowed, d.Status, d.Allowed)
+		}
 	}
 }

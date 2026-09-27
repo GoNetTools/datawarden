@@ -74,6 +74,9 @@ func Text(w io.Writer, r *Report) error {
 		if f.Allowed != "" {
 			extra += " · " + f.Allowed
 		}
+		if f.Fingerprint != "" {
+			extra += " · explain: datawarden explain " + shortFP(f.Fingerprint)
+		}
 		fmt.Fprintf(&b, "         %s\n\n", extra)
 	}
 	for _, l := range r.Literals {
@@ -165,4 +168,12 @@ func JSON(w io.Writer, r *Report) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(r)
+}
+
+// shortFP is the prefix of a fingerprint that `datawarden explain` takes.
+func shortFP(fp string) string {
+	if len(fp) > 12 {
+		return fp[:12]
+	}
+	return fp
 }

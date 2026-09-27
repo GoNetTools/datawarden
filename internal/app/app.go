@@ -23,6 +23,7 @@ import (
 	"github.com/GoNetTools/datawarden/internal/config"
 	"github.com/GoNetTools/datawarden/internal/datamap"
 	"github.com/GoNetTools/datawarden/internal/detect"
+	"github.com/GoNetTools/datawarden/internal/explain"
 	"github.com/GoNetTools/datawarden/internal/flowgraph"
 	"github.com/GoNetTools/datawarden/internal/frontend"
 	"github.com/GoNetTools/datawarden/internal/frontend/golang"
@@ -120,6 +121,7 @@ func NewWith(stdout, stderr io.Writer, d Deps) *cli.App {
 		DataMapper: datamap.Mapper{},
 		Grapher:    flowgraph.Renderer{},
 		RuleTester: ruletest.Tester{},
+		Explainer:  explain.Explainer{Names: comp.Classifier},
 		Languages:  comp.Frontends.Languages,
 		Links:      report.CILinks(d.Getenv),
 		Clock:      d.Clock,

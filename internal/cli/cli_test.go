@@ -23,6 +23,7 @@ import (
 	"github.com/GoNetTools/datawarden/internal/config"
 	"github.com/GoNetTools/datawarden/internal/datamap"
 	"github.com/GoNetTools/datawarden/internal/detect"
+	"github.com/GoNetTools/datawarden/internal/explain"
 	"github.com/GoNetTools/datawarden/internal/finding"
 	"github.com/GoNetTools/datawarden/internal/flowgraph"
 	"github.com/GoNetTools/datawarden/internal/ingest"
@@ -559,5 +560,66 @@ func TestInitMapAndVersion(t *testing.T) {
 	}
 	if h.run("version"); !strings.Contains(h.out.String(), "datawarden test (frontends: go, kotlin)") {
 		t.Errorf("version: %s", h.out)
+	}
+}
+
+func TestExplain(t *testing.T) {
+	h := newHarness(map[string]string{"app/Repo.kt": "package app\n\nclass Repo {\n\n\n\n\n\n    fun save() { Sentry.setUser(phone) }\n}\n"})
+	h.app.Explainer = explain.Explainer{Names: detect.NewClassifier(detect.DefaultTaxonomy())}
+	if code := h.run("explain", "app/Repo.kt:9"); code != ExitClean {
+		t.Fatalf("explain file:line: exit %d %s", code, h.errb)
+	}
+	out := h.out.String()
+	for _, want := range []string{
+		"NEW  phone → Sentry (third_party), host sentry.io  [sdk.sentry.set_user]",
+		"Why the source is phone", `the name ` + "`phone`" + ` matches`,
+		"Path", "Why the sink matched", "rule sdk.sentry.set_user",
+		"Policy: NEW", "`first_party_domains: [sentry.io]` would make it first party",
+		"To silence it", "{sink: sdk.sentry.set_user, data_types: [phone], path: \"app/Repo.kt\"", "datawarden baseline",
+		"9 │ fun save() { Sentry.setUser(phone) }",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("explain output lacks %q:\n%s", want, out)
+		}
+	}
+	fp := sentryFlow()[0]
+	fp.Fingerprint = baseline.FlowFingerprint(fp)
+	if code := h.run("explain", fp.Fingerprint[:8], "--format", "json"); code != ExitClean || !strings.Contains(h.out.String(), `"fingerprint": "`+fp.Fingerprint+`"`) {
+		t.Errorf("explain fingerprint json: exit %d\n%s%s", code, h.out, h.errb)
+	}
+	// A baselined flow is explained as BASELINE, with nothing to silence.
+	if code := h.run("baseline"); code != ExitClean {
+		t.Fatalf("baseline: exit %d", code)
+	}
+	if code := h.run("explain", "app/Repo.kt:3"); code != ExitClean || !strings.HasPrefix(h.out.String(), "BASELINE") || strings.Contains(h.out.String(), "To silence it") {
+		t.Errorf("baselined flow: exit %d\n%s", code, h.out)
+	}
+	for _, args := range [][]string{{"explain"}, {"explain", "a", "b"}, {"explain", "app/Repo.kt:4"}, {"explain", "nonsense"}, {"explain", "x.kt:0"}, {"explain", "app/Repo.kt:9", "--format", "xml"}} {
+		if code := h.run(args...); code != ExitError {
+			t.Errorf("%v: exit %d, want an error", args, code)
+		}
+	}
+	// From a saved JSON report: nothing is scanned.
+	if code := h.run("scan", "--json", "report.json", "--no-fail", "--no-baseline"); code != ExitClean {
+		t.Fatalf("scan --json: exit %d %s", code, h.errb)
+	}
+	scans := len(h.scanner.reqs)
+	if code := h.run("explain", "app/Repo.kt:9", "--report", "report.json"); code != ExitClean || !strings.HasPrefix(h.out.String(), "NEW  phone") {
+		t.Errorf("--report: exit %d\n%s%s", code, h.out, h.errb)
+	}
+	for _, r := range h.scanner.reqs[scans:] {
+		if r.Cache != nil {
+			t.Errorf("--report scanned the repository")
+		}
+	}
+	h.ws.files[filepath.Join(testRoot, "notes.json")] = []byte(`{"flows": []}`)
+	for _, bad := range []string{"missing.json", "notes.json"} {
+		if code := h.run("explain", "app/Repo.kt:9", "--report", bad); code != ExitError {
+			t.Errorf("--report %s: exit %d", bad, code)
+		}
+	}
+	h.app.Explainer = nil
+	if code := h.run("explain", "app/Repo.kt:9"); code != ExitError {
+		t.Errorf("no explainer: exit %d", code)
 	}
 }
