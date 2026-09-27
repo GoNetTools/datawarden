@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
+	"net"
 
 	zlog "github.com/rs/zerolog/log"
 	"github.com/sirupsen/logrus"
@@ -41,6 +42,13 @@ func logrusLogger(email string) {
 func zerologLogger(phoneNumber string) {
 	// ruleid: log.go.zerolog
 	zlog.Info().Str("to", phoneNumber).Msg("otp sent")
+}
+
+// A key names the value only when the value does not say what it is:
+// the listen address is not a postal address.
+func zerologListen(l net.Listener) {
+	// ok: log.go.zerolog
+	zlog.Info().Str("address", l.Addr().String()).Msg("Started listening")
 }
 
 func zapSugared(logger *zap.Logger, email string, orderID int) {

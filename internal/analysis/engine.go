@@ -1198,7 +1198,7 @@ func (a *analyzer) step(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 		// ValidationError("Email is required")}) does not hold that data.
 		untyped := in.Owner == ""
 		if _, fs := a.opts.Schema.Field(in.Owner, in.Field); !errorValue(fn, st.defs, val) && (untyped || (fs == detect.FieldUnknown && !a.opts.Schema.KnownType(in.Owner))) {
-			if m, ok := a.opts.Names.Key(in.Field); ok {
+			if m, ok := a.opts.Names.Key(in.Field); ok && !a.keyContradicted(fn, st.defs, val, m.DataType) {
 				f := st.mutation(&fact{dt: m.DataType, param: -1, src: in.Pos, desc: fmt.Sprintf("key %q", in.Field), path: []ir.Pos{in.Pos}, conf: m.Conf, stored: in.Field})
 				for _, w := range st.pt.mutated(obj) {
 					changed = st.add(w, f) || changed
@@ -1302,7 +1302,7 @@ func (a *analyzer) keyLabels(fn *ir.Func, defs []int, in *ir.Instr, recvOff int)
 		if !ok {
 			continue
 		}
-		if m, ok := a.opts.Names.Key(key); ok {
+		if m, ok := a.opts.Names.Key(key); ok && !a.keyContradicted(fn, defs, in.Args[i+1], m.DataType) {
 			if out == nil {
 				out = map[int][]*fact{}
 			}
@@ -1758,7 +1758,9 @@ func (a *analyzer) call(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 	}
 	if nonRecv >= 1 && in.Dst >= 0 && isGetterName(c.Name) {
 		if key, ok := constOf(fn, st.defs, in.Args[recvOff]); ok {
-			if m, ok := a.opts.Names.Key(key); ok {
+			// A value passed after the key (slog.String("address", v))
+			// may say it is something else.
+			if m, ok := a.opts.Names.Key(key); ok && (recvOff+1 >= len(in.Args) || !a.keyContradicted(fn, st.defs, in.Args[recvOff+1], m.DataType)) {
 				changed = st.add(in.Dst, &fact{dt: m.DataType, param: -1, src: in.Pos, desc: fmt.Sprintf("%s(%q)", c.Name, key), path: []ir.Pos{in.Pos}, conf: m.Conf}) || changed
 			}
 		}
@@ -2084,6 +2086,75 @@ func errorValue(fn *ir.Func, defs []int, v ir.VarID) bool {
 			return strings.HasSuffix(n, "Error") || strings.HasSuffix(n, "Exception")
 		}
 		return false
+	}
+	return false
+}
+
+// selfDescribing are calls and fields whose value is a network location,
+// by name with any get prefix, lower-cased: in
+// Str("address", l.Addr().String()) the value is the listen address, not
+// the postal address the key names.
+var selfDescribing = map[string]bool{
+	"addr": true, "localaddr": true, "remoteaddr": true, "listenaddr": true, "serveraddr": true, "bindaddr": true,
+	"localaddress": true, "remoteaddress": true, "listenaddress": true, "serveraddress": true, "bindaddress": true,
+	"socketaddress": true, "inetaddress": true, "host": true, "hostname": true, "hostport": true, "hoststring": true,
+	"url": true, "uri": true, "requesturi": true, "requesturl": true, "baseurl": true, "port": true, "endpoint": true,
+}
+
+// stringers render the value they are called on: l.Addr().String() is
+// what l.Addr() is.
+var stringers = map[string]bool{"String": true, "toString": true, "description": true, "__str__": true}
+
+// placeholders are literals that stand in for a value, not hold one.
+var placeholders = map[string]bool{"true": true, "false": true, "yes": true, "no": true, "none": true, "null": true, "nil": true, "unknown": true, "n/a": true, "na": true, "-": true, "redacted": true, "hidden": true}
+
+// notData reports whether a literal cannot be the data its key names:
+// empty, a number, a boolean or a placeholder. A hard-coded
+// putString("password", "hunter2") is the secret itself.
+func notData(lit string) bool {
+	t := strings.ToLower(strings.TrimSpace(lit))
+	if t == "" || placeholders[t] {
+		return true
+	}
+	_, err := strconv.ParseFloat(t, 64)
+	return err == nil
+}
+
+// keyContradicted reports whether the value v says it is not the data
+// type dt its key names: a literal that is not data, a call or field that names a network
+// location (Addr(), RemoteAddr, Host, URL, Port), or a variable on the
+// way whose own name is another data type (Str("email", phone)). The key
+// labels only values that do not say what they are.
+func (a *analyzer) keyContradicted(fn *ir.Func, defs []int, v ir.VarID, dt string) bool {
+	for depth := 0; depth < 6 && v >= 0 && int(v) < len(fn.Vars); depth++ {
+		vr := &fn.Vars[v]
+		if vr.Const != nil {
+			return notData(*vr.Const)
+		}
+		if vr.Name != "" {
+			if m, ok := a.opts.Names.Key(vr.Name); ok && m.DataType != dt {
+				return true
+			}
+		}
+		if int(v) >= len(defs) || defs[v] < 0 {
+			return false
+		}
+		in := &fn.Instrs[defs[v]]
+		switch {
+		case in.Op == ir.OpAssign && len(in.Args) == 1:
+			v = in.Args[0]
+		case in.Op == ir.OpLoad && in.Field != "":
+			return selfDescribing[strings.ToLower(in.Field)]
+		case in.Op == ir.OpCall && in.Call != nil:
+			if stringers[in.Call.Name] && in.Call.HasRecv && len(in.Args) == 1 {
+				v = in.Args[0]
+				continue
+			}
+			n := strings.ToLower(in.Call.Name)
+			return selfDescribing[n] || strings.HasPrefix(n, "get") && selfDescribing[n[3:]]
+		default:
+			return false
+		}
 	}
 	return false
 }

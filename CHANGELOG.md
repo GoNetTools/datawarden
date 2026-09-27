@@ -50,6 +50,12 @@ All notable changes to datawarden are documented here. The format follows [Keep 
 
 ### Fixed
 
+- A key no longer labels a value that says what it is (#34). `Str("address", l.Addr().String())` is the listen address, not a postal address. The key is ignored when the value is:
+  - a call or field that names a network location (`Addr()`, `RemoteAddr`, `Host`, `URL`, `Port`, `Endpoint`, also through `String()`);
+  - a variable whose own name is another data type (`Str("email", phone)` is a phone);
+  - a literal that cannot be data (empty, a number, a boolean or a placeholder such as `unknown`). A hard-coded `putString("password", "hunter2")` is still reported.
+
+  This removes the gotify finding from the issue and vulnshop's false positive on `localStorage.setItem("emailOptIn", "true")`. The cache format changes, so the first scan after upgrading is a full one.
 - Scanning the same code twice gives the same report (#53). The analysis keeps one fact per data type in each variable and caps some lists. At equal confidence it kept whichever candidate arrived first, and the arrival order followed Go's randomised map iteration. So a flow's source, its path, and on large projects whether some flows were reported at all changed from run to run: saleor gave 597 to 600 flows. Every such choice now follows a fixed order: higher confidence, then an unguarded path, a fact seeded by the variable's own name, the earliest source, the shortest path. A full list keeps its best entries instead of its first ones. As a result:
   - gotify/server gains two violations of a kind already reported one line earlier (a username in a zerolog warning).
   - A data loader's `load(key)` no longer counts as returning its key (`AppByTokenLoader(ctx).load(token)` is an app), which removes a credential false positive on saleor (an auth token that seemed to reach a tax-calculation log) and two more that keeping the best entries would have surfaced.

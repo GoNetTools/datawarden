@@ -87,7 +87,7 @@ cases:
   - name: vulnshop
     dir: vulnshop
     langs: [go, typescript, kotlin, java, python, swift]
-    min_precision: 0.96
+    min_precision: 1.0
     min_recall: 0.93
     flows:
       # Go API
