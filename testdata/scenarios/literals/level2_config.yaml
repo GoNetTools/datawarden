@@ -1,0 +1,8 @@
+# Service configuration with a support contact and a test account.
+service:
+  name: checkout
+  support_contact: minh.anh.vo@teamchat-demo.com
+  retries: 3
+qa:
+  test_customer_ssn: 165-74-0316
+  build_number: 2026-09-29

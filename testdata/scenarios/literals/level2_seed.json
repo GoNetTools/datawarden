@@ -1,0 +1,19 @@
+{
+  "tenants": [
+    {
+      "id": "t-001",
+      "billing": {
+        "owner": { "name": "Tran Minh Duc", "contact": { "email": "duc.tran.biz@orbitmail-demo.com" } },
+        "payment": { "card": "4916804899677876", "expires": "08/29" },
+        "payout": { "iban": "NL32ABNA7446425271" }
+      }
+    },
+    {
+      "id": "t-002",
+      "billing": {
+        "owner": { "name": "Demo Tenant", "contact": { "email": "billing@example.org" } },
+        "payment": { "card": "4242424242424242", "expires": "01/30" }
+      }
+    }
+  ]
+}

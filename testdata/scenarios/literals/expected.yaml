@@ -1,0 +1,43 @@
+# What `datawarden scan --literals-only testdata/scenarios/literals` should report.
+# data_type is the taxonomy id. `not_reported` lists look-alikes that must not be reported.
+# Levels: 1 plain CSV columns, 2 nested JSON / YAML config, 3 SQL with separators and grouped IBANs,
+# 4 values inside prose next to non-personal look-alikes.
+findings:
+  - {file: level1_customers.csv, line: 2, data_type: credit_card, value: "4539684726395711"}
+  - {file: level1_customers.csv, line: 3, data_type: credit_card, value: "5425202762245726"}
+  - {file: level2_seed.json, line: 7, data_type: credit_card, value: "4916804899677876"}
+  - {file: level3_fixtures.sql, line: 4, data_type: credit_card, value: "2221-0288-7754-3678"}
+  - {file: level3_fixtures.sql, line: 5, data_type: credit_card, value: "3782 309506 48938"}
+  - {file: level4_notes.md, line: 4, data_type: credit_card, value: "4539 6847 2639 5711"}
+  - {file: level1_customers.csv, line: 2, data_type: bank_account, value: "DE27119710245332246884"}
+  - {file: level1_customers.csv, line: 3, data_type: bank_account, value: "FR2499290196248788190204831"}
+  - {file: level2_seed.json, line: 8, data_type: bank_account, value: "NL32ABNA7446425271"}
+  - {file: level3_fixtures.sql, line: 4, data_type: bank_account, value: "DE27 1197 1024 5332 2468 84"}
+  - {file: level4_notes.md, line: 4, data_type: bank_account, value: "FR24 9929 0196 2487 8819 0204 831"}
+  - {file: level1_customers.csv, line: 2, data_type: us_ssn, value: "440-32-3369"}
+  - {file: level1_customers.csv, line: 3, data_type: us_ssn, value: "307-20-5316"}
+  - {file: level2_config.yaml, line: 7, data_type: us_ssn, value: "165-74-0316"}
+  - {file: level3_fixtures.sql, line: 6, data_type: us_ssn, value: "002-53-5920"}
+  - {file: level1_customers.csv, line: 2, data_type: email, value: "linh.nguyen82@quickmail-demo.com"}
+  - {file: level1_customers.csv, line: 3, data_type: email, value: "hoa.le.1990@postbox-demo.com"}
+  - {file: level2_seed.json, line: 6, data_type: email, value: "duc.tran.biz@orbitmail-demo.com"}
+  - {file: level2_config.yaml, line: 4, data_type: email, value: "minh.anh.vo@teamchat-demo.com"}
+  - {file: level3_fixtures.sql, line: 4, data_type: email, value: "bao.pham77@ledgermail-demo.com"}
+  - {file: level3_fixtures.sql, line: 5, data_type: email, value: "trang.hoang@ledgermail-demo.com"}
+  - {file: level4_notes.md, line: 3, data_type: email, value: "tam.vo.hcm@quickmail-demo.com"}
+not_reported:
+  - {file: level1_customers.csv, line: 4, value: "4111111111111111"}
+  - {file: level1_customers.csv, line: 4, value: "123-45-6789"}
+  - {file: level1_customers.csv, line: 4, value: "test@example.com"}
+  - {file: level2_seed.json, line: 15, value: "4242424242424242"}
+  - {file: level2_seed.json, line: 14, value: "billing@example.org"}
+  - {file: level3_fixtures.sql, line: 9, value: "4539567730222925"}
+  - {file: level3_fixtures.sql, line: 9, value: "DE54611003851861547264"}
+  - {file: level3_fixtures.sql, line: 10, value: "666-12-3456"}
+  - {file: level3_fixtures.sql, line: 10, value: "900-12-3456"}
+  - {file: level3_fixtures.sql, line: 10, value: "000-12-3456"}
+  - {file: level4_notes.md, line: 8, value: "7f3c2a90-5b1e-4d8e-9c2f-1a2b3c4d5e6f"}
+  - {file: level4_notes.md, line: 10, value: "1234567812345678"}
+  - {file: level4_notes.md, line: 11, value: "support@quickmail-demo.com"}
+  - {file: level4_notes.md, line: 12, value: "4242 4242 4242 4242"}
+  - {file: level2_config.yaml, line: 8, value: "2026-09-29"}
