@@ -16,6 +16,17 @@ import (
 
 func pos(line int) ir.Pos { return ir.Pos{File: "a.kt", Line: line} }
 
+// builtinHeuristics are the name heuristics shipped with the rules, for
+// tests that fake the rules themselves.
+func builtinHeuristics(tb testing.TB) Heuristics {
+	tb.Helper()
+	h, err := rules.BuiltinHeuristics()
+	if err != nil {
+		tb.Fatal(err)
+	}
+	return h
+}
+
 // helper(x) = mask(x) ; recurse(x) calls itself and logs x ; caller passes phone.
 func TestSummariesAndRecursion(t *testing.T) {
 	rs, err := rules.Load(nil)
@@ -60,7 +71,7 @@ func TestSummariesAndRecursion(t *testing.T) {
 
 	names := detect.NewClassifier(detect.DefaultTaxonomy())
 	eng := Engine{Names: names}
-	res, err := eng.Analyze(context.Background(), []*ir.Func{caller, rec, mask, fill}, Input{Rules: rs, Schema: detect.BuildSchema(names, nil)})
+	res, err := eng.Analyze(context.Background(), []*ir.Func{caller, rec, mask, fill}, Input{Rules: rs, Heuristics: rs.Heuristics(), Schema: detect.BuildSchema(names, nil)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +124,7 @@ func TestEngineWithFakeRules(t *testing.T) {
 	email := fn.AddParam("email", "string", pos(1))
 	fn.Emit(ir.Instr{Op: ir.OpCall, Dst: fn.Temp(pos(2)), Args: []ir.VarID{email}, Call: &ir.Call{Name: "leak"}, Pos: pos(2)})
 	names := detect.NewClassifier(detect.DefaultTaxonomy())
-	res, err := Engine{Names: names}.Analyze(context.Background(), []*ir.Func{fn}, Input{Rules: fakeRules{}, Schema: detect.BuildSchema(names, nil)})
+	res, err := Engine{Names: names}.Analyze(context.Background(), []*ir.Func{fn}, Input{Rules: fakeRules{}, Heuristics: builtinHeuristics(t), Schema: detect.BuildSchema(names, nil)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +147,7 @@ func TestMapKeyLabelsValueDespiteSchemaField(t *testing.T) {
 	m := fn.Named("payload", "map[string]string", pos(2))
 	fn.Emit(ir.Instr{Op: ir.OpStore, Dst: ir.NoVar, Args: []ir.VarID{m, value}, Field: "email", Pos: pos(2)})
 	fn.Emit(ir.Instr{Op: ir.OpCall, Dst: fn.Temp(pos(3)), Args: []ir.VarID{m}, Call: &ir.Call{Name: "leak"}, Pos: pos(3)})
-	res, err := Engine{Names: names}.Analyze(context.Background(), []*ir.Func{fn}, Input{Rules: fakeRules{}, Schema: schema})
+	res, err := Engine{Names: names}.Analyze(context.Background(), []*ir.Func{fn}, Input{Rules: fakeRules{}, Heuristics: builtinHeuristics(t), Schema: schema})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -217,7 +228,7 @@ func TestNetworkResponseIsNotTheRequest(t *testing.T) {
 	resp := fn.Temp(pos(2))
 	fn.Emit(ir.Instr{Op: ir.OpCall, Dst: resp, Args: []ir.VarID{url, password}, Call: &ir.Call{Name: "post"}, Pos: pos(2)})
 	fn.Emit(ir.Instr{Op: ir.OpCall, Dst: fn.Temp(pos(3)), Args: []ir.VarID{resp}, Call: &ir.Call{Name: "leak"}, Pos: pos(3)})
-	res, err := Engine{Names: names}.Analyze(context.Background(), []*ir.Func{fn}, Input{Rules: bothRules{}, Schema: detect.BuildSchema(names, nil)})
+	res, err := Engine{Names: names}.Analyze(context.Background(), []*ir.Func{fn}, Input{Rules: bothRules{}, Heuristics: builtinHeuristics(t), Schema: detect.BuildSchema(names, nil)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +247,7 @@ func TestDestinationHostAndFirstParty(t *testing.T) {
 		url := fn.ConstVar(u, pos(2+i))
 		fn.Emit(ir.Instr{Op: ir.OpCall, Dst: fn.Temp(pos(2 + i)), Args: []ir.VarID{url, email}, Call: &ir.Call{Name: "post"}, Pos: pos(2 + i)})
 	}
-	res, err := Engine{Names: names}.Analyze(context.Background(), []*ir.Func{fn}, Input{Rules: httpRules{}, Schema: detect.BuildSchema(names, nil), FirstPartyDomains: []string{".acme.example"}})
+	res, err := Engine{Names: names}.Analyze(context.Background(), []*ir.Func{fn}, Input{Rules: httpRules{}, Heuristics: builtinHeuristics(t), Schema: detect.BuildSchema(names, nil), FirstPartyDomains: []string{".acme.example"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,7 +268,7 @@ func TestCachedSummaryOfUnchangedCallee(t *testing.T) {
 	email := fn.AddParam("email", "string", pos(1))
 	fn.Emit(ir.Instr{Op: ir.OpCall, Dst: fn.Temp(pos(2)), Args: []ir.VarID{email}, Call: &ir.Call{Name: "send", Target: "p.send"}, Pos: pos(2)})
 	cached := &Summary{ParamSink: map[int][]SinkHit{0: {{Rule: "fake.leak", Dest: finding.Destination{Kind: "third_party"}, Sink: ir.Pos{File: "b.go", Line: 9}, Func: "p.send", Conf: 1}}}}
-	res, err := Engine{Names: names}.Analyze(context.Background(), []*ir.Func{fn}, Input{Rules: fakeRules{}, Schema: detect.BuildSchema(names, nil),
+	res, err := Engine{Names: names}.Analyze(context.Background(), []*ir.Func{fn}, Input{Rules: fakeRules{}, Heuristics: builtinHeuristics(t), Schema: detect.BuildSchema(names, nil),
 		Lookup: func(id string) *Summary {
 			if id == "p.send" {
 				return cached
@@ -294,5 +305,35 @@ func TestRedefinitions(t *testing.T) {
 		if got[v] != w {
 			t.Errorf("var %d (%s): redefinition = %v, want %v", v, f.Vars[v].Name, got[v], w)
 		}
+	}
+}
+
+// Every table the engine reads exists in the built-in heuristics, so a
+// renamed table cannot silently empty a heuristic.
+func TestHeuristicTablesExist(t *testing.T) {
+	h := builtinHeuristics(t)
+	for _, table := range heuristicTables {
+		if len(h.Words(table)) == 0 {
+			if _, ok := h.Lookup(table, "encoding/json.Unmarshal"); !ok {
+				if _, ok := h.Lookup(table, "masked"); !ok {
+					t.Errorf("table %s is empty in the built-in heuristics", table)
+				}
+			}
+		}
+	}
+	w := words{h}
+	if !w.isMutator("putString") || w.isMutator("size") || !w.isGetterName("getEmail") || !w.dataFreeName("rowCount") || w.dataFreeName("account") ||
+		!w.notData("true") || w.notData("hunter2") || !w.handleType("*gorm.io/gorm.DB") || !w.consentName("hasConsent") || w.consentName("hasEmail") {
+		t.Error("word heuristics")
+	}
+	if i, ok := w.decodeInto("encoding/json.Unmarshal"); !ok || i != 1 {
+		t.Error("decodeInto")
+	}
+	if !w.runsReceiver(&ir.Call{Name: "invoke"}, 1, false) || w.runsReceiver(&ir.Call{Name: "add"}, 1, false) || w.runsReceiver(&ir.Call{Name: "forEach"}, 1, true) {
+		t.Error("runsReceiver")
+	}
+	none := words{noHeuristics{}}
+	if none.isMutator("put") || none.runsCallbackNow(&ir.Call{Name: "forEach"}) {
+		t.Error("no heuristics means no name matches")
 	}
 }

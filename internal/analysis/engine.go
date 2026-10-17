@@ -92,6 +92,9 @@ type NameClassifier interface {
 type Input struct {
 	Rules  RuleMatcher
 	Schema SchemaIndex
+	// Heuristics are the name heuristics (see Heuristics); nil means
+	// none, so only the rules describe library calls.
+	Heuristics Heuristics
 	// Lookup returns a cached summary for a function that is not part of
 	// this run (PR mode), or nil.
 	Lookup func(id string) *Summary
@@ -500,6 +503,7 @@ func derive(f *fact, pos ir.Pos, decay float64, xf ...string) *fact {
 }
 
 type analyzer struct {
+	h    words // the name heuristics
 	cha  *hierarchy
 	flow *closureFlow
 	// guards are, per function, the consent checks guarding each block:
@@ -522,7 +526,10 @@ func Analyze(ctx context.Context, funcs []*ir.Func, opts Options) (*Result, erro
 	if opts.Rules == nil || opts.Schema == nil || opts.Names == nil {
 		return nil, errors.New("analysis: Rules, Schema and Names are required")
 	}
-	a := &analyzer{cha: newHierarchy(opts.Classes), opts: opts, summaries: map[string]*Summary{}, digests: map[string]string{}, funcs: map[string]*ir.Func{}, flows: map[string]*finding.Flow{},
+	if opts.Heuristics == nil {
+		opts.Heuristics = noHeuristics{}
+	}
+	a := &analyzer{cha: newHierarchy(opts.Classes), opts: opts, h: words{opts.Heuristics}, summaries: map[string]*Summary{}, digests: map[string]string{}, funcs: map[string]*ir.Func{}, flows: map[string]*finding.Flow{},
 		checks: map[string]map[ir.VarID]check{}}
 	// Branches on checks (isMasked(v), isValidEmail(v)) give the checked
 	// value a new version where they pass; the caller's functions are not
@@ -618,11 +625,11 @@ func Analyze(ctx context.Context, funcs []*ir.Func, opts Options) (*Result, erro
 // function: branches on a consent check (or on a helper returning one) in
 // the function, and the checks guarding every call of it.
 func (a *analyzer) consentGuards(funcs []*ir.Func) map[string][][]string {
-	helpers := consentHelpers(funcs)
+	helpers := consentHelpers(a.h, funcs)
 	blocks := map[string][][]string{}
 	sites := map[string][]callSite{}
 	for _, f := range funcs {
-		blocks[f.ID] = guards(f, helpers)
+		blocks[f.ID] = guards(a.h, f, helpers)
 		for i := range f.Instrs {
 			in := &f.Instrs[i]
 			var ts []string
@@ -904,7 +911,7 @@ func (a *analyzer) mutates(lang string, c *ir.Call) bool {
 	case rules.EffectBuilder:
 		return true
 	case "":
-		return isMutator(c.Name)
+		return a.h.isMutator(c.Name)
 	}
 	return false
 }
@@ -1096,7 +1103,7 @@ func (a *analyzer) fieldFacts(st *state, fn *ir.Func, obj ir.VarID, owner, field
 	known := a.opts.Schema.KnownType(owner)
 	for _, f := range st.of(obj) {
 		switch {
-		case f.stored != "" && !wholeValueFields[name]:
+		case f.stored != "" && !a.h.has(tWholeValueFields, name):
 			// Held by one of the object's fields: read from st.stores
 			// above when it is this one.
 		case f.dt == "" && f.at == 0:
@@ -1141,7 +1148,7 @@ func (a *analyzer) step(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 		if ck, ok := st.checks[in.Dst]; ok {
 			return a.checkedValue(st, in, ck)
 		}
-		if in.Dst >= 0 && dataFreeName(fn.Vars[in.Dst].Name) && !fn.Vars[in.Dst].Cell {
+		if in.Dst >= 0 && a.h.dataFreeName(fn.Vars[in.Dst].Name) && !fn.Vars[in.Dst].Cell {
 			return false // a status or count computed from the data
 		}
 		for _, arg := range in.Args {
@@ -1333,47 +1340,11 @@ func (a *analyzer) keyLabels(fn *ir.Func, defs []int, in *ir.Instr, recvOff int)
 	return out
 }
 
-var getterVerbs = []string{"get", "opt", "form", "postform", "query", "param", "header", "lookup", "read", "cookie", "extra", "value", "object", "string"}
-
-// wholeValueFields are properties that render the whole object
-// (user.description in Swift): they hold what any of its fields holds.
-var wholeValueFields = map[string]bool{"description": true, "debugDescription": true, "dictionaryRepresentation": true, "allValues": true}
-
-// dataFreeSuffixes end the names of variables that hold a status, a count
-// or a flag computed from data, not the data: derivationStatus, rowCount.
-var dataFreeSuffixes = []string{"status", "count", "length", "size", "success", "succeeded", "exists", "ok"}
-
-func dataFreeName(name string) bool {
-	n := strings.ToLower(name)
-	for _, s := range dataFreeSuffixes {
-		if n == s || strings.HasSuffix(n, s) && len(n) > len(s) && (n[len(n)-len(s)-1] == '_' || name[len(name)-len(s)] >= 'A' && name[len(name)-len(s)] <= 'Z') {
-			return true
-		}
-	}
-	return false
-}
-
-// publicParts are accessors that return the public part of what they are
-// called on: a key entry's certificate or public key is not its private
-// key.
-var publicParts = map[string]bool{"getcertificate": true, "getcertificatechain": true, "getpublickey": true, "getpublic": true, "publickey": true, "certificate": true}
-
-// decodeInto maps decoders to the argument they fill (receiver included).
-var decodeInto = map[string]int{
-	"encoding/json.Unmarshal":                  1,
-	"encoding/json.Decoder.Decode":             1,
-	"encoding/xml.Unmarshal":                   1,
-	"encoding/xml.Decoder.Decode":              1,
-	"encoding/gob.Decoder.Decode":              1,
-	"gopkg.in/yaml.v3.Unmarshal":               1,
-	"github.com/gorilla/schema.Decoder.Decode": 1,
-}
-
 // keyedRead reports whether a call reads a value under a constant key:
 // a getter given a string literal first (form.get("page"),
 // r.FormValue("ssn"), getParameter("q")), or chi.URLParam(r, "id").
 func (a *analyzer) keyedRead(fn *ir.Func, defs []int, in *ir.Instr, recvOff int) bool {
-	if in.Call == nil || !isGetterName(in.Call.Name) && !strings.HasSuffix(in.Call.Name, "Param") {
+	if in.Call == nil || !a.h.isGetterName(in.Call.Name) && !strings.HasSuffix(in.Call.Name, "Param") {
 		return false
 	}
 	for i := recvOff; i < len(in.Args); i++ {
@@ -1423,16 +1394,6 @@ func accessPath(fn *ir.Func, defs []int, v ir.VarID) string {
 		v = in.Args[0]
 	}
 	return ""
-}
-
-func isGetterName(name string) bool {
-	n := strings.ToLower(name)
-	for _, v := range getterVerbs {
-		if strings.HasPrefix(n, v) {
-			return true
-		}
-	}
-	return false
 }
 
 func calleeLabel(c *ir.Call) string {
@@ -1717,16 +1678,6 @@ func (a *analyzer) emit(f *fact, h SinkHit, via []ir.Pos) {
 	a.flows[k] = fl
 }
 
-// requestMethods send a request through an HTTP client and return its
-// response.
-var requestMethods = map[string]bool{
-	"send_request": true, "sendrequest": true, "request": true, "urlopen": true, "fetch": true,
-	"post": true, "patch": true, "post_json": true, "postjson": true,
-}
-
-// loaderMethods look a value up by key on a data loader.
-var loaderMethods = map[string]bool{"load": true, "load_many": true, "loadmany": true}
-
 // dataFreeCalls return a size, a count, a flag or a type, not the data
 // they are given.
 // buildsRequest reports whether a request-method call only builds a
@@ -1734,13 +1685,6 @@ var loaderMethods = map[string]bool{"load": true, "load_many": true, "loadmany":
 // the request, and is sent by the call that later executes it.
 func buildsRequest(c *ir.Call) bool {
 	return strings.Contains(strings.ToLower(c.RecvType+"|"+c.RecvText), "builder")
-}
-
-var dataFreeCalls = map[string]bool{
-	"len": true, "count": true, "size": true, "length": true, "isempty": true, "isnotempty": true,
-	"isinstance": true, "issubclass": true, "hasattr": true, "callable": true, "type": true, "typeof": true,
-	"bool": true, "exists": true, "contains": true, "containskey": true, "startswith": true, "endswith": true,
-	"hasprefix": true, "hassuffix": true, "isvalid": true, "is_valid": true, "equals": true, "equal": true,
 }
 
 // errorValue reports whether v is an exception or error constructed in fn
@@ -1765,36 +1709,6 @@ func errorValue(fn *ir.Func, defs []int, v ir.VarID) bool {
 	return false
 }
 
-// selfDescribing are calls and fields whose value is a network location,
-// by name with any get prefix, lower-cased: in
-// Str("address", l.Addr().String()) the value is the listen address, not
-// the postal address the key names.
-var selfDescribing = map[string]bool{
-	"addr": true, "localaddr": true, "remoteaddr": true, "listenaddr": true, "serveraddr": true, "bindaddr": true,
-	"localaddress": true, "remoteaddress": true, "listenaddress": true, "serveraddress": true, "bindaddress": true,
-	"socketaddress": true, "inetaddress": true, "host": true, "hostname": true, "hostport": true, "hoststring": true,
-	"url": true, "uri": true, "requesturi": true, "requesturl": true, "baseurl": true, "port": true, "endpoint": true,
-}
-
-// stringers render the value they are called on: l.Addr().String() is
-// what l.Addr() is.
-var stringers = map[string]bool{"String": true, "toString": true, "description": true, "__str__": true}
-
-// placeholders are literals that stand in for a value, not hold one.
-var placeholders = map[string]bool{"true": true, "false": true, "yes": true, "no": true, "none": true, "null": true, "nil": true, "unknown": true, "n/a": true, "na": true, "-": true, "redacted": true, "hidden": true}
-
-// notData reports whether a literal cannot be the data its key names:
-// empty, a number, a boolean or a placeholder. A hard-coded
-// putString("password", "hunter2") is the secret itself.
-func notData(lit string) bool {
-	t := strings.ToLower(strings.TrimSpace(lit))
-	if t == "" || placeholders[t] {
-		return true
-	}
-	_, err := strconv.ParseFloat(t, 64)
-	return err == nil
-}
-
 // keyContradicted reports whether the value v says it is not the data
 // type dt its key names: a literal that is not data, a call or field that names a network
 // location (Addr(), RemoteAddr, Host, URL, Port), or a variable on the
@@ -1804,7 +1718,7 @@ func (a *analyzer) keyContradicted(fn *ir.Func, defs []int, v ir.VarID, dt strin
 	for depth := 0; depth < 6 && v >= 0 && int(v) < len(fn.Vars); depth++ {
 		vr := &fn.Vars[v]
 		if vr.Const != nil {
-			return notData(*vr.Const)
+			return a.h.notData(*vr.Const)
 		}
 		if vr.Name != "" {
 			if m, ok := a.opts.Names.Key(vr.Name); ok && m.DataType != dt {
@@ -1819,39 +1733,19 @@ func (a *analyzer) keyContradicted(fn *ir.Func, defs []int, v ir.VarID, dt strin
 		case in.Op == ir.OpAssign && len(in.Args) == 1:
 			v = in.Args[0]
 		case in.Op == ir.OpLoad && in.Field != "":
-			return selfDescribing[strings.ToLower(in.Field)]
+			return a.h.has(tSelfDescribing, strings.ToLower(in.Field))
 		case in.Op == ir.OpCall && in.Call != nil:
-			if stringers[in.Call.Name] && in.Call.HasRecv && len(in.Args) == 1 {
+			if a.h.has(tStringers, in.Call.Name) && in.Call.HasRecv && len(in.Args) == 1 {
 				v = in.Args[0]
 				continue
 			}
 			n := strings.ToLower(in.Call.Name)
-			return selfDescribing[n] || strings.HasPrefix(n, "get") && selfDescribing[n[3:]]
+			return a.h.has(tSelfDescribing, n) || strings.HasPrefix(n, "get") && a.h.has(tSelfDescribing, n[3:])
 		default:
 			return false
 		}
 	}
 	return false
-}
-
-// handleTypes are library types of connections, clients, loggers and
-// routers: shared handles that calls pass data through, not hold.
-var handleTypes = map[string]bool{
-	"gorm.io/gorm.DB": true, "database/sql.DB": true, "database/sql.Tx": true, "database/sql.Conn": true,
-	"database/sql.Stmt": true, "github.com/jmoiron/sqlx.DB": true, "github.com/jmoiron/sqlx.Tx": true,
-	"github.com/jackc/pgx/v5/pgxpool.Pool": true, "github.com/jackc/pgx/v5.Conn": true, "github.com/jackc/pgx/v4/pgxpool.Pool": true,
-	"go.mongodb.org/mongo-driver/mongo.Client": true, "go.mongodb.org/mongo-driver/mongo.Database": true,
-	"go.mongodb.org/mongo-driver/mongo.Collection": true, "github.com/redis/go-redis/v9.Client": true,
-	"github.com/go-redis/redis/v8.Client": true, "net/http.Client": true, "net/http.ServeMux": true,
-	"github.com/gin-gonic/gin.Engine": true, "github.com/gin-gonic/gin.RouterGroup": true,
-	"github.com/labstack/echo/v4.Echo": true, "github.com/labstack/echo/v4.Group": true, "github.com/gorilla/mux.Router": true,
-	"github.com/go-chi/chi/v5.Mux": true, "github.com/rs/zerolog.Logger": true, "go.uber.org/zap.Logger": true,
-	"go.uber.org/zap.SugaredLogger": true, "log/slog.Logger": true, "github.com/sirupsen/logrus.Logger": true,
-	"google.golang.org/grpc.ClientConn": true,
-}
-
-func handleType(t string) bool {
-	return t != "" && handleTypes[strings.TrimLeft(t, "*&")]
 }
 
 // copiedType is the declared type of v, or of the value it is a copy of
@@ -1908,37 +1802,6 @@ func (a *analyzer) chainedSink(fn *ir.Func, defs []int, v ir.VarID, id string) b
 	return false
 }
 
-// wholeValueMethods render or copy a whole object: what any of its fields
-// holds is in the result.
-var wholeValueMethods = map[string]bool{
-	"tostring": true, "string": true, "description": true, "json": true, "tojson": true, "dump": true, "dumps": true,
-	"serialize": true, "encode": true, "marshal": true, "copy": true, "clone": true, "build": true, "get": true,
-	"values": true, "entries": true, "items": true, "iterator": true, "asdict": true, "dict": true, "todict": true,
-	"tomap": true, "model_dump": true, "stringify": true, "format": true, "unwrap": true, "orelse": true, "await": true,
-}
-
-// readsPart reports whether an unresolved method call on an object may
-// return what the object's part (field or key) holds: a read with that
-// constant key (ctx.Get("user")), a read with a key not known here, a
-// method named after the part (getEmail() for email), or one rendering
-// the whole object (toString()). ctx.ClientIP() does not return the user
-// put under "user".
-func readsPart(fn *ir.Func, defs []int, in *ir.Instr, part string) bool {
-	name := strings.ToLower(in.Call.Name)
-	if !isGetterName(name) && isMutator(name) {
-		return true // a builder call returns its receiver
-	}
-	if len(in.Args) > 1 {
-		k, ok := constOf(fn, defs, in.Args[1])
-		return !ok || k == part || normName(k) == normName(part)
-	}
-	if wholeValueMethods[name] {
-		return true
-	}
-	p := normName(part)
-	return p != "" && strings.Contains(normName(name), p)
-}
-
 // normName lowercases a name and drops its separators: first_name and
 // firstName are the same.
 func normName(s string) string {
@@ -1960,20 +1823,4 @@ func getterField(name string) (string, bool) {
 		}
 	}
 	return "", false
-}
-
-var mutatorPrefixes = []string{"put", "add", "append", "set", "insert", "push", "write", "with", "field", "param", "header",
-	"body", "extra", "attr", "merge", "concat", "plus", "unshift", "enqueue", "offer", "store", "json", "form", "query", "arg", "str",
-	"int", "any", "object", "value", "update", "fill", "copy", "emit", "send", "post", "next", "resolve", "complete", "apply", "also", "let", "run"}
-
-// isMutator reports whether a method on an unknown receiver plausibly
-// stores its arguments into the receiver (builders, collections, bundles).
-func isMutator(name string) bool {
-	n := strings.ToLower(name)
-	for _, p := range mutatorPrefixes {
-		if strings.HasPrefix(n, p) {
-			return true
-		}
-	}
-	return false
 }

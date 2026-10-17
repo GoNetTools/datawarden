@@ -183,7 +183,7 @@ func TestMatch(t *testing.T) {
 // arg_is and arg_not restrict a sink to calls whose argument is a given
 // variable: fmt.Fprintf is a log only when it writes to os.Stderr.
 func TestArgConditions(t *testing.T) {
-	rs, err := parse([]byte(`
+	rs, _, err := parse([]byte(`
 - id: log.x.fprint
   lang: go
   call: fmt.Fprintf
@@ -218,7 +218,7 @@ func TestArgConditions(t *testing.T) {
 		"bad regex": "- {id: a.b, lang: go, call: f, arg_is: {0: '('}, dest: {kind: log}}\n",
 		"on source": "- {id: src.b, lang: go, kind: source, call: f, data_type: email, arg_not: {0: x}}\n",
 	} {
-		rs, err := parse([]byte(body), "t.yaml")
+		rs, _, err := parse([]byte(body), "t.yaml")
 		if err == nil {
 			_, err = NewSet(rs)
 		}
@@ -230,7 +230,7 @@ func TestArgConditions(t *testing.T) {
 
 // api rules model library calls: an effect, a return type, or both.
 func TestAPIRules(t *testing.T) {
-	rs, err := parse([]byte(`
+	rs, _, err := parse([]byte(`
 - id: api.x.builder
   kind: api
   lang: java
@@ -265,11 +265,72 @@ func TestAPIRules(t *testing.T) {
 		"sink fields":          "- {id: api.a.b, kind: api, lang: java, call: f, effect: none, dest: {kind: log}}\n",
 		"effect on a sink":     "- {id: log.a.b, lang: java, call: f, effect: none, dest: {kind: log}}\n",
 	} {
-		rs, err := parse([]byte(body), "t.yaml")
+		rs, _, err := parse([]byte(body), "t.yaml")
 		if err == nil {
 			_, err = NewSet(rs)
 		}
 		if err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
+// Heuristics are loaded with the rules: the built-in tables are all
+// present, a repository extends them, and mistakes are errors.
+func TestHeuristics(t *testing.T) {
+	set, err := Load(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := set.Heuristics()
+	for _, table := range HeuristicTables() {
+		if len(h.Words(table)) == 0 && len(h.Maps[table]) == 0 {
+			t.Errorf("built-in heuristics: table %s is empty", table)
+		}
+	}
+	if !h.Has("mutator_prefixes", "put") || h.Has("mutator_prefixes", "size") || h.Has("nope", "put") {
+		t.Error("Has")
+	}
+	if v, ok := h.Lookup("decode_into", "encoding/json.Unmarshal"); !ok || v != "1" {
+		t.Errorf("Lookup: %q %v", v, ok)
+	}
+	var none *Heuristics
+	if none.Has("mutator_prefixes", "put") || none.Words("mutator_prefixes") != nil {
+		t.Error("nil heuristics are empty")
+	}
+
+	// A repository's rule file extends the tables and changes the hash.
+	fsys := fstest.MapFS{".datawarden/rules/acme.yaml": &fstest.MapFile{Data: []byte(`
+heuristics:
+  mutator_prefixes: [attach, put]
+  transform_checks: {scrubbed: redacted, masked: tokenized}
+  decode_into: {com.acme.Codec.decode: 0}
+`)}}
+	ext, err := Load(fsys, ".datawarden/rules")
+	if err != nil {
+		t.Fatal(err)
+	}
+	eh := ext.Heuristics()
+	if !eh.Has("mutator_prefixes", "attach") || !eh.Has("mutator_prefixes", "put") || len(eh.Words("mutator_prefixes")) != len(h.Words("mutator_prefixes"))+1 {
+		t.Errorf("extended list: %v", eh.Words("mutator_prefixes"))
+	}
+	if v, _ := eh.Lookup("transform_checks", "scrubbed"); v != "redacted" {
+		t.Error("map entry added")
+	}
+	if v, _ := eh.Lookup("transform_checks", "masked"); v != "tokenized" {
+		t.Error("map entry overridden")
+	}
+	if ext.Hash() == set.Hash() {
+		t.Error("heuristics are part of the rule-set hash")
+	}
+	for name, body := range map[string]string{
+		"unknown table": "heuristics:\n  mutators: [put]\n",
+		"not a list":    "heuristics:\n  mutator_prefixes: put\n",
+		"not a map":     "heuristics:\n  transform_checks: [masked]\n",
+		"bad index":     "heuristics:\n  decode_into: {f: x}\n",
+		"not a mapping": "heuristics: [put]\n",
+	} {
+		if _, _, err := parse([]byte(body), "t.yaml"); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
 	}

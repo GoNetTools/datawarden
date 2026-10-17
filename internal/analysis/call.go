@@ -226,7 +226,7 @@ func (a *analyzer) callClosures(cs *callCtx, run []closure, first int, sourced [
 		// captures are read with every mutation, wherever it happens. The
 		// closure's parameters correspond to the call's other arguments
 		// (the receiver of apply or forEach first).
-		now := runsCallbackNow(c)
+		now := a.h.runsCallbackNow(c)
 		inputs := append([]*fact(nil), sourced...)
 		var others []ir.VarID
 		for j := range in.Args {
@@ -324,15 +324,15 @@ func (a *analyzer) callUnknown(cs *callCtx, remote, keyedRead bool, nameXf strin
 	// response, like a network sink's; a length, count or type check
 	// is a number or a flag.
 	lname := strings.ToLower(c.Name)
-	remote = remote || effect == rules.EffectSends || effect == "" && (c.HasRecv || c.RecvText != "") && requestMethods[lname] && !buildsRequest(c)
-	if effect == rules.EffectNone || effect == "" && dataFreeCalls[lname] {
+	remote = remote || effect == rules.EffectSends || effect == "" && (c.HasRecv || c.RecvText != "") && a.h.has(tRequestMethods, lname) && !buildsRequest(c)
+	if effect == rules.EffectNone || effect == "" && a.h.has(tDataFreeCalls, lname) {
 		return changed
 	}
 	// A data loader (AppByTokenLoader(ctx).load(token), GraphQL's
 	// DataLoader pattern) answers with the value stored under the key it
 	// is given, not with the key.
-	lookup := cs.recvOff == 1 && loaderMethods[lname] && strings.Contains(strings.ToLower(c.RecvText+"|"+c.RecvType+"|"+c.Callee), "loader")
-	if dst, ok := decodeInto[c.Callee]; ok && dst < len(in.Args) {
+	lookup := cs.recvOff == 1 && a.h.has(tLoaderMethods, lname) && strings.Contains(strings.ToLower(c.RecvText+"|"+c.RecvType+"|"+c.Callee), "loader")
+	if dst, ok := a.h.decodeInto(c.Callee); ok && dst < len(in.Args) {
 		// A decoder fills the value it is given with what it reads:
 		// json.NewDecoder(r.Body).Decode(&v), json.Unmarshal(b, &v).
 		for i := range in.Args {
@@ -355,7 +355,7 @@ func (a *analyzer) callUnknown(cs *callCtx, remote, keyedRead bool, nameXf strin
 				// request's reply is not the password.
 				continue
 			}
-			if i == 0 && cs.recvOff == 1 && f.stored != "" && !readsPart(fn, st.defs, in, f.stored) {
+			if i == 0 && cs.recvOff == 1 && f.stored != "" && !a.h.readsPart(fn, st.defs, in, f.stored) {
 				continue
 			}
 			if i == 0 && cs.recvOff == 1 && f.dt == requestData && keyedRead {
@@ -396,7 +396,7 @@ func (a *analyzer) schemaGetter(cs *callCtx) (skipRecv, changed bool) {
 	if !c.HasRecv || cs.recvOff != 1 || cs.nonRecv() != 0 {
 		return false, false
 	}
-	skipRecv = publicParts[strings.ToLower(c.Name)]
+	skipRecv = a.h.has(tPublicParts, strings.ToLower(c.Name))
 	if in.Args[0] < 0 {
 		return skipRecv, false
 	}
@@ -423,7 +423,7 @@ func (a *analyzer) mutateReceiver(cs *callCtx, f *fact) bool {
 	changed := false
 	r := in.Args[0]
 	for depth := 0; r >= 0 && depth < 8; depth++ {
-		if handleType(fn.Vars[r].Type) {
+		if a.h.handleType(fn.Vars[r].Type) {
 			// A connection or client is not changed by the data a query
 			// or request is given: db.Where(q, email) does not put the
 			// email into db.
@@ -457,7 +457,7 @@ func (a *analyzer) nameSources(cs *callCtx, skipRecv bool) bool {
 			changed = st.add(in.Dst, f) || changed
 		}
 	}
-	if cs.nonRecv() >= 1 && isGetterName(c.Name) {
+	if cs.nonRecv() >= 1 && a.h.isGetterName(c.Name) {
 		if key, ok := constOf(fn, st.defs, in.Args[cs.recvOff]); ok {
 			// A value passed after the key (slog.String("address", v))
 			// may say it is something else.

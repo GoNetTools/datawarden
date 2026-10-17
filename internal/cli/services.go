@@ -41,6 +41,8 @@ type RuleSet interface {
 	ByID(id string) *rules.Rule
 	All() []*rules.Rule
 	Hash() string
+	// Heuristics are the name heuristics loaded with the rules.
+	Heuristics() *rules.Heuristics
 }
 
 // RuleLoader loads the built-in rules merged with repository overrides

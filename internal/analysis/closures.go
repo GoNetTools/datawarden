@@ -223,42 +223,6 @@ func isSelf(name string) bool {
 	return name == "this" || name == "self"
 }
 
-// containerOps are methods that read, add to or inspect a collection or
-// holder rather than call it: a call of one on a receiver holding
-// closures (handlers.add(h), handlers.get(0)) does not run them.
-var containerOps = map[string]bool{
-	"add": true, "addall": true, "append": true, "extend": true, "push": true, "unshift": true, "insert": true,
-	"put": true, "putall": true, "putifabsent": true, "set": true, "offer": true, "enqueue": true, "remove": true,
-	"removeat": true, "removefirst": true, "removelast": true, "pop": true, "poll": true, "peek": true,
-	"clear": true, "getordefault": true, "getornull": true, "getorelse": true, "elementat": true,
-	"iterator": true, "listiterator": true, "next": true, "hasnext": true, "values": true, "keys": true,
-	"keyset": true, "entries": true, "entryset": true, "items": true, "tolist": true, "tomutablelist": true,
-	"toarray": true, "totypedarray": true, "aslist": true, "stream": true, "iter": true, "copy": true,
-	"slice": true, "sublist": true, "size": true, "count": true, "length": true, "isempty": true,
-	"isnotempty": true, "contains": true, "containskey": true, "indexof": true, "first": true, "last": true,
-	"firstornull": true, "lastornull": true, "reversed": true, "reverse": true, "equals": true,
-	"hashcode": true, "tostring": true, "compareto": true, "subscribe": true, "register": true,
-	"addlistener": true, "addeventlistener": true, "on": true, "once": true, "off": true, "removelistener": true,
-	"removeeventlistener": true, "unsubscribe": true, "unregister": true,
-}
-
-// runsReceiver reports whether a call of an unresolved method on a
-// receiver holding closures runs them: h.accept(v), h.invoke(v), r.run(),
-// supplier.get(), or a local called as a function (h(v)); not an
-// operation on a collection of them (handlers.add(h), handlers.get(0)).
-func runsReceiver(c *ir.Call, nargs int, closureArg bool) bool {
-	n := strings.ToLower(c.Name)
-	switch {
-	case n == "get":
-		return nargs == 0
-	case containerOps[n]:
-		return false
-	case closureArg && immediateCallbacks[n]:
-		return false
-	}
-	return true
-}
-
 // invoked lists the closures call in may run, and the index of the call's
 // first argument that the closure's first parameter receives: a closure
 // held in the variable called, in the receiver of an unresolved method
@@ -289,7 +253,7 @@ func (cf *closureFlow) invoked(fn *ir.Func, in *ir.Instr, of func(ir.VarID) []cl
 			for _, a := range in.Args[1:] {
 				closureArg = closureArg || len(of(a)) > 0
 			}
-			if runsReceiver(c, len(in.Args)-1, closureArg) {
+			if cf.a.h.runsReceiver(c, len(in.Args)-1, closureArg) {
 				out, _ = cf.addAll(out, held, false, nil)
 			}
 		}
@@ -301,14 +265,6 @@ func (cf *closureFlow) invoked(fn *ir.Func, in *ir.Instr, of func(ir.VarID) []cl
 		return cf.field(ownerOf(fn, fn.Params[0]), c.Name, fn), 0
 	}
 	return nil, 0
-}
-
-// containerBuilders build a collection or holder from their arguments.
-var containerBuilders = map[string]bool{
-	"listof": true, "mutablelistof": true, "arraylistof": true, "arrayof": true, "setof": true,
-	"mutablesetof": true, "hashsetof": true, "mapof": true, "mutablemapof": true, "hashmapof": true,
-	"of": true, "aslist": true, "singletonlist": true, "list": true, "tuple": true, "set": true, "dict": true,
-	"to": true, "pair": true, "array": true, "from": true, "ofnullable": true, "just": true,
 }
 
 func (cf *closureFlow) transfer(fn *ir.Func, in *ir.Instr) {
@@ -420,7 +376,7 @@ func (cf *closureFlow) call(fn *ir.Func, in *ir.Instr, of func(ir.VarID) []closu
 	}
 	// A callback run by the callee gets the call's other arguments, the
 	// receiver first: handlers.forEach { it(v) } calls each handler.
-	if runsCallbackNow(c) {
+	if cf.a.h.runsCallbackNow(c) {
 		for i, a := range in.Args {
 			for _, cl := range of(a) {
 				tf := cf.a.funcs[cl.fn]
@@ -441,13 +397,13 @@ func (cf *closureFlow) call(fn *ir.Func, in *ir.Instr, of func(ir.VarID) []closu
 	// (handlers.add(h)).
 	if c.HasRecv && len(in.Args) > 0 {
 		cf.addVar(fn.ID, in.Dst, of(in.Args[0]), false)
-		if isMutator(c.Name) {
+		if cf.a.h.isMutator(c.Name) {
 			for _, a := range in.Args[1:] {
 				cf.addVar(fn.ID, in.Args[0], of(a), false)
 			}
 		}
 	}
-	if containerBuilders[strings.ToLower(c.Name)] {
+	if cf.a.h.has(tContainerBuilders, strings.ToLower(c.Name)) {
 		for _, a := range in.Args {
 			cf.addVar(fn.ID, in.Dst, of(a), false)
 		}

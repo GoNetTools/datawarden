@@ -19,9 +19,6 @@ import (
 // placeholder matches a format verb or template placeholder.
 var placeholder = regexp.MustCompile(`%[-+# 0-9.*]*[a-zA-Z]|\{\d*\}`)
 
-// labelStopWords are left out of a label: "password is: ", "the email = ".
-var labelStopWords = map[string]bool{"is": true, "was": true, "are": true, "were": true, "the": true, "a": true, "an": true, "of": true, "new": true, "old": true}
-
 // constOf returns the literal v holds: a constant, or a copy of one (an
 // argument label in Swift binds the value to a variable of that name).
 func constOf(fn *ir.Func, defs []int, v ir.VarID) (string, bool) {
@@ -51,7 +48,7 @@ func (a *analyzer) textLabel(text string) (string, float64, bool) {
 	words := strings.FieldsFunc(t, func(r rune) bool {
 		return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' || r == '-')
 	})
-	for len(words) > 0 && labelStopWords[strings.ToLower(words[len(words)-1])] {
+	for len(words) > 0 && a.h.has(tLabelStopWords, strings.ToLower(words[len(words)-1])) {
 		words = words[:len(words)-1]
 	}
 	for n := min(3, len(words)); n >= 1; n-- {

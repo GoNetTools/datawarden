@@ -302,6 +302,15 @@ Destination kinds: `third_party`, `first_party`, `log`, `storage` (device/local)
   returns: com.acme.http.Request.Builder
 ```
 
+**Name heuristics** ([`heuristics.yaml`](internal/rules/builtin/heuristics.yaml)) are what the engine falls back on for a call no rule describes: method-name prefixes that mutate their receiver (`put`, `add`, `with`...), calls that carry no data (`size`, `isEmpty`), calls that run their callback at once (`forEach`, `map`, `let`), words that make a name a consent check, placeholder literals, and the like, 21 tables in all. A rule file extends them under a `heuristics:` key (lists append, map entries override), and a change to them invalidates the summary cache like a rule change:
+
+```yaml
+heuristics:
+  mutator_prefixes: [attach]
+  consent_words: [marketingoptin]
+  transform_checks: {scrubbed: redacted}
+```
+
 Callee names:
 - Go: `importpath.Func`, `importpath.Type.Method` (pointer receivers and type parameters dropped): `github.com/getsentry/sentry-go.Scope.SetUser`, `log/slog.Logger.Info`.
 - Python: `<module>.<name>`, as imported: `sentry_sdk.set_user`, `logging.info`, `requests.post`; `logging.getLogger(__name__).info` is `logging.getLogger().info`.

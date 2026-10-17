@@ -280,6 +280,9 @@ YAML rules of three kinds, each matched against IR calls:
 - **sink**: data in the selected arguments leaves to a destination (`dest.kind`: `log`, `third_party`, `network`, `storage`, `ipc`, `first_party`).
 - **source**: the call returns personal data of a given type.
 - **transform**: the call masks, hashes or encrypts its input; the policy decides which transforms make a flow acceptable.
+- **api**: what a library call does with its arguments (`effect`) and what it returns (`returns`), read by the engine before its name heuristics and by the frontends to type call results.
+
+The same files carry the **name heuristics** (`heuristics:` key, built in from `heuristics.yaml`): the word tables the engine falls back on for calls no rule describes. They reach the engine as `analysis.Heuristics`, an interface the engine declares and `*rules.Heuristics` implements, so the engine holds no word list of its own.
 
 Built-in rules are embedded in the binary; a repository adds, replaces or disables them by id.
 
@@ -339,6 +342,7 @@ The cache stores function summaries, the call graph, schema declarations and the
 | **A language** | entry in `internal/lang`, a frontend, registration in `app.NewComponents`, the 29 conformance programs, rules with examples | `TestEveryLanguageIsWired`, `TestFrontendConformance`, `TestRuleExamples` |
 | **A data type, a class or a secret pattern** | an entry in `internal/detect/builtin/datatypes.yaml`, cases in `detect_test.go` or `secrets_test.go`, a labelled leak in a fixture | `TestBuiltinTaxonomy`, `TestTaxonomyValidation`, `TestBuiltinRuleConventions` (source rules must use known types), `datawarden-bench -check` |
 | **A negative-context or transform word** | `internal/detect/names.go` | `detect_test.go` |
+| **A name heuristic** (a mutator prefix, a data-free call, a consent word, an immediate callback) | an entry in `internal/rules/builtin/heuristics.yaml` (or under `heuristics:` in a repository rule file) | `TestHeuristics`, `TestHeuristicTablesExist` |
 | **An output format** | a case in `report.Write` (or a new `Reporter` implementation wired in `app`) | report tests |
 | **A service or replacement component** | an interface where it is used, a field to inject it, the wiring in `internal/app` | `TestComponentsTalkThroughInterfaces` |
 | **A labelled benchmark case** | a directory under `testdata/`, or an open-source repository pinned by `repo` and `commit`, and its labels in `testdata/eval.yaml` | `datawarden-bench -check` (`-external` for pinned repositories) in CI |
