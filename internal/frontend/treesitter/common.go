@@ -293,6 +293,23 @@ func (p *program) resolveType(f *srcFile, t string) string {
 	return t
 }
 
+// libraryReturn is the type a library call returns according to the api
+// rules: LoggerFactory.getLogger(..) is an org.slf4j.Logger, and
+// Optional<User>.get() ("$T") a User.
+func (b *builder) libraryReturn(c *ir.Call) string {
+	if b.p.opts.ReturnType == nil {
+		return ""
+	}
+	t := b.p.opts.ReturnType(b.p.lang, c)
+	if t != "$T" {
+		return t
+	}
+	if i := strings.IndexByte(c.RecvType, '<'); i > 0 && strings.HasSuffix(c.RecvType, ">") {
+		return c.RecvType[i+1 : len(c.RecvType)-1]
+	}
+	return ""
+}
+
 // carriesElements reports whether a generic type's value carries its
 // type argument's data: a collection or a wrapper of it.
 func carriesElements(short string) bool {
@@ -1548,6 +1565,9 @@ func (b *builder) caughtValue(n *Node) ir.VarID {
 func (b *builder) emitCall(n *Node, c *ir.Call, args []ir.VarID, resultType string) ir.VarID {
 	if v, ok := b.reflectCall(n, c, args); ok {
 		return v
+	}
+	if resultType == "" {
+		resultType = b.libraryReturn(c)
 	}
 	dst := b.fn.Named("", resultType, b.pos(n))
 	defer b.noteReflect(c, args, dst)

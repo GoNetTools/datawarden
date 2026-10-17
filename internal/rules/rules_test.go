@@ -40,6 +40,7 @@ func TestBuiltinRuleConventions(t *testing.T) {
 		KindSink:      {"log": true, "sdk": true, "net": true, "storage": true, "ipc": true},
 		KindSource:    {"src": true},
 		KindTransform: {"xform": true},
+		KindAPI:       {"api": true},
 	}
 	destFor := map[string]map[string]bool{ // sink category -> allowed dest.kind
 		"log": {DestLog: true}, "sdk": {DestThirdParty: true}, "net": {DestNetwork: true},
@@ -216,6 +217,53 @@ func TestArgConditions(t *testing.T) {
 		"bad index": "- {id: a.b, lang: go, call: f, arg_is: {-2: x}, dest: {kind: log}}\n",
 		"bad regex": "- {id: a.b, lang: go, call: f, arg_is: {0: '('}, dest: {kind: log}}\n",
 		"on source": "- {id: src.b, lang: go, kind: source, call: f, data_type: email, arg_not: {0: x}}\n",
+	} {
+		rs, err := parse([]byte(body), "t.yaml")
+		if err == nil {
+			_, err = NewSet(rs)
+		}
+		if err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
+// api rules model library calls: an effect, a return type, or both.
+func TestAPIRules(t *testing.T) {
+	rs, err := parse([]byte(`
+- id: api.x.builder
+  kind: api
+  lang: java
+  call: com.acme.Req.Builder.body
+  effect: builder
+  returns: com.acme.Req.Builder
+- id: api.x.element
+  kind: api
+  lang: java
+  call: java.util.Optional.get
+  returns: $T
+`), "t.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	set, err := NewSet(rs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := set.API("java", &ir.Call{Callee: "com.acme.Req.Builder.body", Name: "body"}); r == nil || r.Effect != EffectBuilder || r.Returns != "com.acme.Req.Builder" {
+		t.Errorf("builder: %+v", r)
+	}
+	if r := set.API("java", &ir.Call{Name: "get", RecvType: "java.util.Optional<com.acme.User>"}); r == nil || r.Returns != "$T" {
+		t.Errorf("element by receiver type: %+v", r)
+	}
+	if r := set.API("kotlin", &ir.Call{Callee: "com.acme.Req.Builder.body", Name: "body"}); r != nil {
+		t.Errorf("other language: %+v", r)
+	}
+	for name, body := range map[string]string{
+		"no effect or returns": "- {id: api.a.b, kind: api, lang: java, call: f}\n",
+		"bad effect":           "- {id: api.a.b, kind: api, lang: java, call: f, effect: stores}\n",
+		"sink fields":          "- {id: api.a.b, kind: api, lang: java, call: f, effect: none, dest: {kind: log}}\n",
+		"effect on a sink":     "- {id: log.a.b, lang: java, call: f, effect: none, dest: {kind: log}}\n",
 	} {
 		rs, err := parse([]byte(body), "t.yaml")
 		if err == nil {

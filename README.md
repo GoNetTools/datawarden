@@ -291,6 +291,17 @@ Other fields: `kind: source` (with `data_type`; a source can also be a field rea
 
 Destination kinds: `third_party`, `first_party`, `log`, `storage` (device/local), `network` (host unknown or not first-party), `ipc` (clipboard, broadcasts).
 
+**API models** (`kind: api`, [`apis.yaml`](internal/rules/builtin/apis.yaml)) say how data moves *inside* the program through library calls, so the engine does not guess from method names: `effect: builder` (the arguments go into the receiver, which is returned: `StringBuilder.append`, `Request.Builder.post`), `sends` (the arguments leave; the result is the remote's answer), `derives` (the result carries every argument: `String.format`), `none` (`String.length`); `returns` gives the type a call returns (`LoggerFactory.getLogger` is an `org.slf4j.Logger`, so the logger's calls resolve), with `$T` for the receiver's element type (`Optional<User>.get()`). A repository adds models for its own SDK the same way:
+
+```yaml
+- id: api.acme.request_builder
+  kind: api
+  lang: java
+  call: [com.acme.http.Request.Builder.body, com.acme.http.Request.Builder.header]
+  effect: builder
+  returns: com.acme.http.Request.Builder
+```
+
 Callee names:
 - Go: `importpath.Func`, `importpath.Type.Method` (pointer receivers and type parameters dropped): `github.com/getsentry/sentry-go.Scope.SetUser`, `log/slog.Logger.Info`.
 - Python: `<module>.<name>`, as imported: `sentry_sdk.set_user`, `logging.info`, `requests.post`; `logging.getLogger(__name__).info` is `logging.getLogger().info`.

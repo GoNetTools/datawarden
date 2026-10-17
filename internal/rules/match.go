@@ -40,6 +40,15 @@ func (s *Set) Match(lang, kind string, c *ir.Call) []Hit {
 	return hits
 }
 
+// API returns the api rule that best describes a call, or nil.
+func (s *Set) API(lang string, c *ir.Call) *Rule {
+	var best Hit
+	for _, h := range s.Match(lang, KindAPI, c) {
+		best = maxHit(best, h)
+	}
+	return best.Rule
+}
+
 // MatchField returns the source rules matching a read of field from an
 // object of type owner (qualified when known), written recv in the source
 // when it is a variable or a chain of field reads from one.

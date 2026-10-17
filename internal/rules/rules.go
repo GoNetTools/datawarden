@@ -34,7 +34,26 @@ const (
 	KindSink      = "sink"
 	KindSource    = "source"
 	KindTransform = "transform"
+	// KindAPI rules model library calls: what they do with their
+	// arguments (Effect) and what they return (Returns).
+	KindAPI = "api"
 )
+
+// API effects: what a call does with the data it is given.
+const (
+	// EffectBuilder: the arguments go into the receiver, which the call
+	// returns (StringBuilder.append, Request.Builder.post).
+	EffectBuilder = "builder"
+	// EffectSends: the arguments leave the program and the result is the
+	// remote's answer, not derived from them (HttpClient.send).
+	EffectSends = "sends"
+	// EffectDerives: the result carries every argument (String.format).
+	EffectDerives = "derives"
+	// EffectNone: the result carries no data (String.length, List.size).
+	EffectNone = "none"
+)
+
+var validEffects = map[string]bool{EffectBuilder: true, EffectSends: true, EffectDerives: true, EffectNone: true}
 
 // Destination kinds.
 const (
@@ -161,7 +180,12 @@ type Rule struct {
 	// (default 1): request data is personal data often, not always.
 	Confidence float64 `yaml:"confidence,omitempty" json:"confidence,omitempty"`
 	// Transform is applied by transform rules ("sha256", "masked").
-	Transform   string `yaml:"transform,omitempty" json:"transform,omitempty"`
+	Transform string `yaml:"transform,omitempty" json:"transform,omitempty"`
+	// Effect is what an api rule's call does with its arguments (see
+	// EffectBuilder...); Returns is the qualified type it returns, or
+	// "$T" for the receiver's element type (Optional<User>.get()).
+	Effect      string `yaml:"effect,omitempty" json:"effect,omitempty"`
+	Returns     string `yaml:"returns,omitempty" json:"returns,omitempty"`
 	Category    string `yaml:"category,omitempty" json:"category,omitempty"`
 	Severity    string `yaml:"severity,omitempty" json:"severity,omitempty"`
 	Description string `yaml:"description,omitempty" json:"description,omitempty"`
@@ -372,6 +396,16 @@ func (r *Rule) compile() error {
 		if r.Transform == "" {
 			return fmt.Errorf("transform rule needs transform")
 		}
+	case KindAPI:
+		if r.Effect == "" && r.Returns == "" {
+			return fmt.Errorf("api rule needs effect (builder, sends, derives, none) or returns")
+		}
+		if r.Effect != "" && !validEffects[r.Effect] {
+			return fmt.Errorf("effect %q must be one of builder, sends, derives, none", r.Effect)
+		}
+		if r.Dest.Kind != "" || r.Arg.All || len(r.Arg.Indexes) > 0 || r.DataType != "" {
+			return fmt.Errorf("api rule takes only call, effect and returns")
+		}
 	default:
 		return fmt.Errorf("unknown kind %q", r.Kind)
 	}
@@ -397,6 +431,9 @@ func (r *Rule) compile() error {
 	}
 	if r.HostArg != nil && *r.HostArg < 0 {
 		return fmt.Errorf("host_arg %d: indexes start at 0", *r.HostArg)
+	}
+	if (r.Effect != "" || r.Returns != "") && r.Kind != KindAPI {
+		return fmt.Errorf("effect and returns are for api rules")
 	}
 	if (len(r.ArgIs) > 0 || len(r.ArgNot) > 0) && r.Kind != KindSink {
 		return fmt.Errorf("arg_is and arg_not are for sink rules")

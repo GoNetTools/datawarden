@@ -871,15 +871,42 @@ func loadsOf(fn *ir.Func) map[ir.VarID]loadRef {
 
 // fluentResults maps the result of each mutating method call to its
 // receiver: builders return themselves (StringBuilder.append, put, add).
-func fluentResults(fn *ir.Func) map[ir.VarID]ir.VarID {
+func (a *analyzer) fluentResults(fn *ir.Func) map[ir.VarID]ir.VarID {
 	out := map[ir.VarID]ir.VarID{}
 	for i := range fn.Instrs {
 		in := &fn.Instrs[i]
-		if in.Op == ir.OpCall && in.Call != nil && in.Call.HasRecv && len(in.Args) > 0 && in.Dst >= 0 && isMutator(in.Call.Name) {
+		if in.Op == ir.OpCall && in.Call != nil && in.Call.HasRecv && len(in.Args) > 0 && in.Dst >= 0 && a.mutates(fn.Lang, in.Call) {
 			out[in.Dst] = in.Args[0]
 		}
 	}
 	return out
+}
+
+// apiEffect is what the api rules say the call does with its arguments
+// (rules.EffectBuilder, ...), or "" when no rule describes it.
+func (a *analyzer) apiEffect(lang string, c *ir.Call) string {
+	var best rules.Hit
+	for _, h := range a.opts.Rules.Match(lang, rules.KindAPI, c) {
+		if h.Rule.Effect != "" && h.Conf > best.Conf {
+			best = h
+		}
+	}
+	if best.Rule == nil {
+		return ""
+	}
+	return best.Rule.Effect
+}
+
+// mutates reports whether a method call stores its arguments into its
+// receiver and returns it: by its api rule, else by its name.
+func (a *analyzer) mutates(lang string, c *ir.Call) bool {
+	switch a.apiEffect(lang, c) {
+	case rules.EffectBuilder:
+		return true
+	case "":
+		return isMutator(c.Name)
+	}
+	return false
 }
 
 func shortType(t string) string {
@@ -892,7 +919,7 @@ func shortType(t string) string {
 
 func (a *analyzer) analyzeFunc(fn *ir.Func) *Summary {
 	st := &state{facts: make([]map[string]*fact, len(fn.Vars)), stores: map[ir.VarID]map[string]map[string]*fact{}, minC: a.opts.MinConf,
-		order: newOrder(fn), multi: multiDefined(fn), fluent: fluentResults(fn), loads: loadsOf(fn), guards: a.guards[fn.ID], last: lastInstrs(fn),
+		order: newOrder(fn), multi: multiDefined(fn), fluent: a.fluentResults(fn), loads: loadsOf(fn), guards: a.guards[fn.ID], last: lastInstrs(fn),
 		closures: a.flow.local(fn.ID), checks: a.checks[fn.ID]}
 	st.pt = newPointsTo(fn, st.fluent, st.checks, st.order)
 	st.defs = definitions(fn)
@@ -1666,8 +1693,10 @@ func (a *analyzer) call(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 	// A keyed put (ctx.Set("user", u), map.put("email", e)) stores the
 	// value under its key: reading another key, or another part of the
 	// object, does not give it.
+	effect := a.apiEffect(fn.Lang, c)
+	mutator := a.mutates(fn.Lang, c)
 	putKey := ""
-	if c.HasRecv && recvOff == 1 && !isNew && nonRecv == 2 && isMutator(c.Name) {
+	if c.HasRecv && recvOff == 1 && !isNew && nonRecv == 2 && mutator {
 		if k, ok := constOf(fn, st.defs, in.Args[1]); ok && k != "" && !strings.ContainsAny(k, " \t\n") {
 			putKey = k
 		}
@@ -1676,9 +1705,11 @@ func (a *analyzer) call(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 	// (HTTPClient.send_request, session.post) answers with the remote's
 	// response, like a network sink's; a length, count or type check
 	// is a number or a flag.
+	// What a library call does with its arguments comes from its api
+	// rule when there is one; the name heuristics below are the fallback.
 	lname := strings.ToLower(c.Name)
-	remote = remote || (c.HasRecv || c.RecvText != "") && requestMethods[lname] && !buildsRequest(c)
-	if dataFreeCalls[lname] {
+	remote = remote || effect == rules.EffectSends || effect == "" && (c.HasRecv || c.RecvText != "") && requestMethods[lname] && !buildsRequest(c)
+	if effect == rules.EffectNone || effect == "" && dataFreeCalls[lname] {
 		return changed
 	}
 	// A data loader (AppByTokenLoader(ctx).load(token), GraphQL's
@@ -1726,7 +1757,7 @@ func (a *analyzer) call(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 			if putKey != "" && i == 1 {
 				continue
 			}
-			if i >= recvOff && c.HasRecv && recvOff == 1 && !isNew && isMutator(c.Name) {
+			if i >= recvOff && c.HasRecv && recvOff == 1 && !isNew && mutator {
 				// The receiver, and the object it came from when it is a
 				// builder call's result (sb.append(a).append(email)).
 				r := in.Args[0]
