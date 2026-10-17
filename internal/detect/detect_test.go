@@ -308,3 +308,54 @@ func TestSchemaCollectionTypes(t *testing.T) {
 		}
 	}
 }
+
+// A repository's taxonomy file adds classes and data types to the
+// built-in ones, or replaces one by id, and the classifier picks them up
+// in place.
+func TestTaxonomyExtension(t *testing.T) {
+	c := NewClassifier(DefaultTaxonomy())
+	if _, ok := c.Ident("frequentFlyerNumber"); ok {
+		t.Fatal("frequent flyer is not built in")
+	}
+	err := c.Extend([]byte(`
+classes:
+  - {id: loyalty, label: Loyalty data, severity: high}
+data_types:
+  - {id: frequent_flyer, label: Frequent flyer number, class: loyalty, category: financial, patterns: [frequent flyer, flyer number]}
+  - id: email
+    label: Email address
+    class: pii
+    category: contact
+    patterns: [email, mail address, correo]
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m, ok := c.Ident("frequentFlyerNumber"); !ok || m.DataType != "frequent_flyer" {
+		t.Errorf("added type: %+v %v", m, ok)
+	}
+	if dt := c.Lookup("frequent_flyer"); dt.Class != "loyalty" || c.Class("loyalty").Severity != "high" || !c.KnownClass("loyalty") {
+		t.Errorf("added class: %+v %+v", dt, c.Class("loyalty"))
+	}
+	if m, ok := c.Ident("correo"); !ok || m.DataType != "email" {
+		t.Errorf("replaced type keeps its id and gains patterns: %+v %v", m, ok)
+	}
+	if m, ok := c.Ident("phoneNumber"); !ok || m.DataType != "phone" {
+		t.Errorf("built-in types stay: %+v %v", m, ok)
+	}
+	if n := len(c.Types()); n != len(DefaultTaxonomy())+1 {
+		t.Errorf("%d types, want %d", n, len(DefaultTaxonomy())+1)
+	}
+	for name, doc := range map[string]string{
+		"unknown class": "data_types:\n  - {id: x, label: X, class: nope, category: c, patterns: [x]}\n",
+		"unknown key":   "data_types:\n  - {id: x, label: X, class: pii, category: c, patterns: [x], colour: red}\n",
+		"not yaml":      "data_types: [\n",
+	} {
+		if err := c.Extend([]byte(doc)); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	if m, ok := c.Ident("frequentFlyerNumber"); !ok || m.DataType != "frequent_flyer" {
+		t.Error("a rejected extension leaves the classifier as it was")
+	}
+}

@@ -6,6 +6,8 @@ package report
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -56,7 +58,7 @@ func rich() *Report {
 func render(t *testing.T, format string, r *Report) string {
 	t.Helper()
 	var b bytes.Buffer
-	if err := (Writer{}).Write(&b, format, r); err != nil {
+	if err := NewWriter().Write(&b, format, r); err != nil {
 		t.Fatalf("%s: %v", format, err)
 	}
 	return b.String()
@@ -245,5 +247,37 @@ func TestSARIFClassTags(t *testing.T) {
 	}
 	if tags["pii-literal/us_ssn"] != "security,privacy,credential" || !strings.HasPrefix(tags["pii-flow/sdk.sentry.set_user"], "security,privacy,pii,") {
 		t.Errorf("class tags: %v", tags)
+	}
+}
+
+// Formats are registered with the writer: the built-ins in order, with
+// their aliases, and any renderer the wiring adds or replaces.
+func TestWriterRegistry(t *testing.T) {
+	w := NewWriter()
+	if got := strings.Join(w.Formats(), ","); got != "text,json,sarif,markdown,gitlab" {
+		t.Errorf("built-in formats: %s", got)
+	}
+	r := &Report{Tool: "datawarden"}
+	var md, alias bytes.Buffer
+	if err := w.Write(&md, "markdown", r); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Write(&alias, "md", r); err != nil || alias.String() != md.String() {
+		t.Errorf("alias md: %v", err)
+	}
+	if err := w.Write(&alias, "yaml", r); err == nil || !strings.Contains(err.Error(), "text, json, sarif, markdown, gitlab") {
+		t.Errorf("unknown format: %v", err)
+	}
+	w.Register("csv", func(out io.Writer, r *Report) error { _, err := fmt.Fprintf(out, "tool,%s\n", r.Tool); return err })
+	w.Register("text", func(out io.Writer, r *Report) error { _, err := io.WriteString(out, "replaced"); return err })
+	var csv, text bytes.Buffer
+	if err := w.Write(&csv, "csv", r); err != nil || csv.String() != "tool,datawarden\n" {
+		t.Errorf("registered format: %q %v", csv.String(), err)
+	}
+	if err := w.Write(&text, "", r); err != nil || text.String() != "replaced" {
+		t.Errorf("replaced format (default): %q %v", text.String(), err)
+	}
+	if got := strings.Join(w.Formats(), ","); got != "text,json,sarif,markdown,gitlab,csv" {
+		t.Errorf("formats after Register: %s", got)
 	}
 }

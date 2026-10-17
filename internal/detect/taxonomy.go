@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -85,16 +86,51 @@ var builtinTaxonomy []byte
 // ParseTaxonomy decodes and validates a taxonomy document. Unknown keys
 // are errors.
 func ParseTaxonomy(b []byte) (Taxonomy, error) {
+	t, err := decodeTaxonomy(b)
+	if err != nil {
+		return Taxonomy{}, err
+	}
+	if err := t.Validate(); err != nil {
+		return Taxonomy{}, fmt.Errorf("taxonomy: %w", err)
+	}
+	return t, nil
+}
+
+// decodeTaxonomy decodes a taxonomy document without validating it: an
+// extension may use the classes of the taxonomy it is merged into.
+func decodeTaxonomy(b []byte) (Taxonomy, error) {
 	var t Taxonomy
 	dec := yaml.NewDecoder(bytes.NewReader(b))
 	dec.KnownFields(true)
 	if err := dec.Decode(&t); err != nil {
 		return Taxonomy{}, fmt.Errorf("taxonomy: %w", err)
 	}
-	if err := t.Validate(); err != nil {
+	return t, nil
+}
+
+// Merge returns t with extra's classes and data types added; an id
+// already in t is replaced. The result is validated, so an extension may
+// use t's classes and must be complete on its own terms.
+func (t Taxonomy) Merge(extra Taxonomy) (Taxonomy, error) {
+	out := Taxonomy{Classes: append([]Class(nil), t.Classes...), Types: append([]DataType(nil), t.Types...)}
+	for _, c := range extra.Classes {
+		if i := slices.IndexFunc(out.Classes, func(x Class) bool { return x.ID == c.ID }); i >= 0 {
+			out.Classes[i] = c
+		} else {
+			out.Classes = append(out.Classes, c)
+		}
+	}
+	for _, d := range extra.Types {
+		if i := slices.IndexFunc(out.Types, func(x DataType) bool { return x.ID == d.ID }); i >= 0 {
+			out.Types[i] = d
+		} else {
+			out.Types = append(out.Types, d)
+		}
+	}
+	if err := out.Validate(); err != nil {
 		return Taxonomy{}, fmt.Errorf("taxonomy: %w", err)
 	}
-	return t, nil
+	return out, nil
 }
 
 // Validate checks that ids are unique, every type names a declared class,

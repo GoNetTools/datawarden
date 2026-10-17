@@ -95,7 +95,11 @@ type Config struct {
 	// FirstPartyDomains turns network sinks to these hosts into first-party.
 	FirstPartyDomains []string `yaml:"first_party_domains" json:"first_party_domains,omitempty"`
 	// Rules are extra rule files or directories (default .datawarden/rules).
-	Rules    []string `yaml:"rules" json:"rules,omitempty"`
+	Rules []string `yaml:"rules" json:"rules,omitempty"`
+	// Taxonomy lists taxonomy files whose classes and data types extend
+	// the built-in ones (default .datawarden/taxonomy.yaml); missing
+	// files are skipped.
+	Taxonomy []string `yaml:"taxonomy" json:"taxonomy,omitempty"`
 	Baseline string   `yaml:"baseline" json:"baseline"`
 	CacheDir string   `yaml:"cache_dir" json:"cache_dir"`
 	// MinConfidence drops flows below this confidence from all output.
@@ -115,6 +119,7 @@ func Default() *Config {
 	return &Config{
 		Version:       1,
 		Rules:         []string{".datawarden/rules"},
+		Taxonomy:      []string{".datawarden/taxonomy.yaml"},
 		Baseline:      ".datawarden/baseline.json",
 		CacheDir:      ".datawarden/cache",
 		MinConfidence: 0.35,
@@ -223,6 +228,11 @@ first_party_domains: []
 # Extra rule files/directories; rules with the same id replace built-ins,
 # and "- {id: <id>, disabled: true}" turns one off.
 rules: [.datawarden/rules]
+
+# Taxonomy files that add classes and data types to the built-in ones
+# (same format as internal/detect/builtin/datatypes.yaml; an id already
+# known is replaced). Missing files are skipped.
+taxonomy: [.datawarden/taxonomy.yaml]
 
 baseline: .datawarden/baseline.json
 cache_dir: .datawarden/cache
