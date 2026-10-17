@@ -4,7 +4,7 @@
 VERSION     ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 MODULE      := $(shell go list -m)
 LDFLAGS     := -s -w -X $(MODULE)/internal/app.Version=$(VERSION)
-STATICCHECK := honnef.co/go/tools/cmd/staticcheck@v0.8.1
+STATICCHECK := honnef.co/go/tools/cmd/staticcheck@v0.8.2
 
 .PHONY: build build-nocgo test test-nocgo race vet lint headers check eval eval-external bench release-local docker scan-self clean
 
