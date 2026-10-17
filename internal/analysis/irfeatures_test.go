@@ -45,7 +45,7 @@ func analyzeTyped(t *testing.T, classes []*ir.Class, types []*ir.TypeDecl, funcs
 		t.Fatal(err)
 	}
 	names := detect.NewClassifier(detect.DefaultTaxonomy())
-	res, err := Engine{Names: names}.Analyze(context.Background(), funcs, Input{Rules: rs, Schema: detect.BuildSchema(names, types), Classes: classes})
+	res, err := Engine{Names: names}.Analyze(context.Background(), funcs, Input{Rules: rs, Heuristics: rs.Heuristics(), Schema: detect.BuildSchema(names, types), Classes: classes})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +144,8 @@ func TestClosures(t *testing.T) {
 	if fl := flowAt(res, 10); fl != nil {
 		t.Errorf("forEach runs its callback before the capture is given data: %+v", fl)
 	}
-	if !runsCallbackNow(&ir.Call{Name: "ForEach"}) || runsCallbackNow(&ir.Call{Name: "addListener"}) || runsCallbackNow(nil) {
+	w := words{builtinHeuristics(t)}
+	if !w.runsCallbackNow(&ir.Call{Name: "ForEach"}) || w.runsCallbackNow(&ir.Call{Name: "addListener"}) || w.runsCallbackNow(nil) {
 		t.Error("runsCallbackNow")
 	}
 }
@@ -278,7 +279,7 @@ func TestRunsReceiver(t *testing.T) {
 		{"apply", 1, false, true},
 		{"apply", 1, true, false},
 	} {
-		if got := runsReceiver(&ir.Call{Name: tc.name}, tc.nargs, tc.closureArg); got != tc.want {
+		if got := (words{builtinHeuristics(t)}).runsReceiver(&ir.Call{Name: tc.name}, tc.nargs, tc.closureArg); got != tc.want {
 			t.Errorf("runsReceiver(%s, %d, %v) = %v", tc.name, tc.nargs, tc.closureArg, got)
 		}
 	}
@@ -389,7 +390,7 @@ func TestHelperAndCallerGuards(t *testing.T) {
 			t.Fatal(err)
 		}
 		names := detect.NewClassifier(detect.DefaultTaxonomy())
-		res, err := Analyze(context.Background(), []*ir.Func{helper, send, caller}, Options{Input: Input{Rules: rs, Schema: detect.BuildSchema(names, nil), Callers: callers}, Names: names})
+		res, err := Analyze(context.Background(), []*ir.Func{helper, send, caller}, Options{Input: Input{Rules: rs, Heuristics: rs.Heuristics(), Schema: detect.BuildSchema(names, nil), Callers: callers}, Names: names})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -518,7 +519,7 @@ func TestChecks(t *testing.T) {
 	branch(6, "isValidEmail", q, false, func() { logTo(f, q, 7) })
 	logTo(f, q, 8)
 
-	a := &analyzer{opts: Options{Names: detect.NewClassifier(detect.DefaultTaxonomy())}}
+	a := &analyzer{opts: Options{Names: detect.NewClassifier(detect.DefaultTaxonomy())}, h: words{builtinHeuristics(t)}}
 	rf, cks := a.refineChecks(f)
 	if len(cks) != 3 || rf == f {
 		t.Fatalf("checks: %v", cks)
@@ -717,7 +718,7 @@ func TestLabelsAndNames(t *testing.T) {
 		t.Errorf("status: %+v", fl)
 	}
 	for name, want := range map[string]bool{"derivationStatus": true, "rowCount": true, "count": true, "discount": false, "status": true, "is_ok": true, "token": false} {
-		if dataFreeName(name) != want {
+		if (words{builtinHeuristics(t)}).dataFreeName(name) != want {
 			t.Errorf("dataFreeName(%s) = %v", name, !want)
 		}
 	}

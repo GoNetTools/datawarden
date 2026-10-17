@@ -12,36 +12,21 @@ import (
 	"github.com/GoNetTools/datawarden/internal/ir"
 )
 
-// consentWords name a check that the user agreed to processing: a sink
-// that runs only when such a check passed is reported as guarded.
-var consentWords = []string{"consent", "optedin", "optin", "trackingallowed", "trackingenabled", "trackingauthorized", "allowtracking",
-	"cantrack", "analyticsenabled", "analyticsallowed", "gdpr"}
-
 // foldName lower-cases a name and drops its separators: has_consent and
 // hasConsent both read hasconsent.
 func foldName(name string) string { return strings.ToLower(separators.Replace(name)) }
 
 var separators = strings.NewReplacer("_", "", "-", "")
 
-func consentName(name string) bool {
-	n := foldName(name)
-	for _, w := range consentWords {
-		if strings.Contains(n, w) {
-			return true
-		}
-	}
-	return false
-}
-
 // consentCheck reports whether v is the result of a consent check
 // (hasConsent(), user.optedIn, analyticsEnabled) and whether it is true
 // when consent was given (false for !hasConsent()).
 // A call of a helper that returns a consent check (helpers) is one too.
-func consentCheck(fn *ir.Func, defs []int, v ir.VarID, depth int, helpers map[string]string) (desc string, positive, ok bool) {
+func consentCheck(w words, fn *ir.Func, defs []int, v ir.VarID, depth int, helpers map[string]string) (desc string, positive, ok bool) {
 	if v < 0 || int(v) >= len(fn.Vars) || depth > 4 {
 		return "", false, false
 	}
-	if name := fn.Vars[v].Name; name != "" && consentName(name) {
+	if name := fn.Vars[v].Name; name != "" && w.consentName(name) {
 		return name, true, true
 	}
 	if defs[v] < 0 {
@@ -50,31 +35,31 @@ func consentCheck(fn *ir.Func, defs []int, v ir.VarID, depth int, helpers map[st
 	in := &fn.Instrs[defs[v]]
 	switch in.Op {
 	case ir.OpCall:
-		if in.Call != nil && consentName(in.Call.Name) {
+		if in.Call != nil && w.consentName(in.Call.Name) {
 			return in.Call.Name + "()", true, true
 		}
 		if in.Call != nil && helpers[in.Call.Target] != "" {
 			return fmt.Sprintf("%s() (%s)", in.Call.Name, helpers[in.Call.Target]), true, true
 		}
 	case ir.OpLoad:
-		if consentName(in.Field) {
+		if w.consentName(in.Field) {
 			return in.Field, true, true
 		}
 	case ir.OpCompute:
 		if in.Operator == "!" && len(in.Args) == 1 {
-			d, p, ok := consentCheck(fn, defs, in.Args[0], depth+1, helpers)
+			d, p, ok := consentCheck(w, fn, defs, in.Args[0], depth+1, helpers)
 			return d, !p, ok
 		}
 		if in.Operator == "&&" || in.Operator == "and" {
 			for _, a := range in.Args {
-				if d, p, ok := consentCheck(fn, defs, a, depth+1, helpers); ok && p {
+				if d, p, ok := consentCheck(w, fn, defs, a, depth+1, helpers); ok && p {
 					return d, true, true
 				}
 			}
 		}
 	case ir.OpAssign:
 		if len(in.Args) == 1 {
-			return consentCheck(fn, defs, in.Args[0], depth+1, helpers)
+			return consentCheck(w, fn, defs, in.Args[0], depth+1, helpers)
 		}
 	}
 	return "", false, false
@@ -83,7 +68,7 @@ func consentCheck(fn *ir.Func, defs []int, v ir.VarID, depth int, helpers map[st
 // guards returns, per block, the consent checks that must have passed for
 // control to reach it: a branch on a consent check whose "consent given"
 // successor is entered only from the branch and dominates the block.
-func guards(fn *ir.Func, helpers map[string]string) [][]string {
+func guards(w words, fn *ir.Func, helpers map[string]string) [][]string {
 	if len(fn.Blocks) == 0 {
 		return nil
 	}
@@ -95,7 +80,7 @@ func guards(fn *ir.Func, helpers map[string]string) [][]string {
 		if blk.Term != ir.TermIf || len(blk.Succs) != 2 {
 			continue
 		}
-		desc, positive, ok := consentCheck(fn, defs, blk.Cond, 0, helpers)
+		desc, positive, ok := consentCheck(w, fn, defs, blk.Cond, 0, helpers)
 		if !ok {
 			continue
 		}
@@ -152,7 +137,7 @@ func definitions(fn *ir.Func) []int {
 // fun canTrack() = consents.hasConsent() && settings.analyticsOn: a
 // branch on a call of one is a consent check. It maps each to the check
 // it returns.
-func consentHelpers(funcs []*ir.Func) map[string]string {
+func consentHelpers(w words, funcs []*ir.Func) map[string]string {
 	out := map[string]string{}
 	for round := 0; round < 4; round++ {
 		grew := false
@@ -170,7 +155,7 @@ func consentHelpers(funcs []*ir.Func) map[string]string {
 				returns++
 				d, positive, ok := "", false, false
 				if len(in.Args) == 1 {
-					d, positive, ok = consentCheck(fn, defs, in.Args[0], 0, out)
+					d, positive, ok = consentCheck(w, fn, defs, in.Args[0], 0, out)
 				}
 				if !ok || !positive {
 					returns = -1

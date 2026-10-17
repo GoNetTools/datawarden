@@ -51,7 +51,7 @@ func BenchmarkAnalyze(b *testing.B) {
 	for _, n := range []int{10, 100, 1000} {
 		b.Run(fmt.Sprintf("funcs=%d", n), func(b *testing.B) {
 			funcs := chain(n)
-			in := Input{Rules: fakeRules{}, Schema: schema}
+			in := Input{Rules: fakeRules{}, Heuristics: builtinHeuristics(b), Schema: schema}
 			b.ReportAllocs()
 			b.ResetTimer()
 			flows := 0

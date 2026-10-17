@@ -31,31 +31,18 @@ type check struct {
 	pos  ir.Pos
 }
 
-// transformChecks name predicates that a value was already made safe:
-// isMasked, isRedacted, wasAnonymized, isEncrypted, isHashed.
-var transformChecks = map[string]string{
-	"masked": "masked", "redacted": "redacted", "anonymized": "anonymized", "anonymised": "anonymized",
-	"encrypted": "encrypted", "hashed": "hashed", "tokenized": "tokenized", "tokenised": "tokenized",
-	"pseudonymized": "tokenized", "pseudonymised": "tokenized", "sanitized": "redacted", "sanitised": "redacted",
-}
-
-// piiDetectors name predicates that a value contains personal data: the
-// value is clean where they return false.
-var piiDetectors = []string{"containspii", "haspii", "ispii", "lookslikepii", "detectpii", "containspersonaldata",
-	"haspersonaldata", "containssensitivedata", "hassensitivedata", "issensitive", "containssensitive", "containsphi"}
-
 // checkKind classifies a predicate by name. It returns the check and
 // whether it holds when the predicate returns true.
 func (a *analyzer) checkKind(name string, pos ir.Pos) (check, bool, bool) {
 	n := foldName(name)
 	for _, p := range []string{"is", "was", "hasbeen", "has"} {
 		if rest, ok := strings.CutPrefix(n, p); ok {
-			if xf, ok := transformChecks[rest]; ok {
+			if xf, ok := a.h.lookup(tTransformChecks, rest); ok {
 				return check{xf: xf, desc: name + "()", pos: pos}, true, true
 			}
 		}
 	}
-	for _, d := range piiDetectors {
+	for _, d := range a.h.list(tPiiDetectors) {
 		if n == d {
 			return check{xf: "pii-checked", desc: name + "()", pos: pos}, false, true
 		}

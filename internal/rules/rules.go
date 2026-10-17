@@ -203,26 +203,35 @@ type Rule struct {
 	typeSegs []string         // second-to-last segment of each call pattern
 }
 
-// Set is a validated, indexed collection of rules.
+// Set is a validated, indexed collection of rules, with the name
+// heuristics loaded alongside them.
 type Set struct {
 	Rules  []*Rule
 	byID   map[string]*Rule
 	byName map[string][]*Rule
 	wild   []*Rule
+	heur   *Heuristics
 	hash   string
 }
 
 // Builtin returns the rules embedded in the binary.
 func Builtin() ([]*Rule, error) {
-	return readTree(builtinFS, "builtin", "builtin:")
+	rs, _, err := readTree(builtinFS, "builtin", "builtin:")
+	return rs, err
 }
 
-// Load returns the built-in rules merged with repository overrides read
-// from fsys (later sources win). Each path may name a YAML file or a
-// directory of them; missing paths are skipped. fsys may be nil when there
-// are no overrides.
+// BuiltinHeuristics returns the name heuristics embedded in the binary.
+func BuiltinHeuristics() (*Heuristics, error) {
+	_, h, err := readTree(builtinFS, "builtin", "builtin:")
+	return h, err
+}
+
+// Load returns the built-in rules and heuristics merged with repository
+// overrides read from fsys (later sources win). Each path may name a
+// YAML file or a directory of them; missing paths are skipped. fsys may
+// be nil when there are no overrides.
 func Load(fsys fs.FS, paths ...string) (*Set, error) {
-	all, err := Builtin()
+	all, heur, err := readTree(builtinFS, "builtin", "builtin:")
 	if err != nil {
 		return nil, err
 	}
@@ -230,23 +239,40 @@ func Load(fsys fs.FS, paths ...string) (*Set, error) {
 		if fsys == nil {
 			break
 		}
-		rs, err := readTree(fsys, path.Clean(p), "")
+		rs, h, err := readTree(fsys, path.Clean(p), "")
 		if err != nil {
 			return nil, err
 		}
 		all = append(all, rs...)
+		heur.merge(h)
 	}
-	return NewSet(all)
+	set, err := NewSet(all)
+	if err != nil {
+		return nil, err
+	}
+	set.heur = heur
+	set.rehash()
+	return set, nil
 }
 
-// readTree parses one YAML file or every *.yaml/*.yml under a directory.
-func readTree(fsys fs.FS, root, originPrefix string) ([]*Rule, error) {
+// Heuristics returns the set's name heuristics (never nil).
+func (s *Set) Heuristics() *Heuristics {
+	if s.heur == nil {
+		return &Heuristics{}
+	}
+	return s.heur
+}
+
+// readTree parses one YAML file or every *.yaml/*.yml under a directory,
+// returning the rules and the merged heuristics they define.
+func readTree(fsys fs.FS, root, originPrefix string) ([]*Rule, *Heuristics, error) {
+	heur := &Heuristics{}
 	st, err := fs.Stat(fsys, root)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return nil, nil
+			return nil, heur, nil
 		}
-		return nil, err
+		return nil, nil, err
 	}
 	var files []string
 	if st.IsDir() {
@@ -260,7 +286,7 @@ func readTree(fsys fs.FS, root, originPrefix string) ([]*Rule, error) {
 			return nil
 		})
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	} else {
 		files = []string{root}
@@ -270,45 +296,53 @@ func readTree(fsys fs.FS, root, originPrefix string) ([]*Rule, error) {
 	for _, f := range files {
 		b, err := fs.ReadFile(fsys, f)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		origin := f
 		if originPrefix != "" {
 			origin = originPrefix + path.Base(f)
 		}
-		rs, err := parse(b, origin)
+		rs, h, err := parse(b, origin)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		out = append(out, rs...)
+		heur.merge(h)
 	}
-	return out, nil
+	return out, heur, nil
 }
 
-// parse decodes a rule file: a list of rules, or {rules: [...]}. Unknown
-// keys are errors, so a misspelt field cannot silently change what a rule
-// matches.
-func parse(b []byte, origin string) ([]*Rule, error) {
+// parse decodes a rule file: a list of rules, or {rules: [...],
+// heuristics: {...}}. Unknown keys are errors, so a misspelt field cannot
+// silently change what a rule matches.
+func parse(b []byte, origin string) ([]*Rule, *Heuristics, error) {
 	var doc yaml.Node
 	if err := yaml.Unmarshal(b, &doc); err != nil {
-		return nil, fmt.Errorf("%s: %w", origin, err)
+		return nil, nil, fmt.Errorf("%s: %w", origin, err)
 	}
 	if len(doc.Content) == 0 {
-		return nil, nil // empty file
+		return nil, nil, nil // empty file
 	}
 	dec := yaml.NewDecoder(bytes.NewReader(b))
 	dec.KnownFields(true)
 	var rs []*Rule
+	var heur *Heuristics
 	if doc.Content[0].Kind == yaml.MappingNode {
 		var wrapped struct {
-			Rules []*Rule `yaml:"rules"`
+			Rules      []*Rule   `yaml:"rules"`
+			Heuristics yaml.Node `yaml:"heuristics"`
 		}
 		if err := dec.Decode(&wrapped); err != nil {
-			return nil, fmt.Errorf("%s: %w", origin, err)
+			return nil, nil, fmt.Errorf("%s: %w", origin, err)
 		}
 		rs = wrapped.Rules
+		h, err := parseHeuristics(&wrapped.Heuristics, origin)
+		if err != nil {
+			return nil, nil, err
+		}
+		heur = h
 	} else if err := dec.Decode(&rs); err != nil {
-		return nil, fmt.Errorf("%s: %w", origin, err)
+		return nil, nil, fmt.Errorf("%s: %w", origin, err)
 	}
 	seen := map[string]bool{}
 	for _, r := range rs {
@@ -317,11 +351,11 @@ func parse(b []byte, origin string) ([]*Rule, error) {
 		}
 		r.Origin = origin
 		if r.ID != "" && seen[r.ID] {
-			return nil, fmt.Errorf("%s: rule %s is defined twice", origin, r.ID)
+			return nil, nil, fmt.Errorf("%s: rule %s is defined twice", origin, r.ID)
 		}
 		seen[r.ID] = true
 	}
-	return rs, nil
+	return rs, heur, nil
 }
 
 // NewSet merges rules by id (later wins), drops disabled ones, validates
@@ -364,10 +398,19 @@ func NewSet(rules []*Rule) (*Set, error) {
 			s.wild = append(s.wild, r)
 		}
 	}
-	b, _ := json.Marshal(s.Rules)
+	s.rehash()
+	return s, nil
+}
+
+// rehash computes the set's hash from its rules and heuristics: a
+// change to either invalidates cached summaries.
+func (s *Set) rehash() {
+	b, _ := json.Marshal(struct {
+		Rules      []*Rule
+		Heuristics *Heuristics
+	}{s.Rules, s.heur})
 	h := sha256.Sum256(b)
 	s.hash = hex.EncodeToString(h[:8])
-	return s, nil
 }
 
 func (r *Rule) compile() error {

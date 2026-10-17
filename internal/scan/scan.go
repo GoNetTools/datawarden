@@ -122,6 +122,9 @@ type Request struct {
 	Cache  Cache
 	Config *config.Config
 	Rules  analysis.RuleMatcher
+	// Heuristics are the name heuristics the analysis falls back on; may
+	// be nil (none).
+	Heuristics analysis.Heuristics
 	// Paths restricts the scan to root-relative files or directories.
 	Paths        []string
 	DiffBase     string
@@ -212,7 +215,7 @@ func (s *Scanner) Run(ctx context.Context, req Request) (*Result, error) {
 
 	// Taint analysis.
 	in := analysis.Input{
-		Rules: req.Rules, Schema: res.Schema, Lookup: req.Cache.Lookup, FirstPartyDomains: cfg.FirstPartyDomains, Classes: classes,
+		Rules: req.Rules, Heuristics: req.Heuristics, Schema: res.Schema, Lookup: req.Cache.Lookup, FirstPartyDomains: cfg.FirstPartyDomains, Classes: classes,
 	}
 	if res.Mode != ModeFull {
 		// Not every function is analysed: callers outside this run are

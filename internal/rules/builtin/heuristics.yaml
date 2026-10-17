@@ -1,0 +1,116 @@
+# Name heuristics: the word lists the analysis falls back on for code no
+# rule describes. An api rule (apis.yaml) names a call exactly; these
+# say what a method name alone suggests, in every language. A repository
+# extends them under the `heuristics:` key of a rule file in
+# .datawarden/rules/ (lists append, map entries override).
+heuristics:
+  # Method name prefixes of accessors that read a value (getEmail,
+  # optString, formValue, readLine): a constant key they are given says
+  # what the value is.
+  getter_verbs: [get, opt, form, postform, query, param, header, lookup, read, cookie, extra, value, object, string]
+  # Properties that render the whole object (user.description in Swift):
+  # they hold what any of its fields holds.
+  whole_value_fields: [description, debugDescription, dictionaryRepresentation, allValues]
+  # Methods that render or copy a whole object: what any of its fields
+  # holds is in the result.
+  whole_value_methods: [tostring, string, description, json, tojson, dump, dumps, serialize, encode, marshal, copy, clone, build, get,
+    values, entries, items, iterator, asdict, dict, todict, tomap, model_dump, stringify, format, unwrap, orelse, await]
+  # Suffixes of variables that hold a status, a count or a flag computed
+  # from data, not the data: derivationStatus, rowCount.
+  data_free_suffixes: [status, count, length, size, success, succeeded, exists, ok]
+  # Calls that return a size, a count, a flag or a type, not the data
+  # they are given.
+  data_free_calls: [len, count, size, length, isempty, isnotempty, isinstance, issubclass, hasattr, callable, type, typeof,
+    bool, exists, contains, containskey, startswith, endswith, hasprefix, hassuffix, isvalid, is_valid, equals, equal]
+  # Accessors that return the public part of what they are called on (a
+  # certificate's public key): the receiver's secret does not flow out.
+  public_parts: [getcertificate, getcertificatechain, getpublickey, getpublic, publickey, certificate]
+  # Methods that send a request through an HTTP client the rules do not
+  # know: the result is the remote's response, not the request.
+  request_methods: [send_request, sendrequest, request, urlopen, fetch, post, patch, post_json, postjson]
+  # Data loaders answer with the value stored under the key they are
+  # given (AppByTokenLoader(ctx).load(token)), not with the key.
+  loader_methods: [load, load_many, loadmany]
+  # Calls and fields whose value is a network location, not personal
+  # data: a listen address under the key "address" is not an address.
+  self_describing: [addr, localaddr, remoteaddr, listenaddr, serveraddr, bindaddr, localaddress, remoteaddress, listenaddress,
+    serveraddress, bindaddress, socketaddress, inetaddress, host, hostname, hostport, hoststring, url, uri, requesturi, requesturl,
+    baseurl, port, endpoint]
+  # Methods that render the value they are called on: l.Addr().String()
+  # is still the address.
+  stringers: [String, toString, description, __str__]
+  # Literals that stand in for a value, not hold one.
+  placeholders: ["true", "false", "yes", "no", none, "null", nil, unknown, n/a, na, "-", redacted, hidden]
+  # Library types of connections, clients, routers and loggers: a query
+  # or request they are given does not change them (db.Where(q, email)
+  # does not put the email into db).
+  handle_types: [gorm.io/gorm.DB, database/sql.DB, database/sql.Tx, database/sql.Conn, database/sql.Stmt, github.com/jmoiron/sqlx.DB,
+    github.com/jmoiron/sqlx.Tx, github.com/jackc/pgx/v5/pgxpool.Pool, github.com/jackc/pgx/v5.Conn, github.com/jackc/pgx/v4/pgxpool.Pool,
+    go.mongodb.org/mongo-driver/mongo.Client, go.mongodb.org/mongo-driver/mongo.Database, go.mongodb.org/mongo-driver/mongo.Collection,
+    github.com/redis/go-redis/v9.Client, github.com/go-redis/redis/v8.Client, net/http.Client, net/http.ServeMux,
+    github.com/gin-gonic/gin.Engine, github.com/gin-gonic/gin.RouterGroup, github.com/labstack/echo/v4.Echo, github.com/labstack/echo/v4.Group,
+    github.com/gorilla/mux.Router, github.com/go-chi/chi/v5.Mux, github.com/rs/zerolog.Logger, go.uber.org/zap.Logger,
+    go.uber.org/zap.SugaredLogger, log/slog.Logger, github.com/sirupsen/logrus.Logger, google.golang.org/grpc.ClientConn]
+  # Method name prefixes of calls on an unknown receiver that plausibly
+  # store their arguments into it (builders, collections, bundles).
+  mutator_prefixes: [put, add, append, set, insert, push, write, with, field, param, header, body, extra, attr, merge, concat, plus,
+    unshift, enqueue, offer, store, json, form, query, arg, str, int, any, object, value, update, fill, copy, emit, send, post, next,
+    resolve, complete, apply, also, let, run]
+  # Decoders, with the index of the argument they fill (receiver
+  # included): json.Unmarshal(b, &v) fills v with what b holds.
+  decode_into:
+    encoding/json.Unmarshal: 1
+    encoding/json.Decoder.Decode: 1
+    encoding/xml.Unmarshal: 1
+    encoding/xml.Decoder.Decode: 1
+    encoding/gob.Decoder.Decode: 1
+    gopkg.in/yaml.v3.Unmarshal: 1
+    github.com/gorilla/schema.Decoder.Decode: 1
+  # Functions and methods that run the closure they are given before
+  # returning (collections, scope functions, locking): its captures are
+  # read as they are at the call.
+  immediate_callbacks: [foreach, foreachindexed, foreachordered, map, mapindexed, mapnotnull, compactmap, flatmap, filter, filternot,
+    filterindexed, reduce, reduceright, fold, foldright, any, all, none, some, every, count, find, findindex, findlast, first, firstornull,
+    last, lastornull, contains, allsatisfy, sumof, maxby, minby, maxbyornull, minbyornull, sortedby, sortedbydescending, sortby, sortwith,
+    sortedwith, sorted, sort, groupby, associate, associateby, associatewith, partition, oneach, removeif, removeall, retainall, replaceall,
+    takewhile, dropwhile, computeifabsent, computeifpresent, compute, merge, ifpresent, ifpresentorelse, anymatch, allmatch, nonematch,
+    let, run, apply, also, with, use, takeif, takeunless, repeat, withlock, synchronized, buildstring,
+    buildlist, buildmap, measuretimemillis, max, min, slice, slicestable, sortfunc, sortstablefunc, indexfunc, containsfunc, deletefunc, fieldsfunc, trimfunc, walk, walkdir]
+  # Predicates named is<Word>/has<Word>/wasX about a value, and the
+  # transform that holds where they pass: isMasked(v) → masked.
+  transform_checks:
+    masked: masked
+    redacted: redacted
+    anonymized: anonymized
+    anonymised: anonymized
+    encrypted: encrypted
+    hashed: hashed
+    tokenized: tokenized
+    tokenised: tokenized
+    pseudonymized: tokenized
+    pseudonymised: tokenized
+    sanitized: redacted
+    sanitised: redacted
+  # Predicates that detect personal data: where they return false, the
+  # value is pii-checked.
+  pii_detectors: [containspii, haspii, ispii, lookslikepii, detectpii, containspersonaldata, haspersonaldata, containssensitivedata,
+    hassensitivedata, issensitive, containssensitive, containsphi]
+  # Collection operations: calling one on a receiver holding closures
+  # does not run them.
+  container_ops: [add, addall, append, extend, push, unshift, insert, put, putall, putifabsent, set, offer, enqueue, remove, removeat,
+    removefirst, removelast, pop, poll, peek, clear, getordefault, getornull, getorelse, elementat, iterator, listiterator, next, hasnext,
+    values, keys, keyset, entries, entryset, items, tolist, tomutablelist, toarray, totypedarray, aslist, stream, iter, copy, slice,
+    sublist, size, count, length, isempty, isnotempty, contains, containskey, indexof, first, last, firstornull, lastornull, reversed,
+    reverse, equals, hashcode, tostring, compareto, subscribe, register, addlistener, addeventlistener, "on", once, "off", removelistener,
+    removeeventlistener, unsubscribe, unregister]
+  # Collection and wrapper constructors: the result holds every argument
+  # (listOf(handler), Optional.of(x), a to b).
+  container_builders: [listof, mutablelistof, arraylistof, arrayof, setof, mutablesetof, hashsetof, mapof, mutablemapof, hashmapof, of,
+    aslist, singletonlist, list, tuple, set, dict, to, pair, array, from, ofnullable, just]
+  # Words in a name that make it a consent check (hasConsent,
+  # trackingAllowed, isOptedIn).
+  consent_words: [consent, optedin, optin, trackingallowed, trackingenabled, trackingauthorized, allowtracking, cantrack, analyticsenabled,
+    analyticsallowed, gdpr]
+  # Words dropped from the end of a text label ("user email is", "the
+  # phone of") before it is classified.
+  label_stop_words: [is, was, are, were, the, a, an, of, new, old]

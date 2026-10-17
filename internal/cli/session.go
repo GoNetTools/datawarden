@@ -138,12 +138,13 @@ func (s *session) inRoot(p string) string {
 
 func (a *App) request(s *session, c *common) scan.Request {
 	return scan.Request{
-		Repo:   s.repo,
-		Cache:  a.OpenCache(s.repo, s.inRoot(s.cfg.CacheDir), s.rules.Hash(), !c.noCache),
-		Config: s.cfg,
-		Rules:  s.rules,
-		Paths:  s.paths,
-		Logf:   s.logf,
+		Repo:       s.repo,
+		Cache:      a.OpenCache(s.repo, s.inRoot(s.cfg.CacheDir), s.rules.Hash(), !c.noCache),
+		Config:     s.cfg,
+		Rules:      s.rules,
+		Heuristics: s.rules.Heuristics(),
+		Paths:      s.paths,
+		Logf:       s.logf,
 	}
 }
 

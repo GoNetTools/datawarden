@@ -92,6 +92,9 @@ type NameClassifier interface {
 type Input struct {
 	Rules  RuleMatcher
 	Schema SchemaIndex
+	// Heuristics are the name heuristics (see Heuristics); nil means
+	// none, so only the rules describe library calls.
+	Heuristics Heuristics
 	// Lookup returns a cached summary for a function that is not part of
 	// this run (PR mode), or nil.
 	Lookup func(id string) *Summary
@@ -500,6 +503,7 @@ func derive(f *fact, pos ir.Pos, decay float64, xf ...string) *fact {
 }
 
 type analyzer struct {
+	h    words // the name heuristics
 	cha  *hierarchy
 	flow *closureFlow
 	// guards are, per function, the consent checks guarding each block:
@@ -522,7 +526,10 @@ func Analyze(ctx context.Context, funcs []*ir.Func, opts Options) (*Result, erro
 	if opts.Rules == nil || opts.Schema == nil || opts.Names == nil {
 		return nil, errors.New("analysis: Rules, Schema and Names are required")
 	}
-	a := &analyzer{cha: newHierarchy(opts.Classes), opts: opts, summaries: map[string]*Summary{}, digests: map[string]string{}, funcs: map[string]*ir.Func{}, flows: map[string]*finding.Flow{},
+	if opts.Heuristics == nil {
+		opts.Heuristics = noHeuristics{}
+	}
+	a := &analyzer{cha: newHierarchy(opts.Classes), opts: opts, h: words{opts.Heuristics}, summaries: map[string]*Summary{}, digests: map[string]string{}, funcs: map[string]*ir.Func{}, flows: map[string]*finding.Flow{},
 		checks: map[string]map[ir.VarID]check{}}
 	// Branches on checks (isMasked(v), isValidEmail(v)) give the checked
 	// value a new version where they pass; the caller's functions are not
@@ -618,11 +625,11 @@ func Analyze(ctx context.Context, funcs []*ir.Func, opts Options) (*Result, erro
 // function: branches on a consent check (or on a helper returning one) in
 // the function, and the checks guarding every call of it.
 func (a *analyzer) consentGuards(funcs []*ir.Func) map[string][][]string {
-	helpers := consentHelpers(funcs)
+	helpers := consentHelpers(a.h, funcs)
 	blocks := map[string][][]string{}
 	sites := map[string][]callSite{}
 	for _, f := range funcs {
-		blocks[f.ID] = guards(f, helpers)
+		blocks[f.ID] = guards(a.h, f, helpers)
 		for i := range f.Instrs {
 			in := &f.Instrs[i]
 			var ts []string
@@ -904,7 +911,7 @@ func (a *analyzer) mutates(lang string, c *ir.Call) bool {
 	case rules.EffectBuilder:
 		return true
 	case "":
-		return isMutator(c.Name)
+		return a.h.isMutator(c.Name)
 	}
 	return false
 }
@@ -1096,7 +1103,7 @@ func (a *analyzer) fieldFacts(st *state, fn *ir.Func, obj ir.VarID, owner, field
 	known := a.opts.Schema.KnownType(owner)
 	for _, f := range st.of(obj) {
 		switch {
-		case f.stored != "" && !wholeValueFields[name]:
+		case f.stored != "" && !a.h.has(tWholeValueFields, name):
 			// Held by one of the object's fields: read from st.stores
 			// above when it is this one.
 		case f.dt == "" && f.at == 0:
@@ -1141,7 +1148,7 @@ func (a *analyzer) step(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 		if ck, ok := st.checks[in.Dst]; ok {
 			return a.checkedValue(st, in, ck)
 		}
-		if in.Dst >= 0 && dataFreeName(fn.Vars[in.Dst].Name) && !fn.Vars[in.Dst].Cell {
+		if in.Dst >= 0 && a.h.dataFreeName(fn.Vars[in.Dst].Name) && !fn.Vars[in.Dst].Cell {
 			return false // a status or count computed from the data
 		}
 		for _, arg := range in.Args {
@@ -1333,47 +1340,11 @@ func (a *analyzer) keyLabels(fn *ir.Func, defs []int, in *ir.Instr, recvOff int)
 	return out
 }
 
-var getterVerbs = []string{"get", "opt", "form", "postform", "query", "param", "header", "lookup", "read", "cookie", "extra", "value", "object", "string"}
-
-// wholeValueFields are properties that render the whole object
-// (user.description in Swift): they hold what any of its fields holds.
-var wholeValueFields = map[string]bool{"description": true, "debugDescription": true, "dictionaryRepresentation": true, "allValues": true}
-
-// dataFreeSuffixes end the names of variables that hold a status, a count
-// or a flag computed from data, not the data: derivationStatus, rowCount.
-var dataFreeSuffixes = []string{"status", "count", "length", "size", "success", "succeeded", "exists", "ok"}
-
-func dataFreeName(name string) bool {
-	n := strings.ToLower(name)
-	for _, s := range dataFreeSuffixes {
-		if n == s || strings.HasSuffix(n, s) && len(n) > len(s) && (n[len(n)-len(s)-1] == '_' || name[len(name)-len(s)] >= 'A' && name[len(name)-len(s)] <= 'Z') {
-			return true
-		}
-	}
-	return false
-}
-
-// publicParts are accessors that return the public part of what they are
-// called on: a key entry's certificate or public key is not its private
-// key.
-var publicParts = map[string]bool{"getcertificate": true, "getcertificatechain": true, "getpublickey": true, "getpublic": true, "publickey": true, "certificate": true}
-
-// decodeInto maps decoders to the argument they fill (receiver included).
-var decodeInto = map[string]int{
-	"encoding/json.Unmarshal":                  1,
-	"encoding/json.Decoder.Decode":             1,
-	"encoding/xml.Unmarshal":                   1,
-	"encoding/xml.Decoder.Decode":              1,
-	"encoding/gob.Decoder.Decode":              1,
-	"gopkg.in/yaml.v3.Unmarshal":               1,
-	"github.com/gorilla/schema.Decoder.Decode": 1,
-}
-
 // keyedRead reports whether a call reads a value under a constant key:
 // a getter given a string literal first (form.get("page"),
 // r.FormValue("ssn"), getParameter("q")), or chi.URLParam(r, "id").
 func (a *analyzer) keyedRead(fn *ir.Func, defs []int, in *ir.Instr, recvOff int) bool {
-	if in.Call == nil || !isGetterName(in.Call.Name) && !strings.HasSuffix(in.Call.Name, "Param") {
+	if in.Call == nil || !a.h.isGetterName(in.Call.Name) && !strings.HasSuffix(in.Call.Name, "Param") {
 		return false
 	}
 	for i := recvOff; i < len(in.Args); i++ {
@@ -1425,16 +1396,6 @@ func accessPath(fn *ir.Func, defs []int, v ir.VarID) string {
 	return ""
 }
 
-func isGetterName(name string) bool {
-	n := strings.ToLower(name)
-	for _, v := range getterVerbs {
-		if strings.HasPrefix(n, v) {
-			return true
-		}
-	}
-	return false
-}
-
 func calleeLabel(c *ir.Call) string {
 	switch {
 	case c.Callee != "":
@@ -1445,364 +1406,6 @@ func calleeLabel(c *ir.Call) string {
 		return shortType(c.RecvType) + "." + c.Name
 	}
 	return c.Name
-}
-
-func (a *analyzer) call(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool {
-	c := in.Call
-	if c == nil {
-		return false
-	}
-	changed := false
-	isNew := in.Op == ir.OpNew
-	recvOff := 0
-	if (c.HasRecv || c.Indirect) && len(in.Args) > 0 {
-		recvOff = 1
-	}
-	keyed := a.keyLabels(fn, st.defs, in, recvOff)
-	for i, fs := range a.textLabels(fn, st.defs, in.Args, in.Pos) {
-		if i >= recvOff {
-			if keyed == nil {
-				keyed = map[int][]*fact{}
-			}
-			keyed[i] = append(keyed[i], fs...)
-		}
-	}
-	factsOf := func(i int) []*fact {
-		fs := st.of(in.Args[i])
-		// A key or label names a value that does not already say what
-		// it is: putString("password", encrypt(pw)) stays encrypted.
-		for _, k := range keyed[i] {
-			if !slices.ContainsFunc(fs, func(f *fact) bool { return f.dt == k.dt }) {
-				fs = append(fs, k)
-			}
-		}
-		return fs
-	}
-	label := calleeLabel(c)
-	guards := st.guardsAt(fn)
-	run, first := a.flow.invoked(fn, in, func(v ir.VarID) []closure { return st.closures[v] })
-	match := a.opts.Rules.Match
-	if len(run) > 0 && c.Callee == "" {
-		// A local or field holding closures, called: rules for a function
-		// of that name do not apply.
-		match = func(string, string, *ir.Call) []rules.Hit { return nil }
-	}
-
-	// Sinks.
-	remote := false
-	for _, hit := range match(fn.Lang, rules.KindSink, c) {
-		r := hit.Rule
-		if !r.ArgAllowed(func(i int) string { return argName(fn, st.defs, in, i, recvOff) }) {
-			continue
-		}
-		remote = remote || r.Category == "network"
-		dest := a.dest(r, fn, in, recvOff)
-		for i := 0; i < len(in.Args); i++ {
-			if i < recvOff && !(c.HasRecv && r.Arg.Selects(-1)) || !r.Arg.Selects(i-recvOff) {
-				continue
-			}
-			if i < recvOff && a.chainedSink(fn, st.defs, in.Args[i], r.ID) {
-				// log.Info().Str("ip", ip).Msg("x"): the receiver is what
-				// the previous call of the chain returned, and that call
-				// reported what it carries.
-				continue
-			}
-			for _, f := range factsOf(i) {
-				if i < recvOff && f.at > 0 && a.sinkCall(fn, f.at-1, r.ID) {
-					// evt.Str("ip", ip); evt.Msg(""): put on the receiver
-					// by a call that already reported it.
-					continue
-				}
-				if f.dt == "" {
-					sum.addParamSink(f.param, SinkHit{Rule: r.ID, Dest: dest, Sink: in.Pos, Func: a.reportFunc(fn), Call: label, Lang: fn.Lang,
-						Path: appendPath(f.path, in.Pos), Xf: f.xf, Conf: f.conf * hit.Conf, Field: f.field, Guards: guards})
-					continue
-				}
-				a.emit(f, SinkHit{Rule: r.ID, Dest: dest, Sink: in.Pos, Func: a.reportFunc(fn), Call: label, Lang: fn.Lang, Conf: hit.Conf, Guards: guards}, nil)
-			}
-		}
-	}
-
-	// Sources. A source that delivers its data to a callback (a location
-	// fix, an HTTP response) hands it to the closures it is given.
-	var sourced []*fact
-	keyedRead := a.keyedRead(fn, st.defs, in, recvOff)
-	for _, hit := range match(fn.Lang, rules.KindSource, c) {
-		if hit.Rule.DataType == requestData && keyedRead {
-			// r.FormValue("page"): the key says what the value is.
-			continue
-		}
-		f := &fact{dt: hit.Rule.DataType, param: -1, src: in.Pos, desc: "call " + label, path: []ir.Pos{in.Pos}, conf: sourceConf(hit)}
-		if into := hit.Rule.Arg.Indexes; len(into) > 0 {
-			// c.ShouldBindJSON(&v): the call fills its argument.
-			for _, i := range into {
-				if j := recvOff + i; i >= 0 && j < len(in.Args) {
-					changed = st.mutate(in.Args[j], "", st.mutation(f)) || changed
-				}
-			}
-			continue
-		}
-		changed = st.add(in.Dst, f) || changed
-		sourced = append(sourced, f)
-	}
-
-	// Transforms (sanitizers): the result carries the input's data types
-	// with the transform recorded; no default propagation.
-	if hits := match(fn.Lang, rules.KindTransform, c); len(hits) > 0 {
-		x := hits[0].Rule.Transform
-		for i := range in.Args {
-			for _, f := range factsOf(i) {
-				changed = st.add(in.Dst, derive(f, in.Pos, 1, x)) || changed
-			}
-		}
-		return changed
-	}
-
-	nameXf := a.opts.Names.FuncTransform(c.Name)
-
-	// Closures. A call runs the closures held in the variable it calls,
-	// in the receiver of an unresolved method or in the field the method
-	// is named after (closureFlow.invoked), with its arguments. A closure
-	// passed as an argument may be called back by the callee with
-	// anything else the call is given.
-	invoked := false
-	for _, cl := range run {
-		if cl.param {
-			continue
-		}
-		// Arguments beyond the closure's last parameter reach that
-		// parameter (varargs, an implicit it standing for several).
-		last := len(in.Args) - first - 1
-		if cf := a.funcs[cl.fn]; cf != nil {
-			last = len(cf.Params) - cf.Captures - 1
-		}
-		ok, ch := a.runClosure(st, fn, in, cl, in.Args[first:], func(i int) []*fact {
-			var out []*fact
-			for j := first + i; j < len(in.Args) && (j == first+i || i == last); j++ {
-				out = append(out, factsOf(j)...)
-			}
-			return out
-		}, st.of, sum)
-		invoked, changed = invoked || ok, changed || ch
-	}
-	for i, arg := range in.Args {
-		if len(run) > 0 && i < first {
-			continue
-		}
-		cls := st.closures[arg]
-		if len(cls) == 0 {
-			continue
-		}
-		// A callee known to run the closure before it returns (forEach,
-		// map, apply, sort.Slice) runs it here: its captures are read as
-		// they are at the call. Any other callee may keep the closure and
-		// run it at any later time (a listener, a stored handler), so its
-		// captures are read with every mutation, wherever it happens. The
-		// closure's parameters correspond to the call's other arguments
-		// (the receiver of apply or forEach first).
-		now := runsCallbackNow(c)
-		inputs := append([]*fact(nil), sourced...)
-		var others []ir.VarID
-		for j := range in.Args {
-			if j != i && !(c.Indirect && j == 0) {
-				inputs = append(inputs, factsOf(j)...)
-				others = append(others, in.Args[j])
-			}
-		}
-		outs := others
-		if !now {
-			// A kept callback (a handler, a middleware) is later given
-			// arguments of the caller's choosing: what it writes into
-			// its parameters does not go into this call's arguments.
-			outs = nil
-		}
-		for _, cl := range cls {
-			captured := st.all
-			if now {
-				captured = st.of
-			}
-			_, ch := a.runClosure(st, fn, in, cl, outs, func(int) []*fact { return inputs }, captured, sum)
-			changed = changed || ch
-		}
-	}
-	if invoked {
-		return changed
-	}
-
-	// Calls into analyzed code: apply the callee summaries. A dynamically
-	// dispatched call may run its target or any override or
-	// implementation of it; a construction runs the constructor on the
-	// new object.
-	if isNew && c.Target != "" {
-		if s := a.summaryFor(c.Target); s != nil {
-			// The constructor's first parameter is the new object.
-			base := append([]ir.VarID{in.Dst}, in.Args...)
-			var names []string
-			if c.ArgNames != nil {
-				names = append([]string{""}, c.ArgNames...)
-			}
-			args, idx := a.arrange(c.Target, base, names)
-			factsAt := func(i int) []*fact {
-				switch {
-				case idx[i] < 0:
-					return nil
-				case idx[i] == 0:
-					return st.of(in.Dst)
-				}
-				return factsOf(idx[i] - 1)
-			}
-			changed = a.apply(st, fn, in, s, args, factsAt, "", ir.NoVar, sum) || changed
-		}
-	}
-	applied := false
-	if !isNew && !c.Indirect {
-		for _, t := range a.cha.targets(c, fn.Lang) {
-			if s := a.summaryFor(t); s != nil {
-				args, idx := a.arrange(t, in.Args, c.ArgNames)
-				factsAt := func(i int) []*fact {
-					if idx[i] < 0 {
-						return nil
-					}
-					return factsOf(idx[i])
-				}
-				changed = a.apply(st, fn, in, s, args, factsAt, nameXf, in.Dst, sum) || changed
-				applied = true
-			}
-		}
-	}
-	if applied {
-		return changed
-	}
-
-	// Unknown code: conservative propagation. A getter on a value whose
-	// type the schema knows (profile.getBio()) is answered from the schema
-	// instead of smearing every field of the object onto the result.
-	nonRecv := len(in.Args) - recvOff
-	skipRecv := c.HasRecv && recvOff == 1 && nonRecv == 0 && publicParts[strings.ToLower(c.Name)]
-	if c.HasRecv && recvOff == 1 && nonRecv == 0 && in.Args[0] >= 0 {
-		if owner := fn.Vars[in.Args[0]].Type; owner != "" && a.opts.Schema.KnownType(owner) {
-			if field, ok := getterField(c.Name); ok {
-				skipRecv = true
-				if h, fs := a.opts.Schema.Field(owner, field); fs == detect.FieldPII {
-					f := &fact{dt: h.DataType, param: -1, src: in.Pos, desc: fmt.Sprintf("%s.%s() (%s)", shortType(owner), c.Name, h.Via), path: []ir.Pos{in.Pos}, conf: h.Conf}
-					changed = st.add(in.Dst, f) || changed
-				}
-			}
-		}
-	}
-	// A keyed put (ctx.Set("user", u), map.put("email", e)) stores the
-	// value under its key: reading another key, or another part of the
-	// object, does not give it.
-	effect := a.apiEffect(fn.Lang, c)
-	mutator := a.mutates(fn.Lang, c)
-	putKey := ""
-	if c.HasRecv && recvOff == 1 && !isNew && nonRecv == 2 && mutator {
-		if k, ok := constOf(fn, st.defs, in.Args[1]); ok && k != "" && !strings.ContainsAny(k, " \t\n") {
-			putKey = k
-		}
-	}
-	// A request through an HTTP client the rules do not know
-	// (HTTPClient.send_request, session.post) answers with the remote's
-	// response, like a network sink's; a length, count or type check
-	// is a number or a flag.
-	// What a library call does with its arguments comes from its api
-	// rule when there is one; the name heuristics below are the fallback.
-	lname := strings.ToLower(c.Name)
-	remote = remote || effect == rules.EffectSends || effect == "" && (c.HasRecv || c.RecvText != "") && requestMethods[lname] && !buildsRequest(c)
-	if effect == rules.EffectNone || effect == "" && dataFreeCalls[lname] {
-		return changed
-	}
-	// A data loader (AppByTokenLoader(ctx).load(token), GraphQL's
-	// DataLoader pattern) answers with the value stored under the key it
-	// is given, not with the key.
-	lookup := recvOff == 1 && loaderMethods[lname] && strings.Contains(strings.ToLower(c.RecvText+"|"+c.RecvType+"|"+c.Callee), "loader")
-	if dst, ok := decodeInto[c.Callee]; ok && dst < len(in.Args) {
-		// A decoder fills the value it is given with what it reads:
-		// json.NewDecoder(r.Body).Decode(&v), json.Unmarshal(b, &v).
-		for i := range in.Args {
-			if i == dst {
-				continue
-			}
-			for _, f := range factsOf(i) {
-				changed = st.mutate(in.Args[dst], "", st.mutation(derive(f, in.Pos, 0.95))) || changed
-			}
-		}
-	}
-	for i := range in.Args {
-		if skipRecv && i == 0 {
-			continue
-		}
-		for _, f := range factsOf(i) {
-			if remote {
-				// A network call answers with the remote's response,
-				// which is not derived from what was sent: a login
-				// request's reply is not the password.
-				continue
-			}
-			if i == 0 && recvOff == 1 && f.stored != "" && !readsPart(fn, st.defs, in, f.stored) {
-				continue
-			}
-			if i == 0 && recvOff == 1 && f.dt == requestData && keyedRead {
-				// request.form.get("page"): the key says what it is.
-				continue
-			}
-			if lookup && i >= recvOff {
-				continue
-			}
-			changed = st.add(in.Dst, derive(f, in.Pos, 0.95, nameXf)) || changed
-			if putKey != "" && i == 2 {
-				changed = st.mutate(in.Args[0], putKey, st.mutation(derive(f, in.Pos, 0.9))) || changed
-				continue
-			}
-			if putKey != "" && i == 1 {
-				continue
-			}
-			if i >= recvOff && c.HasRecv && recvOff == 1 && !isNew && mutator {
-				// The receiver, and the object it came from when it is a
-				// builder call's result (sb.append(a).append(email)).
-				r := in.Args[0]
-				for depth := 0; r >= 0 && depth < 8; depth++ {
-					if handleType(fn.Vars[r].Type) {
-						// A connection or client is not changed by the data
-						// a query or request is given: db.Where(q, email)
-						// does not put the email into db.
-						break
-					}
-					changed = st.mutate(r, "", st.mutation(derive(f, in.Pos, 0.9))) || changed
-					next, ok := st.fluent[r]
-					if !ok {
-						break
-					}
-					r = next
-				}
-			}
-		}
-	}
-	if r, ok := st.fluent[in.Dst]; ok && r == in.Args[0] && !remote {
-		// A builder or scope function returns its receiver: the result
-		// is the same object, with the mutations made to it here and
-		// later (User().apply { email = x }).
-		changed = a.alias(st, in, in.Dst, r) || changed
-	}
-	if nonRecv == 0 && in.Dst >= 0 && !skipRecv {
-		if m, ok := a.opts.Names.Getter(c.Name); ok {
-			f := &fact{dt: m.DataType, param: -1, src: in.Pos, desc: fmt.Sprintf("getter %s()", c.Name), path: []ir.Pos{in.Pos}, conf: m.Conf}
-			if m.Transform != "" {
-				f.xf = []string{m.Transform}
-			}
-			changed = st.add(in.Dst, f) || changed
-		}
-	}
-	if nonRecv >= 1 && in.Dst >= 0 && isGetterName(c.Name) {
-		if key, ok := constOf(fn, st.defs, in.Args[recvOff]); ok {
-			// A value passed after the key (slog.String("address", v))
-			// may say it is something else.
-			if m, ok := a.opts.Names.Key(key); ok && (recvOff+1 >= len(in.Args) || !a.keyContradicted(fn, st.defs, in.Args[recvOff+1], m.DataType)) {
-				changed = st.add(in.Dst, &fact{dt: m.DataType, param: -1, src: in.Pos, desc: fmt.Sprintf("%s(%q)", c.Name, key), path: []ir.Pos{in.Pos}, conf: m.Conf}) || changed
-			}
-		}
-	}
-	return changed
 }
 
 // runClosure applies the summary of closure cl at a call that runs it. The
@@ -2075,16 +1678,6 @@ func (a *analyzer) emit(f *fact, h SinkHit, via []ir.Pos) {
 	a.flows[k] = fl
 }
 
-// requestMethods send a request through an HTTP client and return its
-// response.
-var requestMethods = map[string]bool{
-	"send_request": true, "sendrequest": true, "request": true, "urlopen": true, "fetch": true,
-	"post": true, "patch": true, "post_json": true, "postjson": true,
-}
-
-// loaderMethods look a value up by key on a data loader.
-var loaderMethods = map[string]bool{"load": true, "load_many": true, "loadmany": true}
-
 // dataFreeCalls return a size, a count, a flag or a type, not the data
 // they are given.
 // buildsRequest reports whether a request-method call only builds a
@@ -2092,13 +1685,6 @@ var loaderMethods = map[string]bool{"load": true, "load_many": true, "loadmany":
 // the request, and is sent by the call that later executes it.
 func buildsRequest(c *ir.Call) bool {
 	return strings.Contains(strings.ToLower(c.RecvType+"|"+c.RecvText), "builder")
-}
-
-var dataFreeCalls = map[string]bool{
-	"len": true, "count": true, "size": true, "length": true, "isempty": true, "isnotempty": true,
-	"isinstance": true, "issubclass": true, "hasattr": true, "callable": true, "type": true, "typeof": true,
-	"bool": true, "exists": true, "contains": true, "containskey": true, "startswith": true, "endswith": true,
-	"hasprefix": true, "hassuffix": true, "isvalid": true, "is_valid": true, "equals": true, "equal": true,
 }
 
 // errorValue reports whether v is an exception or error constructed in fn
@@ -2123,36 +1709,6 @@ func errorValue(fn *ir.Func, defs []int, v ir.VarID) bool {
 	return false
 }
 
-// selfDescribing are calls and fields whose value is a network location,
-// by name with any get prefix, lower-cased: in
-// Str("address", l.Addr().String()) the value is the listen address, not
-// the postal address the key names.
-var selfDescribing = map[string]bool{
-	"addr": true, "localaddr": true, "remoteaddr": true, "listenaddr": true, "serveraddr": true, "bindaddr": true,
-	"localaddress": true, "remoteaddress": true, "listenaddress": true, "serveraddress": true, "bindaddress": true,
-	"socketaddress": true, "inetaddress": true, "host": true, "hostname": true, "hostport": true, "hoststring": true,
-	"url": true, "uri": true, "requesturi": true, "requesturl": true, "baseurl": true, "port": true, "endpoint": true,
-}
-
-// stringers render the value they are called on: l.Addr().String() is
-// what l.Addr() is.
-var stringers = map[string]bool{"String": true, "toString": true, "description": true, "__str__": true}
-
-// placeholders are literals that stand in for a value, not hold one.
-var placeholders = map[string]bool{"true": true, "false": true, "yes": true, "no": true, "none": true, "null": true, "nil": true, "unknown": true, "n/a": true, "na": true, "-": true, "redacted": true, "hidden": true}
-
-// notData reports whether a literal cannot be the data its key names:
-// empty, a number, a boolean or a placeholder. A hard-coded
-// putString("password", "hunter2") is the secret itself.
-func notData(lit string) bool {
-	t := strings.ToLower(strings.TrimSpace(lit))
-	if t == "" || placeholders[t] {
-		return true
-	}
-	_, err := strconv.ParseFloat(t, 64)
-	return err == nil
-}
-
 // keyContradicted reports whether the value v says it is not the data
 // type dt its key names: a literal that is not data, a call or field that names a network
 // location (Addr(), RemoteAddr, Host, URL, Port), or a variable on the
@@ -2162,7 +1718,7 @@ func (a *analyzer) keyContradicted(fn *ir.Func, defs []int, v ir.VarID, dt strin
 	for depth := 0; depth < 6 && v >= 0 && int(v) < len(fn.Vars); depth++ {
 		vr := &fn.Vars[v]
 		if vr.Const != nil {
-			return notData(*vr.Const)
+			return a.h.notData(*vr.Const)
 		}
 		if vr.Name != "" {
 			if m, ok := a.opts.Names.Key(vr.Name); ok && m.DataType != dt {
@@ -2177,39 +1733,19 @@ func (a *analyzer) keyContradicted(fn *ir.Func, defs []int, v ir.VarID, dt strin
 		case in.Op == ir.OpAssign && len(in.Args) == 1:
 			v = in.Args[0]
 		case in.Op == ir.OpLoad && in.Field != "":
-			return selfDescribing[strings.ToLower(in.Field)]
+			return a.h.has(tSelfDescribing, strings.ToLower(in.Field))
 		case in.Op == ir.OpCall && in.Call != nil:
-			if stringers[in.Call.Name] && in.Call.HasRecv && len(in.Args) == 1 {
+			if a.h.has(tStringers, in.Call.Name) && in.Call.HasRecv && len(in.Args) == 1 {
 				v = in.Args[0]
 				continue
 			}
 			n := strings.ToLower(in.Call.Name)
-			return selfDescribing[n] || strings.HasPrefix(n, "get") && selfDescribing[n[3:]]
+			return a.h.has(tSelfDescribing, n) || strings.HasPrefix(n, "get") && a.h.has(tSelfDescribing, n[3:])
 		default:
 			return false
 		}
 	}
 	return false
-}
-
-// handleTypes are library types of connections, clients, loggers and
-// routers: shared handles that calls pass data through, not hold.
-var handleTypes = map[string]bool{
-	"gorm.io/gorm.DB": true, "database/sql.DB": true, "database/sql.Tx": true, "database/sql.Conn": true,
-	"database/sql.Stmt": true, "github.com/jmoiron/sqlx.DB": true, "github.com/jmoiron/sqlx.Tx": true,
-	"github.com/jackc/pgx/v5/pgxpool.Pool": true, "github.com/jackc/pgx/v5.Conn": true, "github.com/jackc/pgx/v4/pgxpool.Pool": true,
-	"go.mongodb.org/mongo-driver/mongo.Client": true, "go.mongodb.org/mongo-driver/mongo.Database": true,
-	"go.mongodb.org/mongo-driver/mongo.Collection": true, "github.com/redis/go-redis/v9.Client": true,
-	"github.com/go-redis/redis/v8.Client": true, "net/http.Client": true, "net/http.ServeMux": true,
-	"github.com/gin-gonic/gin.Engine": true, "github.com/gin-gonic/gin.RouterGroup": true,
-	"github.com/labstack/echo/v4.Echo": true, "github.com/labstack/echo/v4.Group": true, "github.com/gorilla/mux.Router": true,
-	"github.com/go-chi/chi/v5.Mux": true, "github.com/rs/zerolog.Logger": true, "go.uber.org/zap.Logger": true,
-	"go.uber.org/zap.SugaredLogger": true, "log/slog.Logger": true, "github.com/sirupsen/logrus.Logger": true,
-	"google.golang.org/grpc.ClientConn": true,
-}
-
-func handleType(t string) bool {
-	return t != "" && handleTypes[strings.TrimLeft(t, "*&")]
 }
 
 // copiedType is the declared type of v, or of the value it is a copy of
@@ -2266,37 +1802,6 @@ func (a *analyzer) chainedSink(fn *ir.Func, defs []int, v ir.VarID, id string) b
 	return false
 }
 
-// wholeValueMethods render or copy a whole object: what any of its fields
-// holds is in the result.
-var wholeValueMethods = map[string]bool{
-	"tostring": true, "string": true, "description": true, "json": true, "tojson": true, "dump": true, "dumps": true,
-	"serialize": true, "encode": true, "marshal": true, "copy": true, "clone": true, "build": true, "get": true,
-	"values": true, "entries": true, "items": true, "iterator": true, "asdict": true, "dict": true, "todict": true,
-	"tomap": true, "model_dump": true, "stringify": true, "format": true, "unwrap": true, "orelse": true, "await": true,
-}
-
-// readsPart reports whether an unresolved method call on an object may
-// return what the object's part (field or key) holds: a read with that
-// constant key (ctx.Get("user")), a read with a key not known here, a
-// method named after the part (getEmail() for email), or one rendering
-// the whole object (toString()). ctx.ClientIP() does not return the user
-// put under "user".
-func readsPart(fn *ir.Func, defs []int, in *ir.Instr, part string) bool {
-	name := strings.ToLower(in.Call.Name)
-	if !isGetterName(name) && isMutator(name) {
-		return true // a builder call returns its receiver
-	}
-	if len(in.Args) > 1 {
-		k, ok := constOf(fn, defs, in.Args[1])
-		return !ok || k == part || normName(k) == normName(part)
-	}
-	if wholeValueMethods[name] {
-		return true
-	}
-	p := normName(part)
-	return p != "" && strings.Contains(normName(name), p)
-}
-
 // normName lowercases a name and drops its separators: first_name and
 // firstName are the same.
 func normName(s string) string {
@@ -2318,20 +1823,4 @@ func getterField(name string) (string, bool) {
 		}
 	}
 	return "", false
-}
-
-var mutatorPrefixes = []string{"put", "add", "append", "set", "insert", "push", "write", "with", "field", "param", "header",
-	"body", "extra", "attr", "merge", "concat", "plus", "unshift", "enqueue", "offer", "store", "json", "form", "query", "arg", "str",
-	"int", "any", "object", "value", "update", "fill", "copy", "emit", "send", "post", "next", "resolve", "complete", "apply", "also", "let", "run"}
-
-// isMutator reports whether a method on an unknown receiver plausibly
-// stores its arguments into the receiver (builders, collections, bundles).
-func isMutator(name string) bool {
-	n := strings.ToLower(name)
-	for _, p := range mutatorPrefixes {
-		if strings.HasPrefix(n, p) {
-			return true
-		}
-	}
-	return false
 }
