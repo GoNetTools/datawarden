@@ -47,6 +47,9 @@ func runAnnotated(t *testing.T, set *rules.Set, root string) (covered, ran map[s
 		}
 		l, ok := lang.Lookup(e.Name())
 		if !ok || l.Kind != lang.Code || l.Name != e.Name() {
+			if e.Name() == "literals" {
+				continue // checked by TestScenarioLiterals
+			}
 			t.Errorf("%s/%s: name each directory after a code language in internal/lang (%v)", root, e.Name(), lang.CodeNames())
 			continue
 		}

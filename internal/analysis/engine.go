@@ -1677,7 +1677,7 @@ func (a *analyzer) call(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 	// response, like a network sink's; a length, count or type check
 	// is a number or a flag.
 	lname := strings.ToLower(c.Name)
-	remote = remote || (c.HasRecv || c.RecvText != "") && requestMethods[lname]
+	remote = remote || (c.HasRecv || c.RecvText != "") && requestMethods[lname] && !buildsRequest(c)
 	if dataFreeCalls[lname] {
 		return changed
 	}
@@ -2056,6 +2056,13 @@ var loaderMethods = map[string]bool{"load": true, "load_many": true, "loadmany":
 
 // dataFreeCalls return a size, a count, a flag or a type, not the data
 // they are given.
+// buildsRequest reports whether a request-method call only builds a
+// request (new Request.Builder().url(u).post(body)): the body goes into
+// the request, and is sent by the call that later executes it.
+func buildsRequest(c *ir.Call) bool {
+	return strings.Contains(strings.ToLower(c.RecvType+"|"+c.RecvText), "builder")
+}
+
 var dataFreeCalls = map[string]bool{
 	"len": true, "count": true, "size": true, "length": true, "isempty": true, "isnotempty": true,
 	"isinstance": true, "issubclass": true, "hasattr": true, "callable": true, "type": true, "typeof": true,

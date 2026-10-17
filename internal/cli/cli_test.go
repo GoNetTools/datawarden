@@ -483,6 +483,17 @@ func TestSessionFlags(t *testing.T) {
 	if req.Config.Policy.MinConfidence != 0.9 {
 		t.Errorf("min_confidence = %v", req.Config.Policy.MinConfidence)
 	}
+	// --fail-on overrides policy.fail_on and rejects unknown kinds.
+	if code := h.run("scan", "--fail-on", "log, third_party", "--no-cache", "--no-fail"); code != ExitClean {
+		t.Fatalf("exit %d: %s", code, h.errb)
+	}
+	req = h.scanner.reqs[len(h.scanner.reqs)-1]
+	if got := strings.Join(req.Config.Policy.FailOn, ","); got != "log,third_party" {
+		t.Errorf("fail_on = %s", got)
+	}
+	if code := h.run("scan", "--fail-on", "logs", "--no-cache"); code != ExitError || !strings.Contains(h.errb.String(), "fail-on") {
+		t.Errorf("bad --fail-on: exit %d\n%s", code, h.errb)
+	}
 	if code := h.run("rules", "--lang", "go"); code != ExitClean || !strings.Contains(h.out.String(), "sdk.acme.x") {
 		t.Errorf("absolute rules path: exit %d\n%s%s", code, h.out, h.errb)
 	}

@@ -293,3 +293,18 @@ func TestSchemaSensitiveMarkers(t *testing.T) {
 		t.Errorf("Card carries %v", dts)
 	}
 }
+
+// A collection of a sensitive type carries what its elements carry.
+func TestSchemaCollectionTypes(t *testing.T) {
+	s := BuildSchema(testC, []*ir.TypeDecl{{Name: "com.acme.User", Kind: "data", Fields: []ir.Field{{Name: "email", Type: "String"}}}})
+	for _, typ := range []string{"com.acme.User", "List<User>", "java.util.List<com.acme.User>", "Map<String, User>", "Set<User?>", "[]User", "[]*model.User", "map[string]User", "map[string][]User", "User[]", "list[User]", "dict[str, User]", "Promise<User[]>", "Optional<User>", "java.util.concurrent.CompletableFuture<com.acme.User>"} {
+		if dts := s.TypeDataTypes(typ); len(dts) != 1 || dts[0] != "email" {
+			t.Errorf("TypeDataTypes(%q) = %v, want [email]", typ, dts)
+		}
+	}
+	for _, typ := range []string{"List<String>", "[]string", "Map<User, String>", "UserService", "Optional<String>"} {
+		if dts := s.TypeDataTypes(typ); len(dts) != 0 {
+			t.Errorf("TypeDataTypes(%q) = %v, want none", typ, dts)
+		}
+	}
+}

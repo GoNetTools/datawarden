@@ -88,6 +88,24 @@ func javaTypeText(f *srcFile, n *Node) string {
 	}
 	t := f.text(n)
 	if i := strings.IndexByte(t, '<'); i > 0 {
+		// Type arguments are dropped, except the element type of a
+		// collection (List<User>): a list of users carries their data.
+		head, args := strings.TrimSpace(t[:i]), t[i+1:strings.LastIndexByte(t, '>')]
+		t = head
+		if carriesElements(shortName(head)) {
+			el := strings.TrimSpace(args[strings.LastIndexByte(args, ',')+1:])
+			el = strings.TrimPrefix(strings.TrimPrefix(el, "? extends "), "? super ")
+			if el != "" && el != "?" {
+				t = head + "<" + javaTypeTextOf(el) + ">"
+			}
+		}
+	}
+	return strings.TrimSpace(strings.TrimSuffix(t, "[]"))
+}
+
+// javaTypeTextOf is javaTypeText for a type written as a string.
+func javaTypeTextOf(t string) string {
+	if i := strings.IndexByte(t, '<'); i > 0 {
 		t = t[:i]
 	}
 	return strings.TrimSpace(strings.TrimSuffix(t, "[]"))

@@ -256,6 +256,11 @@ func (p *program) resolveType(f *srcFile, t string) string {
 	t = strings.TrimSpace(t)
 	t = strings.TrimSuffix(t, "?")
 	if i := strings.IndexAny(t, "<["); i > 0 {
+		if t[i] == '<' && strings.HasSuffix(t, ">") {
+			// A collection's element type (List<User>), kept by the
+			// frontend: resolve both.
+			return p.resolveType(f, t[:i]) + "<" + p.resolveType(f, t[i+1:len(t)-1]) + ">"
+		}
 		t = t[:i]
 	}
 	if t == "" {
@@ -288,7 +293,22 @@ func (p *program) resolveType(f *srcFile, t string) string {
 	return t
 }
 
+// carriesElements reports whether a generic type's value carries its
+// type argument's data: a collection or a wrapper of it.
+func carriesElements(short string) bool {
+	switch short {
+	case "List", "MutableList", "Set", "MutableSet", "Map", "MutableMap", "Collection", "Iterable", "Iterator", "Stream",
+		"ArrayList", "LinkedList", "HashSet", "LinkedHashSet", "TreeSet", "HashMap", "LinkedHashMap", "TreeMap", "Queue", "Deque",
+		"Optional", "Future", "CompletableFuture", "Mono", "Flux", "Single", "Maybe", "Observable", "Flow", "LiveData", "MutableLiveData", "Deferred", "Lazy", "Supplier":
+		return true
+	}
+	return false
+}
+
 func (p *program) class(name string) *classInfo {
+	if i := strings.IndexByte(name, '<'); i > 0 {
+		name = name[:i]
+	}
 	if c, ok := p.classes[name]; ok {
 		return c
 	}

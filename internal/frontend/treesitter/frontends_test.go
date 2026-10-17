@@ -538,3 +538,37 @@ class C { void f(String email) { log.error("no annotation {}", email); } }`})
 		t.Errorf("no annotation: %+v", c)
 	}
 }
+
+// A collection's element type is kept and resolved; other type arguments
+// are dropped, and class lookups ignore them.
+func TestJavaCollectionTypes(t *testing.T) {
+	m := lower(t, NewJava, map[string]string{"p/A.java": `package p;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+class User { String email; }
+class Page<T> { List<T> items; void log(T x) {} }
+class A {
+    void f(List<User> users, Map<String, User> byId, Optional<User> maybe, Page<User> page, List<? extends User> wild) {
+        users.size(); page.log(users.get(0));
+    }
+}`})
+	var f *ir.Func
+	for _, fn := range m.Funcs {
+		if fn.ID == "p.A.f" {
+			f = fn
+		}
+	}
+	if f == nil {
+		t.Fatal("no A.f")
+	}
+	want := map[string]string{"users": "java.util.List<p.User>", "byId": "java.util.Map<p.User>", "maybe": "java.util.Optional<p.User>", "page": "p.Page", "wild": "java.util.List<p.User>"}
+	for _, v := range f.Vars {
+		if w, ok := want[v.Name]; ok && v.Type != w {
+			t.Errorf("%s: type %q, want %q", v.Name, v.Type, w)
+		}
+	}
+	if c := calls(m)["log"]; c == nil || c.Callee != "p.Page.log" {
+		t.Errorf("generic class method: %+v", c)
+	}
+}
