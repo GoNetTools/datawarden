@@ -71,3 +71,22 @@ func BenchmarkAnalyze(b *testing.B) {
 		})
 	}
 }
+
+// BenchmarkAnalyzeWorkers shows how much a wide call graph gains from
+// analyzing its components in parallel.
+func BenchmarkAnalyzeWorkers(b *testing.B) {
+	names := detect.NewClassifier(detect.DefaultTaxonomy())
+	schema := detect.BuildSchema(names, nil)
+	funcs := fanout(300)
+	for _, workers := range []int{1, 0} {
+		b.Run(fmt.Sprintf("workers=%d", workers), func(b *testing.B) {
+			in := Input{Rules: fakeRules{}, Heuristics: builtinHeuristics(b), Schema: schema, Workers: workers}
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				if _, err := (Engine{Names: names}).Analyze(context.Background(), funcs, in); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}

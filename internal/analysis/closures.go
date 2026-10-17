@@ -7,6 +7,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/GoNetTools/datawarden/internal/ir"
 )
@@ -45,6 +46,7 @@ type closureFlow struct {
 	// ownerFiles caches the files declaring each owner type and its
 	// supertypes, for field.
 	ownerFiles map[string][]string
+	ofmu       sync.Mutex // ownerFiles is filled lazily, by any worker
 	grew       bool
 }
 
@@ -161,6 +163,7 @@ func (cf *closureFlow) field(owner, field string, fn *ir.Func) []closure {
 	if len(m) == 0 {
 		return nil
 	}
+	cf.ofmu.Lock()
 	ownerFiles, ok := cf.ownerFiles[owner]
 	if !ok {
 		for _, o := range cf.a.cha.ancestors(owner) {
@@ -170,6 +173,7 @@ func (cf *closureFlow) field(owner, field string, fn *ir.Func) []closure {
 		}
 		cf.ownerFiles[owner] = ownerFiles
 	}
+	cf.ofmu.Unlock()
 	var out []closure
 	add := func(src []closure) {
 		for _, c := range src {

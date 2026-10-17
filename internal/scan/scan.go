@@ -216,6 +216,7 @@ func (s *Scanner) Run(ctx context.Context, req Request) (*Result, error) {
 	// Taint analysis.
 	in := analysis.Input{
 		Rules: req.Rules, Heuristics: req.Heuristics, Schema: res.Schema, Lookup: req.Cache.Lookup, FirstPartyDomains: cfg.FirstPartyDomains, Classes: classes,
+		Workers: cfg.Workers,
 	}
 	if res.Mode != ModeFull {
 		// Not every function is analysed: callers outside this run are

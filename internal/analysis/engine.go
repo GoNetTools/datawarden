@@ -31,6 +31,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode"
 
 	"github.com/GoNetTools/datawarden/internal/detect"
@@ -106,6 +107,9 @@ type Input struct {
 	// Callers returns the callers of a function known from earlier runs,
 	// when only part of the program is analysed (PR mode), or is nil.
 	Callers func(id string) []string
+	// Workers is how many components of the call graph are analyzed at
+	// a time: 0 for one per CPU, 1 for one after the other.
+	Workers int
 }
 
 // Engine is the analysis service. Its name classifier and threshold are
@@ -510,11 +514,14 @@ type analyzer struct {
 	// its own branches and those every caller passed (guard.go).
 	guards map[string][][]string
 	// checks are, per function, the checked values (refineChecks).
-	checks    map[string]map[ir.VarID]check
-	opts      Options
+	checks map[string]map[ir.VarID]check
+	opts   Options
+	funcs  map[string]*ir.Func
+	// summaries and flows are written by the workers that analyze
+	// components (schedule.go), under their locks.
+	smu       sync.RWMutex
 	summaries map[string]*Summary
-	digests   map[string]string
-	funcs     map[string]*ir.Func
+	fmu       sync.Mutex
 	flows     map[string]*finding.Flow
 }
 
@@ -529,7 +536,7 @@ func Analyze(ctx context.Context, funcs []*ir.Func, opts Options) (*Result, erro
 	if opts.Heuristics == nil {
 		opts.Heuristics = noHeuristics{}
 	}
-	a := &analyzer{cha: newHierarchy(opts.Classes), opts: opts, h: words{opts.Heuristics}, summaries: map[string]*Summary{}, digests: map[string]string{}, funcs: map[string]*ir.Func{}, flows: map[string]*finding.Flow{},
+	a := &analyzer{cha: newHierarchy(opts.Classes), opts: opts, h: words{opts.Heuristics}, summaries: map[string]*Summary{}, funcs: map[string]*ir.Func{}, flows: map[string]*finding.Flow{},
 		checks: map[string]map[ir.VarID]check{}}
 	// Branches on checks (isMasked(v), isValidEmail(v)) give the checked
 	// value a new version where they pass; the caller's functions are not
@@ -579,38 +586,8 @@ func Analyze(ctx context.Context, funcs []*ir.Func, opts Options) (*Result, erro
 		sort.Strings(cg[f.ID])
 	}
 	a.guards = a.consentGuards(funcs)
-	for _, scc := range tarjan(funcs, cg, a.funcs) {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		recursive := len(scc) > 1
-		if len(scc) == 1 {
-			for _, c := range cg[scc[0].ID] {
-				if c == scc[0].ID {
-					recursive = true
-				}
-			}
-		}
-		if !recursive {
-			// One pass: nothing it calls depends on it.
-			a.summaries[scc[0].ID] = a.analyzeFunc(scc[0])
-			continue
-		}
-		for iter := 0; iter < 8; iter++ {
-			changed := false
-			for _, fn := range scc {
-				s := a.analyzeFunc(fn)
-				d := s.Digest()
-				if d != a.digests[fn.ID] {
-					a.digests[fn.ID] = d
-					a.summaries[fn.ID] = s
-					changed = true
-				}
-			}
-			if !changed {
-				break
-			}
-		}
+	if err := a.runComponents(ctx, tarjan(funcs, cg, a.funcs), cg, opts.Workers); err != nil {
+		return nil, err
 	}
 	res := &Result{Summaries: a.summaries, CallGraph: cg}
 	keys := slices.Sorted(maps.Keys(a.flows))
@@ -694,7 +671,10 @@ func (a *analyzer) reportFunc(fn *ir.Func) string {
 }
 
 func (a *analyzer) summaryFor(id string) *Summary {
-	if s, ok := a.summaries[id]; ok {
+	a.smu.RLock()
+	s, ok := a.summaries[id]
+	a.smu.RUnlock()
+	if ok {
 		return s
 	}
 	if _, inProgram := a.funcs[id]; inProgram {
@@ -1669,6 +1649,8 @@ func (a *analyzer) emit(f *fact, h SinkHit, via []ir.Pos) {
 		Guards: h.Guards,
 	}
 	k := strings.Join([]string{f.dt, h.Rule, h.Func, h.Sink.String(), xfKey(xf)}, "|")
+	a.fmu.Lock()
+	defer a.fmu.Unlock()
 	if old, ok := a.flows[k]; ok && compareFlows(fl, old) >= 0 {
 		// An unguarded path to the sink outweighs a guarded one; among
 		// equally guarded ones the more confident wins, then the one
