@@ -106,7 +106,7 @@ type Classifier struct {
 	vocab    map[string]bool
 	// idents remembers what Ident answered for a name (identMatch): the
 	// analysis asks about the same names on every pass.
-	idents sync.Map
+	idents *sync.Map
 }
 
 type identMatch struct {
@@ -127,7 +127,7 @@ func NewClassifier(types []DataType, classes ...Class) *Classifier {
 	if len(classes) == 0 {
 		classes = DefaultClasses()
 	}
-	c := &Classifier{classes: map[string]Class{}, types: append([]DataType(nil), types...), byID: map[string]*DataType{}, vocab: map[string]bool{}}
+	c := &Classifier{classes: map[string]Class{}, types: append([]DataType(nil), types...), byID: map[string]*DataType{}, vocab: map[string]bool{}, idents: &sync.Map{}}
 	for _, cl := range classes {
 		c.classes[cl.ID] = cl
 	}
@@ -163,6 +163,28 @@ func NewClassifier(types []DataType, classes ...Class) *Classifier {
 
 // Types returns the taxonomy the classifier was built from.
 func (c *Classifier) Types() []DataType { return append([]DataType(nil), c.types...) }
+
+// Taxonomy returns the classes and data types the classifier was built
+// from.
+func (c *Classifier) Taxonomy() Taxonomy { return Taxonomy{Classes: c.Classes(), Types: c.Types()} }
+
+// Extend rebuilds the classifier with the classes and data types of a
+// taxonomy document added (a repository's taxonomy file): an id already
+// known is replaced, the rest is kept. The classifier is replaced in
+// place, so every component holding it sees the new types; call it when
+// a scan is set up, before any analysis runs.
+func (c *Classifier) Extend(doc []byte) error {
+	extra, err := decodeTaxonomy(doc)
+	if err != nil {
+		return err
+	}
+	merged, err := c.Taxonomy().Merge(extra)
+	if err != nil {
+		return err
+	}
+	*c = *NewClassifier(merged.Types, merged.Classes...)
+	return nil
+}
 
 // Lookup returns a data type definition, or a synthetic one for custom
 // types introduced by rules or pii tags.

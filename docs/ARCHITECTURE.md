@@ -342,10 +342,10 @@ The cache stores function summaries, the call graph, schema declarations and the
 |---|---|---|
 | **A rule** for an SDK | YAML entry in `internal/rules/builtin/` (or `.datawarden/rules/` in your repository), plus an annotated example | `TestBuiltinRuleConventions`, `TestRuleExamples`, `datawarden rules test` |
 | **A language** | entry in `internal/lang`, a frontend, registration in `app.NewComponents`, the 29 conformance programs, rules with examples | `TestEveryLanguageIsWired`, `TestFrontendConformance`, `TestRuleExamples` |
-| **A data type, a class or a secret pattern** | an entry in `internal/detect/builtin/datatypes.yaml`, cases in `detect_test.go` or `secrets_test.go`, a labelled leak in a fixture | `TestBuiltinTaxonomy`, `TestTaxonomyValidation`, `TestBuiltinRuleConventions` (source rules must use known types), `datawarden-bench -check` |
+| **A data type, a class or a secret pattern** | an entry in `internal/detect/builtin/datatypes.yaml`, cases in `detect_test.go` or `secrets_test.go`, a labelled leak in a fixture; a repository adds its own in `.datawarden/taxonomy.yaml` (`Classifier.Extend`, loaded by the CLI session) | `TestBuiltinTaxonomy`, `TestTaxonomyValidation`, `TestTaxonomyExtension`, `TestRepositoryTaxonomy`, `TestBuiltinRuleConventions` (source rules must use known types), `datawarden-bench -check` |
 | **A negative-context or transform word** | `internal/detect/names.go` | `detect_test.go` |
 | **A name heuristic** (a mutator prefix, a data-free call, a consent word, an immediate callback) | an entry in `internal/rules/builtin/heuristics.yaml` (or under `heuristics:` in a repository rule file) | `TestHeuristics`, `TestHeuristicTablesExist` |
-| **An output format** | a case in `report.Write` (or a new `Reporter` implementation wired in `app`) | report tests |
+| **An output format** | a `report.Renderer` registered on the writer in `app` (`report.NewWriter().Register("csv", render)`); `--format` lists what is registered | `TestWriterRegistry` |
 | **A service or replacement component** | an interface where it is used, a field to inject it, the wiring in `internal/app` | `TestComponentsTalkThroughInterfaces` |
 | **A labelled benchmark case** | a directory under `testdata/`, or an open-source repository pinned by `repo` and `commit`, and its labels in `testdata/eval.yaml` | `datawarden-bench -check` (`-external` for pinned repositories) in CI |
 

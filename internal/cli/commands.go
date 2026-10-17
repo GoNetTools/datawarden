@@ -74,7 +74,7 @@ func (a *App) runScan(ctx context.Context, args []string) (int, error) {
 	var prof profile
 	prof.register(fs)
 	diff := fs.String("diff", "", "PR mode: scan files changed since the merge base with `ref`, plus their callers")
-	format := fs.String("format", "text", "stdout format: text, json, sarif, markdown, gitlab")
+	format := fs.String("format", "text", "stdout format: "+strings.Join(a.Reporter.Formats(), ", "))
 	output := fs.String("output", "", "write the --format output to this file instead of stdout")
 	sarifOut := fs.String("sarif", "", "also write a SARIF report to `file`")
 	mdOut := fs.String("markdown", "", "also write a Markdown summary to `file`")

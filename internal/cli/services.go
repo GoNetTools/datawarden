@@ -79,6 +79,8 @@ type BaselineCodec interface {
 // Reporter renders scan reports in a named format (report.Writer).
 type Reporter interface {
 	Write(w io.Writer, format string, r *report.Report) error
+	// Formats lists the formats Write accepts.
+	Formats() []string
 }
 
 // FlowGrapher draws the call graph of flows as an image or a graph

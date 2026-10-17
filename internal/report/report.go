@@ -138,21 +138,60 @@ func posLess(a, b ir.Pos) bool {
 	return a.Col < b.Col
 }
 
-// Write renders the report in the named format.
-func Write(w io.Writer, format string, r *Report) error {
-	switch format {
-	case "", "text":
-		return Text(w, r)
-	case "json":
-		return JSON(w, r)
-	case "sarif":
-		return SARIF(w, r)
-	case "markdown", "md":
-		return Markdown(w, r)
-	case "gitlab", "gitlab-sast":
-		return GitLab(w, r)
+// Renderer renders a report in one format.
+type Renderer func(w io.Writer, r *Report) error
+
+// Writer renders reports in the formats registered with it: the CLI's
+// Reporter. NewWriter registers the built-in ones; Register adds a
+// format or replaces one, so an output format is an implementation
+// plugged in by the wiring, not a case in a switch.
+type Writer struct {
+	renderers map[string]Renderer
+	names     []string // registration order, aliases excluded
+}
+
+// NewWriter returns a writer with the built-in formats: text, json,
+// sarif, markdown (md) and gitlab (gitlab-sast).
+func NewWriter() *Writer {
+	w := &Writer{renderers: map[string]Renderer{}}
+	w.Register("text", Text)
+	w.Register("json", JSON)
+	w.Register("sarif", SARIF)
+	w.Register("markdown", Markdown, "md")
+	w.Register("gitlab", GitLab, "gitlab-sast")
+	return w
+}
+
+// Register adds a format under name and its aliases, replacing one of
+// that name.
+func (w *Writer) Register(name string, r Renderer, aliases ...string) {
+	if _, known := w.renderers[name]; !known {
+		w.names = append(w.names, name)
 	}
-	return fmt.Errorf("unknown format %q (text, json, sarif, markdown, gitlab)", format)
+	w.renderers[name] = r
+	for _, a := range aliases {
+		w.renderers[a] = r
+	}
+}
+
+// Formats lists the registered formats, in registration order.
+func (w *Writer) Formats() []string { return append([]string(nil), w.names...) }
+
+// Write renders r in format ("" is text).
+func (w *Writer) Write(out io.Writer, format string, r *Report) error {
+	if format == "" {
+		format = "text"
+	}
+	render, ok := w.renderers[format]
+	if !ok {
+		return fmt.Errorf("unknown format %q (%s)", format, strings.Join(w.names, ", "))
+	}
+	return render(out, r)
+}
+
+// Write renders the report in one of the built-in formats.
+func Write(w io.Writer, format string, r *Report) error {
+	return NewWriter().Write(w, format, r)
 }
 
 func destLabel(d finding.Destination) string {
@@ -190,12 +229,4 @@ func (r *Report) message(f *finding.Flow) string {
 
 func (r *Report) literalMessage(l *finding.Literal) string {
 	return fmt.Sprintf("%s committed to the repository: %s", r.dtLabel(l.DataType), l.Masked)
-}
-
-// Writer renders reports: the CLI's Reporter.
-type Writer struct{}
-
-// Write renders r in format (see Write).
-func (Writer) Write(w io.Writer, format string, r *Report) error {
-	return Write(w, format, r)
 }

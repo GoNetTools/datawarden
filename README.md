@@ -175,6 +175,14 @@ Every data type belongs to a class, and every finding carries its class (`class`
 - **Severity.** Findings of `phi`, `pci` and `credential` data are high severity wherever they go, as are identity documents and special-category personal data.
 - **Per-class policy.** `policy.classes.<class>` overrides `fail_on` and `safe_transforms`. The default lets credentials go over the network (an API key is sent to the service it unlocks) and accepts a hashed password, while a hashed phone number is still a leak.
 - **Opting out.** `policy.ignore_classes: [credential]` turns a whole class off, for example when another tool already scans for secrets.
+- **Your own types.** `.datawarden/taxonomy.yaml` (or the files under `taxonomy:` in `.datawarden.yaml`) adds classes and data types in the same format as the built-in file, or replaces a built-in one by id; a change to it invalidates the summary cache like a rule change. A class of your own gets the same policy knobs (`policy.classes.<id>`, `ignore_classes`) and report columns as the built-in ones:
+
+  ```yaml
+  classes:
+    - {id: loyalty, label: Loyalty data, severity: high}
+  data_types:
+    - {id: loyalty_card, label: Loyalty card number, class: loyalty, category: financial, patterns: [loyalty card, member card]}
+  ```
 
 ## Source detectors
 
@@ -343,6 +351,7 @@ languages: [go, python, java, kotlin, swift, typescript]   # default: all presen
 include_tests: false          # analyze test sources for flows (literals always scan tests)
 first_party_domains: [api.example.com]       # network sinks to these hosts become first-party
 rules: [.datawarden/rules]
+taxonomy: [.datawarden/taxonomy.yaml]   # your own classes and data types
 baseline: .datawarden/baseline.json
 cache_dir: .datawarden/cache
 workers: 0                    # parts of the call graph analyzed at a time: 0 is one per CPU (--workers overrides)

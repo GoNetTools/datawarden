@@ -10,8 +10,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/GoNetTools/datawarden/internal/cli"
 	"github.com/GoNetTools/datawarden/internal/finding"
@@ -168,5 +170,52 @@ func TestInit(t *testing.T) {
 	// The generated config and rules must load.
 	if code, _, errs := run(t, "rules", "--root", dir); code != cli.ExitClean {
 		t.Errorf("rules with generated config: %s", errs)
+	}
+}
+
+// A repository's taxonomy file makes its own data types and classes
+// findings like the built-in ones.
+func TestRepositoryTaxonomy(t *testing.T) {
+	if !slices.Contains(NewComponents(time.Now).Frontends.Languages(), "java") {
+		t.Skip("no java frontend in this build")
+	}
+	dir := t.TempDir()
+	write := func(rel, body string) {
+		t.Helper()
+		p := filepath.Join(dir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(".datawarden/taxonomy.yaml", `classes:
+  - {id: loyalty, label: Loyalty data, severity: high}
+data_types:
+  - {id: loyalty_card, label: Loyalty card number, class: loyalty, category: financial, patterns: [loyalty card, member card]}
+`)
+	write("src/main/java/acme/Shop.java", `package acme;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+class Shop {
+    private static final Logger log = LoggerFactory.getLogger(Shop.class);
+    void checkout(String loyaltyCard, String orderId) {
+        log.info("checkout {} {}", loyaltyCard, orderId);
+    }
+}
+`)
+	_, r := scanJSON(t, dir, "--no-baseline")
+	var found *finding.Flow
+	for _, f := range r.Flows {
+		if f.DataType == "loyalty_card" {
+			found = f
+		}
+	}
+	if found == nil {
+		t.Fatalf("loyalty_card flow not reported: %+v", r.Flows)
+	}
+	if found.Class != "loyalty" || found.Severity != "high" || !found.Violation {
+		t.Errorf("flow: class %s severity %s violation %v", found.Class, found.Severity, found.Violation)
 	}
 }
