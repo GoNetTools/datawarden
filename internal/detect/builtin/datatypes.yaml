@@ -53,7 +53,7 @@ data_types:
     label: Person name
     category: identity
     class: pii
-    patterns: [full name, fullname, first name, firstname, last name, lastname, given name, family name, surname, middle name, legal name, customer name, patient name, holder name, cardholder name, account holder]
+    patterns: [full name, fullname, first name, firstname, last name, lastname, given name, family name, surname, middle name, legal name, customer name, patient name, holder name, account holder]
     exclude: [file, class, type, host, field, column, table, package, module, app, bucket, method, func, function, event, screen, tag, attr, attribute, font, theme, bundle]
 
   - id: dob
@@ -122,14 +122,52 @@ data_types:
     severity: high
     patterns: [social insurance, health insurance number, insurance number, medicare number, nhs number]
 
+  # Cardholder data (PCI DSS): the primary account number, the cardholder
+  # name, the expiry date, and sensitive authentication data (security
+  # codes, track data, PINs), which must never be stored after
+  # authorization, let alone logged.
+
   - id: credit_card
     label: Payment card number
     category: financial
     class: pci
     sensitive: true
-    patterns: [card number, cardnumber, card no, credit card, creditcard, debit card, cc number, ccnumber, cc num, cvv, cvc, cvv2, card cvv, card expiry]
+    patterns: [card number, cardnumber, card no, credit card, creditcard, debit card, cc number, ccnumber, cc num, primary account number, card pan, pan number, full pan, card data, card details]
     weak: [pan]
-    exclude: [type, brand, network, view, layout, icon, logo, scheme, last4, last, "4", bin, masked]
+    exclude: [type, brand, network, view, layout, icon, logo, scheme, last4, last, "4", bin, masked, token, tokenized]
+
+  - id: card_security_code
+    label: Card security code (CVV/CVC)
+    category: financial
+    class: pci
+    sensitive: true
+    patterns: [cvv, cvc, cvv2, cvc2, cvn, card cvv, card cvc, card security code, security code, card verification value, card verification code, card verification, verification value]
+    weak: [csc]
+    exclude: [length, len, field, input, label, hint, help, placeholder, mask, masked, required, valid, invalid, check, otp, sms, mfa, totp, access, door, building, alarm, pin, http, status, country, region, zip, postal]
+
+  - id: card_expiry
+    label: Card expiry date
+    category: financial
+    class: pci
+    patterns: [card expiry, card expiration, card exp, cc expiry, cc exp, exp month, exp year, expiry month, expiry year, expiration month, expiration year, valid thru, valid through, expiry mm yy, exp mm yy]
+    weak: [expiry date, expiration date, exp date]
+    exclude: [token, session, cookie, cert, certificate, license, licence, key, password, otp, code, coupon, promo, voucher, offer, discount, subscription, plan, trial, cache, ttl, lease, contract, domain, warranty, insurance, passport, visa, membership, document, product, batch, lot, food, lock, link, url, invite, invitation, order, quote, bid, reservation, booking, hold, policy, permit, id, grant, consent, deadline, ticket, pass]
+
+  - id: card_track_data
+    label: Card track / magnetic stripe data
+    category: financial
+    class: pci
+    sensitive: true
+    severity: high
+    patterns: [track data, track 1, track 2, track 1 data, track 2 data, track1, track2, magnetic stripe, mag stripe, magstripe, stripe data, pin block, pinblock, card pin, encrypted pin, emv data, chip data, icc data, discretionary data]
+    exclude: [github, repo, git, gps, audio, music, playlist, song, album, race, running, fitness, activity, analytics, event, changes, order, shipment, package, parcel, delivery, api, http, route, service, user, usage, issue, bug, error, time, progress, visitor, click, pixel, zebra]
+
+  - id: cardholder_name
+    label: Cardholder name
+    category: financial
+    class: pci
+    patterns: [cardholder name, card holder name, cardholder, card holder, name on card, embossed name]
+    exclude: [file, class, type, host, field, column, table, package, module, app, bucket, method, func, function, event, screen, tag, attr, attribute, font, theme, bundle, id, agreement, present, not present]
 
   - id: bank_account
     label: Bank account number

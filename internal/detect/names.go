@@ -5,6 +5,7 @@ package detect
 
 import (
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -169,7 +170,19 @@ func (c *Classifier) Lookup(id string) DataType {
 	if dt, ok := c.byID[id]; ok {
 		return *dt
 	}
-	return DataType{ID: id, Label: strings.ReplaceAll(id, "_", " "), Class: "pii", Category: "custom"}
+	class := "pii"
+	if _, ok := c.classes[id]; ok {
+		// A field tagged with a class and nothing else (pci:"true" on
+		// Card.Number) holds data of that class.
+		class = id
+	}
+	return DataType{ID: id, Label: strings.ReplaceAll(id, "_", " "), Class: class, Category: "custom"}
+}
+
+// KnownClass reports whether id is a class of the taxonomy.
+func (c *Classifier) KnownClass(id string) bool {
+	_, ok := c.classes[id]
+	return ok
 }
 
 // Class describes a class of data (pii, phi, pci, credential). Unknown
@@ -412,18 +425,32 @@ var personEntities = set("user", "customer", "person", "member", "employee", "pa
 // name) as extra context.
 func (c *Classifier) Field(owner, field string) (Match, bool) {
 	if m, ok := c.Ident(field); ok {
-		return m, true
+		return ownerContext(owner, m), true
 	}
 	ft := Tokenize(field)
 	if len(ft) == 1 && ft[0] == "name" && owner != "" {
-		ot := Tokenize(lastSegment(owner))
-		for _, t := range ot {
+		for _, t := range Tokenize(lastSegment(owner)) {
+			if t == "cardholder" {
+				return Match{DataType: "cardholder_name", Conf: 0.6, Pattern: "entity name"}, true
+			}
 			if personEntities[c.singular(t)] {
 				return Match{DataType: "person_name", Conf: 0.6, Pattern: "entity name"}, true
 			}
 		}
 	}
 	return Match{}, false
+}
+
+// ownerContext refines a field's match by its owner type: the holder
+// name on a Card is the cardholder name.
+func ownerContext(owner string, m Match) Match {
+	if m.DataType == "person_name" && owner != "" {
+		ot := Tokenize(lastSegment(owner))
+		if slices.Contains(ot, "card") || slices.Contains(ot, "cardholder") {
+			m.DataType = "cardholder_name"
+		}
+	}
+	return m
 }
 
 func lastSegment(s string) string {

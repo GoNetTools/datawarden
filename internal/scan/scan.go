@@ -92,7 +92,7 @@ type LiteralDetector interface {
 type SchemaParser interface {
 	ParseProto(path string, src []byte) []*ir.TypeDecl
 	ParseSQL(path string, src []byte) []*ir.TypeDecl
-	Build(types []*ir.TypeDecl) *detect.Schema
+	Build(types []*ir.TypeDecl, opts detect.SchemaOptions) *detect.Schema
 }
 
 // FileLister lists repository files and narrows them to requested paths
@@ -492,7 +492,7 @@ func (s *Scanner) buildSchema(req Request, all []ingest.File, prog *ir.Module, l
 		types = append(types, req.Cache.SchemaTypes(loweredSet)...)
 		classes = append(classes, req.Cache.Classes(loweredSet)...)
 	}
-	schema := s.Schemas.Build(types)
+	schema := s.Schemas.Build(types, detect.SchemaOptions{SensitiveMarkers: req.Config.Schema.SensitiveMarkers})
 
 	byFile := map[string][]*ir.TypeDecl{}
 	for _, t := range prog.Types {

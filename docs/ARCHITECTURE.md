@@ -349,7 +349,7 @@ The full checklists for rules and languages are in [CONTRIBUTING](../CONTRIBUTIN
 
 ```mermaid
 flowchart LR
-    U["Unit tests<br/>fakes, fstest.MapFS,<br/>httptest"] --> C["Contract tests<br/>rule examples (all 126 rules)<br/>frontend conformance (42 × 6)"]
+    U["Unit tests<br/>fakes, fstest.MapFS,<br/>httptest"] --> C["Contract tests<br/>rule examples (all 181 rules)<br/>frontend conformance (42 × 6)"]
     C --> E["End-to-end<br/>fixtures through the real app"]
     E --> A["Accuracy<br/>labelled corpus:<br/>precision / recall / F1"]
     S["Structure tests<br/>architecture, wiring,<br/>rule conventions, language table"] -.-> U

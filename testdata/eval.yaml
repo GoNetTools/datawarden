@@ -29,13 +29,17 @@ cases:
     dir: goapp
     langs: [go]
     min_precision: 1.0
-    min_recall: 0.75
+    min_recall: 0.8
     flows:
       - {data_type: phone, sink_rule: log.go.stdlib, function: service.Register, note: "Contact is the phone_number column"}
       - {data_type: email, sink_rule: sdk.go.sentry.scope, function: service.Register}
       - {data_type: national_id, sink_rule: net.go.http_body, function: service.sendSMS, note: "c.NationalID in Register, two calls deep through notify()"}
       - {data_type: phone, sink_rule: log.go.slog, function: service.Handler, note: "request form value named mobileNo"}
       - {data_type: ip_address, sink_rule: log.go.fmt_print, function: service.Handler}
+      - {data_type: credit_card, sink_rule: log.go.fmt_fprint, function: service.Charge, note: "fmt.Fprintf to os.Stderr"}
+      - {data_type: card_security_code, sink_rule: log.go.fmt_fprint, function: service.Charge, note: "Card.Code is tagged pci:\"card_security_code\""}
+      - {data_type: card_expiry, sink_rule: log.go.slog, function: service.Charge}
+      - {data_type: cardholder_name, sink_rule: log.go.slog, function: service.Charge}
     literals:
       - {data_type: national_id, file: fixtures/customers.json, line: 2,
          note: "known miss: national ID numbers are found through names, not as committed values"}
@@ -47,7 +51,7 @@ cases:
     dir: android
     langs: [kotlin, java]
     min_precision: 1.0
-    min_recall: 0.9
+    min_recall: 0.95
     flows:
       - {data_type: phone, sink_rule: sdk.firebase.analytics, function: SignupViewModel.submit}
       - {data_type: dob, sink_rule: log.jvm.stdout, function: SignupViewModel.track}
@@ -60,6 +64,12 @@ cases:
       - {data_type: person_name, sink_rule: log.android.logcat, function: ProfileActivity.show}
       - {data_type: email, sink_rule: sdk.sentry.set_extra, function: ProfileActivity.show, note: "getMail() returns the email column"}
       - {data_type: email, sink_rule: log.android.logcat, function: ProfileActivity.send, note: "passed in from show()"}
+      - {data_type: credit_card, sink_rule: log.jvm.mdc, function: PaymentService.charge}
+      - {data_type: card_security_code, sink_rule: log.jvm.logger, function: PaymentService.charge, note: "Lombok @Slf4j declares the logger"}
+      - {data_type: cardholder_name, sink_rule: log.jvm.logger, function: PaymentService.charge}
+      - {data_type: card_expiry, sink_rule: log.jvm.logger, function: PaymentService.charge}
+      - {data_type: credit_card, sink_rule: log.jvm.logger, function: PaymentService.charge, note: "the last four digits, taken with substring, still count: no masking transform is recognised"}
+      - {data_type: credit_card, sink_rule: log.jvm.stack_trace, function: PaymentService.charge, note: "the declined exception carries the card number in its message"}
 
   - name: web
     dir: web

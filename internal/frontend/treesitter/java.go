@@ -93,6 +93,19 @@ func javaTypeText(f *srcFile, n *Node) string {
 	return strings.TrimSpace(strings.TrimSuffix(t, "[]"))
 }
 
+// lombokLoggers maps Lombok's logging annotations to the type of the
+// "log" field each one generates.
+var lombokLoggers = map[string]string{
+	"Slf4j":      "org.slf4j.Logger",
+	"XSlf4j":     "org.slf4j.ext.XLogger",
+	"Log4j2":     "org.apache.logging.log4j.Logger",
+	"Log4j":      "org.apache.log4j.Logger",
+	"Log":        "java.util.logging.Logger",
+	"CommonsLog": "org.apache.commons.logging.Log",
+	"JBossLog":   "org.jboss.logging.Logger",
+	"Flogger":    "com.google.common.flogger.FluentLogger",
+}
+
 // javaAnnotations extracts annotation tags from a modifiers node.
 func javaAnnotations(f *srcFile, mods *Node) (map[string]string, []string, bool) {
 	tags := map[string]string{}
@@ -145,6 +158,12 @@ func (jp *jvProgram) collectType(f *srcFile, n *Node, scope string) {
 	}
 	ci := &classInfo{name: qual, short: name, file: f, fields: map[string]string{}, methods: map[string]string{}}
 	_, annNames, _ := javaAnnotations(f, firstOf(n, "modifiers"))
+	for _, a := range annNames {
+		if typ, ok := lombokLoggers[a]; ok {
+			// Lombok generates "private static final <Logger> log".
+			ci.fields["log"] = typ
+		}
+	}
 	td := &ir.TypeDecl{Name: qual, Kind: "class", Lang: lang.Java, Annotations: annNames, Pos: posOf(f, n)}
 	if isEntityAnnotation(annNames) {
 		td.Kind = "entity"

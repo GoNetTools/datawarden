@@ -13,7 +13,7 @@ It knows four classes of sensitive data, and the list is data, not code ([`datat
 |---|---|---|
 | `pii` | Personal data (GDPR, CCPA and similar laws) | email, phone, name, date of birth, address, national ID, location, device ids |
 | `phi` | Protected health information (HIPAA) | diagnoses, prescriptions, medical record numbers |
-| `pci` | Cardholder data (PCI DSS) | payment card numbers |
+| `pci` | Cardholder data (PCI DSS) | card numbers, security codes (CVV), expiry dates, track data, cardholder names |
 | `credential` | Credentials and secrets | passwords, API keys, access and session tokens, private keys |
 
 It understands Go, Python, Java, Kotlin, Swift and TypeScript/JavaScript, and is built for CI: SARIF for code scanning, a PR/MR comment, a baseline so only *new* problems fail the build, and an incremental PR mode.
@@ -178,7 +178,7 @@ Every data type belongs to a class, and every finding carries its class (`class`
 
 ## Source detectors
 
-**1. Identifier names.** Identifiers are split on camelCase, PascalCase, ACRONYMS, snake/kebab case and letter/digit boundaries. Token sequences are matched against the taxonomy (29 data types), for example:
+**1. Identifier names.** Identifiers are split on camelCase, PascalCase, ACRONYMS, snake/kebab case and letter/digit boundaries. Token sequences are matched against the taxonomy (34 data types), for example:
 
 | Data type | Identifiers |
 |---|---|
@@ -188,6 +188,11 @@ Every data type belongs to a class, and every finding carries its class (`class`
 | `dob` | dob, dateOfBirth, birthday |
 | `address` | streetAddress, shippingAddress |
 | `bank_account` | accountNumber, iban |
+| `credit_card` | cardNumber, pan, primaryAccountNumber |
+| `card_security_code` | cvv, cvc, securityCode, cardVerificationValue |
+| `card_expiry` | cardExpiry, expMonth, expYear, validThru (expiryDate alone scores lower) |
+| `card_track_data` | track2Data, magneticStripe, pinBlock, cardPin |
+| `cardholder_name` | cardholderName, nameOnCard, Card.holderName |
 | `tax_id` | taxId, taxCode |
 | `insurance_id` | socialInsurance, insuranceNumber, nhsNumber |
 | `license_plate` | licensePlate |
@@ -207,8 +212,9 @@ Negative context avoids the usual noise: `emailValidator`, `isEmailValid`, `phon
 String keys label their values: `put("email", x)`, `bundleOf("phone" to x)`, `zap.String("phone", x)`, `r.FormValue("ssn")`, `{ phone: x }`, `m["email"] = x`.
 
 **2. Schema hints.** Field-level hints from:
-- Go struct tags: `json`, `db`, `bson`, `gorm:"column:phone_number"`, `protobuf:"...,name=email"`; explicit `pii:"email"` (any data type, e.g. `pii:"api_key"`) or `pii:"-"` (not sensitive).
-- JPA/Room/Moshi/Gson annotations: `@Column(name=...)`, `@ColumnInfo`, `@SerializedName`, `@JsonProperty`, `@Json`; explicit `@PII("email")`.
+- Go struct tags: `json`, `db`, `bson`, `gorm:"column:phone_number"`, `protobuf:"...,name=email"`; explicit `pii:"email"` (any data type, e.g. `pii:"api_key"`), `pci:"card_security_code"`, `phi:"true"`, `sensitive:"true"` (the field name decides the type, the tag's class is the fallback) or `pii:"-"` (not sensitive).
+- JPA/Room/Moshi/Gson annotations: `@Column(name=...)`, `@ColumnInfo`, `@SerializedName`, `@JsonProperty`, `@Json`; explicit `@PII("email")`, `@PCI`, `@PHI`, `@Sensitive`, `@PersonalData`, `@Confidential`.
+- Your own markers: `schema.sensitive_markers: [mask, "@Masked"]` in `.datawarden.yaml` reads a `mask:"phone"` tag or a `@Masked("phone")` annotation the same way.
 - TypeORM decorators (`@Column({ name: ... })`), TypeScript interfaces and type aliases.
 - Protobuf messages (`string contact = 3 [(pii) = "phone"];` or `// pii: phone`).
 - SQL migrations (`CREATE TABLE`, `ALTER TABLE ... ADD COLUMN`, `-- pii: phone` comments).
@@ -248,7 +254,7 @@ datawarden looks for secrets *in data flows* as well as in files: a password log
 
 ## Sink rules
 
-Rules are YAML files embedded in the binary (`internal/rules/builtin/`: 126 rules for Go, Python, Java/Kotlin, Swift and TypeScript). A repository adds, replaces or disables rules in `.datawarden/rules/*.yaml` (or any path listed under `rules:` in `.datawarden.yaml`).
+Rules are YAML files embedded in the binary (`internal/rules/builtin/`: 181 rules for Go, Python, Java/Kotlin, Swift and TypeScript). A repository adds, replaces or disables rules in `.datawarden/rules/*.yaml` (or any path listed under `rules:` in `.datawarden.yaml`).
 
 ```yaml
 - id: sdk.sentry.set_user
@@ -281,7 +287,7 @@ Telemetry.send("order", mapOf("orderId" to orderId))
 
 `datawarden rules test .datawarden/rules/examples` scans the directory with the repository's rules and policy, and fails if an expected finding is missing, an `ok:` line is reported, or any violation is unannotated. `todoruleid:` and `todook:` record known misses and false positives. Every built-in rule has such an example in `internal/rules/testdata/examples/`.
 
-Other fields: `kind: source` (with `data_type`; a source can also be a field read, `field: ["express.Request.body"]`, a parameter annotation, `param_annotation: [RequestBody]`, or the argument a call fills, `arg: 0`, and `confidence` scales what it produces) and `kind: transform` (with `transform`, e.g. `sha256`), `host_arg` (take the destination host from a constant URL argument, as for `http.Post` and `fetch`), `match_bare` (match an unresolved call without receiver, for Kotlin scope functions such as `prefs.edit { putString(...) }`), `severity`, `category`, `description`.
+Other fields: `kind: source` (with `data_type`; a source can also be a field read, `field: ["express.Request.body"]`, a parameter annotation, `param_annotation: [RequestBody]`, or the argument a call fills, `arg: 0`, and `confidence` scales what it produces) and `kind: transform` (with `transform`, e.g. `sha256`), `host_arg` (take the destination host from a constant URL argument, as for `http.Post` and `fetch`), `arg_is` / `arg_not` (apply the rule only when an argument, by index or `-1` for the receiver, is a variable whose name matches a regular expression: `fmt.Fprintf` is a log when `arg_is: { 0: '^os\\.(Stderr|Stdout)$' }`), `match_bare` (match an unresolved call without receiver, for Kotlin scope functions such as `prefs.edit { putString(...) }`), `severity`, `category`, `description`.
 
 Destination kinds: `third_party`, `first_party`, `log`, `storage` (device/local), `network` (host unknown or not first-party), `ipc` (clipboard, broadcasts).
 
@@ -306,6 +312,8 @@ rules: [.datawarden/rules]
 baseline: .datawarden/baseline.json
 cache_dir: .datawarden/cache
 literals: { enabled: true, min_confidence: 0.6 }
+schema:
+  sensitive_markers: []      # your own field markers, e.g. [mask, "@Masked"]; built in: pii, pci, phi, sensitive, @PII, @Sensitive, ...
 policy:
   fail_on: [third_party, log, network, storage, ipc]
   safe_transforms: [masked, redacted, encrypted, tokenized, anonymized, pii-checked]

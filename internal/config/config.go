@@ -70,6 +70,21 @@ type Literals struct {
 	MinConfidence float64 `yaml:"min_confidence" json:"min_confidence"`
 }
 
+// Schema configures how declared types (structs, classes, entities) are
+// read for field hints.
+type Schema struct {
+	// SensitiveMarkers are struct tags and annotations that mark a field
+	// as sensitive, on top of the built-in ones (pii, pci, phi, sensitive,
+	// @PII, @Sensitive, @PersonalData, ...). A Go struct tag is given by
+	// its key ("mask"), an annotation or decorator with its "@"
+	// ("@Masked"). The tag value or annotation argument names the data
+	// type (`mask:"email"`, @Masked("phone")); empty or "true" lets the
+	// field name decide, with the marker's class as the fallback
+	// (`pci:"true"` on an unnamed field is cardholder data); "-" or
+	// "false" marks a field as not sensitive.
+	SensitiveMarkers []string `yaml:"sensitive_markers" json:"sensitive_markers,omitempty"`
+}
+
 // Config is .datawarden.yaml.
 type Config struct {
 	Version int `yaml:"version" json:"version"`
@@ -87,6 +102,7 @@ type Config struct {
 	MinConfidence float64  `yaml:"min_confidence" json:"min_confidence"`
 	Literals      Literals `yaml:"literals" json:"literals"`
 	Policy        Policy   `yaml:"policy" json:"policy"`
+	Schema        Schema   `yaml:"schema" json:"schema"`
 	// Go build flags / tags passed to go/packages.
 	GoBuildTags []string `yaml:"go_build_tags" json:"go_build_tags,omitempty"`
 
@@ -177,6 +193,11 @@ func (c *Config) validate() error {
 			return err
 		}
 	}
+	for _, m := range c.Schema.SensitiveMarkers {
+		if strings.TrimSpace(m) == "" || strings.ContainsAny(m, " \t\"'`:") || m == "@" {
+			return fmt.Errorf("%s: schema.sensitive_markers: %q is not a struct tag key (pii) or an annotation (@Sensitive)", c.Path, m)
+		}
+	}
 	for _, l := range c.Languages {
 		if !lang.IsCode(l) {
 			return fmt.Errorf("%s: languages: unsupported language %q (supported: %s)", c.Path, l, strings.Join(lang.CodeNames(), ", "))
@@ -241,6 +262,17 @@ policy:
   #    data_types: [email]
   #    reason: DPA with Sentry, EU data region
   #  - dest_host: api.example.com
+
+# Struct tags (Go: pii:"email") and annotations (Java/Kotlin: @Sensitive)
+# that mark a field as sensitive, on top of the built-in markers pii, pci,
+# phi, sensitive, @PII, @PCI, @PHI, @Sensitive, @PersonalData and
+# @Confidential. The value names the data type (mask:"phone",
+# @Masked("email")); empty or "true" lets the field name decide; "-" or
+# "false" says the field is not sensitive.
+schema:
+  sensitive_markers: []
+  #  - mask
+  #  - "@Masked"
 `
 
 // Loader reads configuration: the CLI's ConfigLoader.

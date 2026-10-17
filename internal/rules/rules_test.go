@@ -178,3 +178,51 @@ func TestMatch(t *testing.T) {
 		t.Errorf("splitCallee: %v", got)
 	}
 }
+
+// arg_is and arg_not restrict a sink to calls whose argument is a given
+// variable: fmt.Fprintf is a log only when it writes to os.Stderr.
+func TestArgConditions(t *testing.T) {
+	rs, err := parse([]byte(`
+- id: log.x.fprint
+  lang: go
+  call: fmt.Fprintf
+  arg: "*"
+  arg_is: { 0: '^os\.(Stderr|Stdout)$' }
+  dest: { kind: log }
+  category: logging
+- id: storage.x.file
+  lang: go
+  call: os.File.Write
+  arg_not: { -1: '^os\.' }
+  dest: { kind: storage }
+  category: storage
+`), "t.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	set, err := NewSet(rs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := func(m map[int]string) func(int) string { return func(i int) string { return m[i] } }
+	fprint, file := set.ByID("log.x.fprint"), set.ByID("storage.x.file")
+	if !fprint.ArgAllowed(names(map[int]string{0: "os.Stderr"})) || fprint.ArgAllowed(names(map[int]string{0: "w"})) || fprint.ArgAllowed(names(nil)) {
+		t.Error("arg_is")
+	}
+	if file.ArgAllowed(names(map[int]string{-1: "os.Stdout"})) || !file.ArgAllowed(names(map[int]string{-1: "f"})) || !file.ArgAllowed(names(nil)) {
+		t.Error("arg_not")
+	}
+	for name, body := range map[string]string{
+		"bad index": "- {id: a.b, lang: go, call: f, arg_is: {-2: x}, dest: {kind: log}}\n",
+		"bad regex": "- {id: a.b, lang: go, call: f, arg_is: {0: '('}, dest: {kind: log}}\n",
+		"on source": "- {id: src.b, lang: go, kind: source, call: f, data_type: email, arg_not: {0: x}}\n",
+	} {
+		rs, err := parse([]byte(body), "t.yaml")
+		if err == nil {
+			_, err = NewSet(rs)
+		}
+		if err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}

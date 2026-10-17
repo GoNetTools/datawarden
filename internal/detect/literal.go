@@ -146,7 +146,9 @@ func (s *LiteralScanner) Scan(content []byte) []LiteralHit {
 				continue
 			}
 			if conf := cardConf(d); conf > 0 {
-				if ctxFor()["credit_card"] {
+				if ctx := ctxFor(); ctx["credit_card"] || ctx["card_security_code"] || ctx["card_expiry"] || ctx["cardholder_name"] {
+					// A card number next to its label, or next to the
+					// expiry or security code it was committed with.
 					conf += 0.1
 				}
 				emit("credit_card", m[0], d, conf, "luhn+iin")

@@ -17,21 +17,77 @@
 
 - id: log.jvm.stdout
   lang: [kotlin, java]
-  call: ["java.lang.System.out.print*", "java.lang.System.err.print*", "kotlin.io.println", "kotlin.io.print"]
+  call: ["java.lang.System.out.print*", "java.lang.System.err.print*", "java.lang.System.out.format", "java.lang.System.err.format",
+         "java.lang.System.out.append", "java.lang.System.err.append", "java.lang.System.out.write", "java.lang.System.err.write",
+         "kotlin.io.println", "kotlin.io.print"]
   arg: "*"
   dest: { kind: log, host: stdout }
   category: logging
 
 - id: log.jvm.logger
   lang: [kotlin, java]
+  # SLF4J (and Logback behind it), java.util.logging, Log4j 2 and 1.x,
+  # Apache Commons Logging, JBoss Logging, tinylog, System.Logger
+  # (Java 9+), kotlin-logging. Lombok's @Slf4j, @Log4j2, @Log, @CommonsLog
+  # and @JBossLog declare the "log" field these resolve through; any
+  # other logger held in a variable named log, logger, LOG, LOGGER,
+  # mLogger, auditLogger... matches by name.
   call: ["org.slf4j.Logger.trace", "org.slf4j.Logger.debug", "org.slf4j.Logger.info", "org.slf4j.Logger.warn", "org.slf4j.Logger.error",
-         "java.util.logging.Logger.info", "java.util.logging.Logger.warning", "java.util.logging.Logger.severe", "java.util.logging.Logger.fine", "java.util.logging.Logger.log",
-         "org.apache.logging.log4j.Logger.info", "org.apache.logging.log4j.Logger.debug", "org.apache.logging.log4j.Logger.warn", "org.apache.logging.log4j.Logger.error",
-         "mu.KLogger.info", "mu.KLogger.debug", "mu.KLogger.warn", "mu.KLogger.error", "mu.KLogger.trace"]
-  receiver: "(?i)^(this\\.)?_?(log|logger)$"
+         "org.slf4j.ext.XLogger.*", "ch.qos.logback.classic.Logger.trace", "ch.qos.logback.classic.Logger.debug", "ch.qos.logback.classic.Logger.info",
+         "ch.qos.logback.classic.Logger.warn", "ch.qos.logback.classic.Logger.error",
+         "java.util.logging.Logger.info", "java.util.logging.Logger.warning", "java.util.logging.Logger.severe", "java.util.logging.Logger.config",
+         "java.util.logging.Logger.fine", "java.util.logging.Logger.finer", "java.util.logging.Logger.finest", "java.util.logging.Logger.log",
+         "java.util.logging.Logger.logp", "java.util.logging.Logger.logrb", "java.util.logging.Logger.entering", "java.util.logging.Logger.exiting", "java.util.logging.Logger.throwing",
+         "org.apache.logging.log4j.Logger.trace", "org.apache.logging.log4j.Logger.debug", "org.apache.logging.log4j.Logger.info", "org.apache.logging.log4j.Logger.warn",
+         "org.apache.logging.log4j.Logger.error", "org.apache.logging.log4j.Logger.fatal", "org.apache.logging.log4j.Logger.log", "org.apache.logging.log4j.Logger.printf",
+         "org.apache.logging.log4j.Logger.always", "org.apache.logging.log4j.Logger.logMessage",
+         "org.apache.log4j.Logger.trace", "org.apache.log4j.Logger.debug", "org.apache.log4j.Logger.info", "org.apache.log4j.Logger.warn", "org.apache.log4j.Logger.error",
+         "org.apache.log4j.Logger.fatal", "org.apache.log4j.Logger.log", "org.apache.log4j.Category.*",
+         "org.apache.commons.logging.Log.trace", "org.apache.commons.logging.Log.debug", "org.apache.commons.logging.Log.info", "org.apache.commons.logging.Log.warn",
+         "org.apache.commons.logging.Log.error", "org.apache.commons.logging.Log.fatal",
+         "org.jboss.logging.Logger.trace*", "org.jboss.logging.Logger.debug*", "org.jboss.logging.Logger.info*", "org.jboss.logging.Logger.warn*",
+         "org.jboss.logging.Logger.error*", "org.jboss.logging.Logger.fatal*", "org.jboss.logging.Logger.log*",
+         "org.tinylog.Logger.trace", "org.tinylog.Logger.debug", "org.tinylog.Logger.info", "org.tinylog.Logger.warn", "org.tinylog.Logger.error",
+         "org.tinylog.TaggedLogger.trace", "org.tinylog.TaggedLogger.debug", "org.tinylog.TaggedLogger.info", "org.tinylog.TaggedLogger.warn", "org.tinylog.TaggedLogger.error",
+         "java.lang.System.Logger.log",
+         "mu.KLogger.info", "mu.KLogger.debug", "mu.KLogger.warn", "mu.KLogger.error", "mu.KLogger.trace",
+         "io.github.oshai.kotlinlogging.KLogger.info", "io.github.oshai.kotlinlogging.KLogger.debug", "io.github.oshai.kotlinlogging.KLogger.warn",
+         "io.github.oshai.kotlinlogging.KLogger.error", "io.github.oshai.kotlinlogging.KLogger.trace"]
+  receiver: "(?i)^(this\\.)?(_?[ms]?_?(log|logger)|_?[a-z0-9]*logger)_?$"
   arg: "*"
   dest: { kind: log, host: application-log }
   category: logging
+
+- id: log.jvm.fluent
+  lang: [kotlin, java]
+  # Fluent logging: SLF4J 2 (log.atInfo().addArgument(x).log("..")), Log4j 2
+  # LogBuilder (logger.atInfo().log("..", x)) and Flogger
+  # (logger.atInfo().log("..", x)). The builder's type is rarely resolved,
+  # so the calls match on the ".atLevel(" receiver.
+  call: ["org.slf4j.spi.LoggingEventBuilder.log", "org.slf4j.spi.LoggingEventBuilder.addArgument", "org.slf4j.spi.LoggingEventBuilder.addKeyValue",
+         "org.slf4j.spi.LoggingEventBuilder.setMessage", "org.slf4j.spi.LoggingEventBuilder.setCause",
+         "org.apache.logging.log4j.LogBuilder.log", "com.google.common.flogger.LoggingApi.log", "com.google.common.flogger.LoggingApi.logVarargs"]
+  receiver: "(?i)\\.at(trace|debug|info|warn|warning|error|fatal|severe|level|most|finest|finer|fine|config)\\("
+  arg: "*"
+  dest: { kind: log, host: application-log }
+  category: logging
+
+- id: log.jvm.mdc
+  lang: [kotlin, java]
+  call: ["org.slf4j.MDC.put", "org.slf4j.MDC.putCloseable", "org.apache.logging.log4j.ThreadContext.put", "org.apache.logging.log4j.CloseableThreadContext.put", "org.apache.log4j.MDC.put"]
+  arg: 1
+  dest: { kind: log, host: application-log }
+  category: logging
+  description: A mapped diagnostic context value is written into every log line of the thread until it is removed.
+
+- id: log.jvm.stack_trace
+  lang: [kotlin, java]
+  call: ["java.lang.Throwable.printStackTrace", "*Exception.printStackTrace", "*Error.printStackTrace", "*Throwable.printStackTrace"]
+  receiver: "(?i)^(e|ex|exc|err|error|t|th|thr|throwable|cause|[a-z0-9_]*(exception|error|throwable|cause))$"
+  arg: -1
+  dest: { kind: log, host: stderr }
+  category: logging
+  description: printStackTrace() prints the exception's message, and so the data it was built with, to stderr.
 
 - id: sdk.sentry.set_user
   lang: [kotlin, java]

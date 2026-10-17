@@ -360,7 +360,7 @@ func (l *lowerer) classes() []*ir.Class {
 		ifaces[k] = v
 	}
 	for _, pkg := range l.prog.AllPackages() {
-		if pkg.Pkg == nil || (pkg.Pkg.Path() != l.modPath && !strings.HasPrefix(pkg.Pkg.Path(), l.modPath+"/")) {
+		if !l.inModule(pkg.Pkg) {
 			continue
 		}
 		for _, m := range pkg.Members {
@@ -496,11 +496,16 @@ func (l *lowerer) internalType(t types.Type) bool {
 		t = p.Elem()
 	}
 	n, ok := t.(*types.Named)
-	if !ok || n.Obj().Pkg() == nil || l.modPath == "" {
+	return ok && l.inModule(n.Obj().Pkg())
+}
+
+// inModule reports whether p is a package of the module being analyzed
+// (not a dependency or the standard library).
+func (l *lowerer) inModule(p *types.Package) bool {
+	if p == nil || l.modPath == "" {
 		return false
 	}
-	p := n.Obj().Pkg().Path()
-	return p == l.modPath || strings.HasPrefix(p, l.modPath+"/")
+	return p.Path() == l.modPath || strings.HasPrefix(p.Path(), l.modPath+"/")
 }
 
 func (l *lowerer) internal(fn *ssa.Function) bool {
@@ -541,7 +546,7 @@ func (l *lowerer) typeDecl(n *types.Named) *ir.TypeDecl {
 	}
 	l.emittedTypes[name] = true
 	td := &ir.TypeDecl{Name: name, Kind: "struct", Lang: lang.Go, Pos: l.pos(n.Obj().Pos())}
-	if p := n.Obj().Pkg(); p == nil || (l.modPath != "" && p.Path() != l.modPath && !strings.HasPrefix(p.Path(), l.modPath+"/")) {
+	if p := n.Obj().Pkg(); p == nil || (l.modPath != "" && !l.inModule(p)) {
 		td.External = true
 	}
 	for i := 0; i < st.NumFields(); i++ {
@@ -764,7 +769,12 @@ func (l *lowerer) v(val ssa.Value) ir.VarID {
 	case *ssa.Function, *ssa.Builtin:
 		id = F.Temp(l.lastPos)
 	case *ssa.Global:
-		id = F.Named(x.Name(), typeStr(x.Type()), l.pos(x.Pos()))
+		name := x.Name()
+		if l.modPath != "" && x.Pkg != nil && !l.inModule(x.Pkg.Pkg) {
+			// A dependency's variable, by its qualified name: os.Stderr.
+			name = x.Pkg.Pkg.Path() + "." + name
+		}
+		id = F.Named(name, typeStr(x.Type()), l.pos(x.Pos()))
 	default:
 		p := l.pos(val.Pos())
 		if !p.IsValid() {

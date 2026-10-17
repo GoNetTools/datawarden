@@ -78,7 +78,7 @@ func TestSchemaParserWrappers(t *testing.T) {
 	if len(proto) != 1 || len(sql) != 1 {
 		t.Fatalf("proto=%+v sql=%+v", proto, sql)
 	}
-	schema := s.Build(append(proto, sql...))
+	schema := s.Build(append(proto, sql...), SchemaOptions{})
 	if h, st := schema.Field("table:users", "phone_number"); st != FieldPII || h.DataType != "phone" {
 		t.Errorf("sql hint: %+v %v", h, st)
 	}
