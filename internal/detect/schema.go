@@ -51,8 +51,19 @@ type Schema struct {
 var nameTags = []string{"column", "gorm", "db", "bson", "json", "yaml", "xml", "protobuf", "msgpack", "mapstructure", "form", "query",
 	"@Column", "@SerializedName", "@JsonProperty", "@Json", "@ColumnInfo", "@Field", "@JsonAlias", "@SerialName", "@Property"}
 
-// Tags/annotations that explicitly mark PII.
-var piiTags = []string{"pii", "datawarden", "@PII", "@Pii", "@PersonalData", "@Sensitive", "@SensitiveData"}
+// Tags/annotations that explicitly mark sensitive data. A repository adds
+// its own with SchemaOptions.SensitiveMarkers.
+var piiTags = []string{"pii", "pci", "phi", "sensitive", "datawarden",
+	"@PII", "@Pii", "@PCI", "@Pci", "@PHI", "@Phi", "@PersonalData", "@Sensitive", "@SensitiveData", "@Confidential"}
+
+// SchemaOptions configures BuildSchema.
+type SchemaOptions struct {
+	// SensitiveMarkers are extra struct tag keys ("mask") and annotations
+	// ("@Masked") that mark a field as sensitive, read like pii:"..." and
+	// @PII(...): the value names the data type, empty or "true" leaves
+	// it to the field name, "-" or "false" says not sensitive.
+	SensitiveMarkers []string
+}
 
 // Schemas parses schema files and builds indexes with a classifier. It is
 // the production implementation of the scanner's schema dependency.
@@ -65,10 +76,18 @@ func (Schemas) ParseProto(path string, src []byte) []*ir.TypeDecl { return Parse
 func (Schemas) ParseSQL(path string, src []byte) []*ir.TypeDecl { return ParseSQL(path, src) }
 
 // Build implements scan.SchemaParser.
-func (s Schemas) Build(types []*ir.TypeDecl) *Schema { return BuildSchema(s.Classifier, types) }
+func (s Schemas) Build(types []*ir.TypeDecl, opts SchemaOptions) *Schema {
+	return BuildSchema(s.Classifier, types, opts)
+}
 
-// BuildSchema indexes type declarations.
-func BuildSchema(c *Classifier, types []*ir.TypeDecl) *Schema {
+// BuildSchema indexes type declarations. Options are optional.
+func BuildSchema(c *Classifier, types []*ir.TypeDecl, opts ...SchemaOptions) *Schema {
+	markers := piiTags
+	for _, o := range opts {
+		if len(o.SensitiveMarkers) > 0 {
+			markers = append(append([]string(nil), piiTags...), o.SensitiveMarkers...)
+		}
+	}
 	s := &Schema{byTypeField: map[string]map[string]Hint{}, byField: map[string][]Hint{}, typePII: map[string][]string{}, known: map[string]bool{}, Types: types}
 	for _, t := range types {
 		keys := typeKeys(t.Name)
@@ -76,7 +95,7 @@ func BuildSchema(c *Classifier, types []*ir.TypeDecl) *Schema {
 			s.known[k] = true
 		}
 		for _, f := range t.Fields {
-			h, ok := classifyDeclField(c, t, f)
+			h, ok := classifyDeclField(c, markers, t, f)
 			if !ok {
 				continue
 			}
@@ -114,7 +133,7 @@ func BuildSchema(c *Classifier, types []*ir.TypeDecl) *Schema {
 			byKey[k] = append(byKey[k], t)
 		}
 		for _, f := range t.Fields {
-			if h, ok := classifyDeclField(c, t, f); ok && !h.Suppressed && h.Conf >= 0.6 {
+			if h, ok := classifyDeclField(c, markers, t, f); ok && !h.Suppressed && h.Conf >= 0.6 {
 				declDTs[t][h.DataType] = true
 			}
 		}
@@ -167,9 +186,9 @@ func BuildSchema(c *Classifier, types []*ir.TypeDecl) *Schema {
 	return s
 }
 
-func classifyDeclField(c *Classifier, t *ir.TypeDecl, f ir.Field) (Hint, bool) {
+func classifyDeclField(c *Classifier, markers []string, t *ir.TypeDecl, f ir.Field) (Hint, bool) {
 	h := Hint{Type: t.Name, Field: f.Name, Pos: f.Pos}
-	for _, k := range piiTags {
+	for _, k := range markers {
 		v, ok := f.Tags[k]
 		if !ok {
 			continue
@@ -183,7 +202,7 @@ func classifyDeclField(c *Classifier, t *ir.TypeDecl, f ir.Field) (Hint, bool) {
 			if m, ok := c.Ident(f.Name); ok {
 				v = m.DataType
 			} else {
-				v = "pii"
+				v = markerClass(c, k)
 			}
 		}
 		h.DataType, h.Conf, h.Via = v, 1.0, tagVia(k, v)
@@ -203,6 +222,7 @@ func classifyDeclField(c *Classifier, t *ir.TypeDecl, f ir.Field) (Hint, bool) {
 			continue
 		}
 		if m, ok := c.Ident(v); ok && m.Conf+0.05 > best.Conf {
+			m = ownerContext(t.Name, m)
 			m.Conf += 0.05
 			if m.Conf > 0.95 {
 				m.Conf = 0.95
@@ -215,6 +235,17 @@ func classifyDeclField(c *Classifier, t *ir.TypeDecl, f ir.Field) (Hint, bool) {
 	}
 	h.DataType, h.Conf, h.Transform, h.Via, h.Contextual = best.DataType, best.Conf, best.Transform, bestVia, contextual
 	return h, true
+}
+
+// markerClass is the data type a marker gives a field whose name says
+// nothing: the marker's class when it names one (pci:"true", @PHI), else
+// personal data.
+func markerClass(c *Classifier, marker string) string {
+	id := strings.ToLower(strings.TrimPrefix(marker, "@"))
+	if c.KnownClass(id) {
+		return id
+	}
+	return "pii"
 }
 
 func tagVia(k, v string) string {

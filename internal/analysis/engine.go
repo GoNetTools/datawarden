@@ -1357,6 +1357,16 @@ func (a *analyzer) keyedRead(fn *ir.Func, defs []int, in *ir.Instr, recvOff int)
 	return false
 }
 
+// argName is the name of call argument i (-1 for the receiver) as the
+// source writes it (os.Stderr, w, req.body), or "".
+func argName(fn *ir.Func, defs []int, in *ir.Instr, i, recvOff int) string {
+	j := i + recvOff
+	if (i == -1 && recvOff == 0) || j < 0 || j >= len(in.Args) {
+		return ""
+	}
+	return accessPath(fn, defs, in.Args[j])
+}
+
 // accessPath writes the object v as the source does when it is a named
 // variable or a chain of field reads from one (req, ctx.request), else "".
 func accessPath(fn *ir.Func, defs []int, v ir.VarID) string {
@@ -1455,6 +1465,9 @@ func (a *analyzer) call(st *state, fn *ir.Func, in *ir.Instr, sum *Summary) bool
 	remote := false
 	for _, hit := range match(fn.Lang, rules.KindSink, c) {
 		r := hit.Rule
+		if !r.ArgAllowed(func(i int) string { return argName(fn, st.defs, in, i, recvOff) }) {
+			continue
+		}
 		remote = remote || r.Category == "network"
 		dest := a.dest(r, fn, in, recvOff)
 		for i := 0; i < len(in.Args); i++ {

@@ -516,3 +516,25 @@ func TestConformanceProgramsParseCleanly(t *testing.T) {
 		}
 	}
 }
+
+// Lombok's logging annotations declare the "log" field the class uses.
+func TestJavaLombokLogger(t *testing.T) {
+	m := lower(t, NewJava, map[string]string{"p/A.java": `package p;
+import lombok.extern.slf4j.Slf4j;
+@Slf4j
+class A { void f(String email) { log.info("signup {}", email); } }`, "p/B.java": `package p;
+import lombok.extern.log4j.Log4j2;
+@Log4j2
+class B { void f(String email) { log.warn("signup {}", email); } }`, "p/C.java": `package p;
+class C { void f(String email) { log.error("no annotation {}", email); } }`})
+	cs := calls(m)
+	if c := cs["info"]; c == nil || c.Callee != "org.slf4j.Logger.info" {
+		t.Errorf("@Slf4j: %+v", c)
+	}
+	if c := cs["warn"]; c == nil || c.Callee != "org.apache.logging.log4j.Logger.warn" {
+		t.Errorf("@Log4j2: %+v", c)
+	}
+	if c := cs["error"]; c == nil || c.Callee != "" || c.RecvText != "log" {
+		t.Errorf("no annotation: %+v", c)
+	}
+}

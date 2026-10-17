@@ -6,6 +6,16 @@ All notable changes to datawarden are documented here. The format follows [Keep 
 
 ### Added
 
+- Cardholder data beyond the card number, as PCI DSS defines it: `card_security_code` (cvv, cvc, securityCode), `card_expiry` (cardExpiry, expMonth, expYear; a bare `expiryDate` scores lower), `card_track_data` (track2Data, magneticStripe, pinBlock, cardPin) and `cardholder_name` (cardholderName, nameOnCard, `Card.holderName`), all in class `pci`. A card number committed next to its expiry or security code scores higher.
+- Field markers: struct tags `pci`, `phi` and `sensitive` and annotations `@PCI`, `@PHI` and `@Confidential` mark a field like `pii` and `@PII` did; a marker that names a class (`pci:"true"`) is the fallback type when the field name says nothing. `schema.sensitive_markers` in `.datawarden.yaml` adds a repository's own tags and annotations (`[mask, "@Masked"]`).
+- Java/Kotlin logging: Log4j 2 `fatal`, `log`, `printf` and `always`, Log4j 1.x, `java.util.logging` `config`/`finer`/`finest`/`logp`/`entering`/`exiting`/`throwing`, Logback's `Logger`, Apache Commons Logging, JBoss Logging, tinylog, `System.Logger` and kotlin-logging 5 (`log.jvm.logger`); fluent logging with SLF4J 2 `atInfo().addArgument(x).log(..)`, Log4j 2 `LogBuilder` and Flogger (`log.jvm.fluent`); `MDC.put` and `ThreadContext.put` (`log.jvm.mdc`); `printStackTrace()` on an exception built with the data (`log.jvm.stack_trace`); `System.out.format` and `write`. Lombok's `@Slf4j`, `@Log4j2`, `@Log`, `@CommonsLog`, `@JBossLog` and `@Flogger` declare the `log` field, so its calls resolve; loggers of unknown types also match by names such as `LOGGER`, `mLogger` or `auditLogger`.
+- Go logging: `fmt.Fprint*` to `os.Stderr`/`os.Stdout` (`log.go.fmt_fprint`), `os.Stderr.WriteString` (`log.go.stdio_write`, no longer reported as file storage), the `print`/`println` builtins, logrus `Trace*`/`Fatal*`/`Panic*`/`Log*`, zerolog `Logger.Print*`, and klog/glog (`log.go.klog`), logr (`log.go.logr`), go-hclog (`log.go.hclog`) and go-kit/log (`log.go.gokit`).
+- Rule fields `arg_is` and `arg_not`: a sink applies only when an argument (by index, `-1` for the receiver) is a variable whose name matches a regular expression. The Go frontend names a dependency's package variables with their import path (`os.Stderr`).
+
+### Changed
+
+- `cvv`, `cvc` and `cardExpiry` are now `card_security_code` and `card_expiry` findings instead of `credit_card`, and `cardholderName` is `cardholder_name` instead of `person_name`, so their baseline fingerprints change; re-run `datawarden baseline` to accept them again.
+
 - Tracing and APM sinks (#41), each with an annotated example. They use a new category, `tracing`.
   - **OpenTelemetry** (`sdk.*.otel`) in Go, Python, Java/Kotlin, TypeScript and Swift covers span attributes, events and statuses, recorded exceptions, baggage, and log records. The destination is `third_party` with host `otel-collector`. Declare a collector you run yourself in `first_party_domains`.
   - **Datadog APM** (`sdk.*.datadog.trace`) in Go, Python, Java, TypeScript and Swift covers span tags and user info (`tracer.SetUser`, `set_user`, `tracer.setUser`). Datadog RUM was already covered.

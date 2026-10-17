@@ -31,6 +31,7 @@ var vocabulary = map[string]bool{
 // behind an interface.
 var dataMethods = map[string]string{
 	"rules.ArgSpec.Selects": "part of the rule definitions a RuleMatcher returns",
+	"rules.Rule.ArgAllowed": "part of the rule definitions a RuleMatcher returns",
 }
 
 // TestComponentsTalkThroughInterfaces enforces the design rule: a

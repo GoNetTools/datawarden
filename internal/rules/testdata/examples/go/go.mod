@@ -21,6 +21,11 @@ require (
 	go.uber.org/zap v0.0.0
 	golang.org/x/crypto v0.0.0
 	gorm.io/gorm v0.0.0
+	k8s.io/klog/v2 v2.0.0
+	github.com/golang/glog v0.0.0
+	github.com/go-logr/logr v0.0.0
+	github.com/hashicorp/go-hclog v0.0.0
+	github.com/go-kit/log v0.0.0
 )
 
 replace (
@@ -42,4 +47,9 @@ replace (
 	go.uber.org/zap => ../../gostubs/zap
 	golang.org/x/crypto => ../../gostubs/xcrypto
 	gorm.io/gorm => ../../gostubs/gorm
+	k8s.io/klog/v2 => ../../gostubs/klog
+	github.com/golang/glog => ../../gostubs/glog
+	github.com/go-logr/logr => ../../gostubs/logr
+	github.com/hashicorp/go-hclog => ../../gostubs/hclog
+	github.com/go-kit/log => ../../gostubs/gokit-log
 )

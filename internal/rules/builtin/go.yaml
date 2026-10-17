@@ -11,9 +11,26 @@
 
 - id: log.go.fmt_print
   lang: go
-  call: ["fmt.Print", "fmt.Printf", "fmt.Println"]
+  call: ["fmt.Print", "fmt.Printf", "fmt.Println", "builtin.print", "builtin.println"]
   arg: "*"
   dest: { kind: log, host: stdout }
+  category: logging
+
+- id: log.go.fmt_fprint
+  lang: go
+  call: ["fmt.Fprint", "fmt.Fprintf", "fmt.Fprintln"]
+  arg: "*"
+  arg_is: { 0: '^os\.(Stderr|Stdout)$' }
+  dest: { kind: log, host: stderr }
+  category: logging
+  description: fmt.Fprint* writes to the writer it is given; to os.Stderr or os.Stdout it is a log line.
+
+- id: log.go.stdio_write
+  lang: go
+  call: ["os.File.Write", "os.File.WriteString"]
+  arg: "*"
+  arg_is: { -1: '^os\.(Stderr|Stdout)$' }
+  dest: { kind: log, host: stderr }
   category: logging
 
 - id: log.go.slog
@@ -32,8 +49,9 @@
 
 - id: log.go.logrus
   lang: go
-  call: ["github.com/sirupsen/logrus.Info*", "github.com/sirupsen/logrus.Debug*", "github.com/sirupsen/logrus.Warn*",
-         "github.com/sirupsen/logrus.Error*", "github.com/sirupsen/logrus.Print*", "github.com/sirupsen/logrus.With*",
+  call: ["github.com/sirupsen/logrus.Trace*", "github.com/sirupsen/logrus.Info*", "github.com/sirupsen/logrus.Debug*", "github.com/sirupsen/logrus.Warn*",
+         "github.com/sirupsen/logrus.Error*", "github.com/sirupsen/logrus.Fatal*", "github.com/sirupsen/logrus.Panic*", "github.com/sirupsen/logrus.Print*",
+         "github.com/sirupsen/logrus.Log*", "github.com/sirupsen/logrus.With*",
          "github.com/sirupsen/logrus.Entry.*", "github.com/sirupsen/logrus.Logger.*", "github.com/sirupsen/logrus.FieldLogger.*"]
   arg: "*"
   dest: { kind: log, host: logrus }
@@ -41,9 +59,46 @@
 
 - id: log.go.zerolog
   lang: go
-  call: ["github.com/rs/zerolog.Event.*", "github.com/rs/zerolog.Context.*", "github.com/rs/zerolog/log.Print*"]
+  call: ["github.com/rs/zerolog.Event.*", "github.com/rs/zerolog.Context.*", "github.com/rs/zerolog.Logger.Print*", "github.com/rs/zerolog/log.Print*"]
   arg: "*"
   dest: { kind: log, host: zerolog }
+  category: logging
+
+- id: log.go.klog
+  lang: go
+  call: ["k8s.io/klog/v2.Info*", "k8s.io/klog/v2.Warning*", "k8s.io/klog/v2.Error*", "k8s.io/klog/v2.Fatal*", "k8s.io/klog/v2.Exit*",
+         "k8s.io/klog/v2.Verbose.Info*", "k8s.io/klog/v2.Verbose.Error*", "k8s.io/klog/v2.Logger.Info", "k8s.io/klog/v2.Logger.Error",
+         "k8s.io/klog.Info*", "k8s.io/klog.Warning*", "k8s.io/klog.Error*", "k8s.io/klog.Fatal*", "k8s.io/klog.Verbose.Info*",
+         "github.com/golang/glog.Info*", "github.com/golang/glog.Warning*", "github.com/golang/glog.Error*", "github.com/golang/glog.Fatal*", "github.com/golang/glog.Exit*",
+         "github.com/golang/glog.Verbose.Info*"]
+  arg: "*"
+  dest: { kind: log, host: klog }
+  category: logging
+  description: klog and glog (Kubernetes-style leveled logging), including V(n).Info.
+
+- id: log.go.logr
+  lang: go
+  call: ["github.com/go-logr/logr.Logger.Info", "github.com/go-logr/logr.Logger.Error", "github.com/go-logr/logr.Logger.WithValues", "github.com/go-logr/logr.Logger.WithName",
+         "github.com/go-logr/logr.LogSink.Info", "github.com/go-logr/logr.LogSink.Error"]
+  arg: "*"
+  dest: { kind: log, host: logr }
+  category: logging
+
+- id: log.go.hclog
+  lang: go
+  call: ["github.com/hashicorp/go-hclog.Logger.Trace", "github.com/hashicorp/go-hclog.Logger.Debug", "github.com/hashicorp/go-hclog.Logger.Info",
+         "github.com/hashicorp/go-hclog.Logger.Warn", "github.com/hashicorp/go-hclog.Logger.Error", "github.com/hashicorp/go-hclog.Logger.Log",
+         "github.com/hashicorp/go-hclog.Logger.With", "github.com/hashicorp/go-hclog.Logger.Named"]
+  arg: "*"
+  dest: { kind: log, host: hclog }
+  category: logging
+
+- id: log.go.gokit
+  lang: go
+  call: ["github.com/go-kit/log.Logger.Log", "github.com/go-kit/log.With", "github.com/go-kit/log.WithPrefix", "github.com/go-kit/log.WithSuffix",
+         "github.com/go-kit/kit/log.Logger.Log", "github.com/go-kit/kit/log.With", "github.com/go-kit/kit/log.WithPrefix"]
+  arg: "*"
+  dest: { kind: log, host: go-kit }
   category: logging
 
 - id: sdk.go.sentry.scope
@@ -157,6 +212,7 @@
   lang: go
   call: ["os.WriteFile", "os.File.Write", "os.File.WriteString"]
   arg: "*"
+  arg_not: { -1: '^os\.(Stderr|Stdout)$' } # those are log.go.stdio_write
   dest: { kind: storage, host: local-file }
   category: storage
 

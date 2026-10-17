@@ -112,15 +112,18 @@ func (fakeLiterals) Scan(b []byte) []detect.LiteralHit {
 	return out
 }
 
-type fakeSchemas struct{ built []*ir.TypeDecl }
+type fakeSchemas struct {
+	built []*ir.TypeDecl
+	opts  detect.SchemaOptions
+}
 
 func (s *fakeSchemas) ParseProto(path string, _ []byte) []*ir.TypeDecl {
 	return []*ir.TypeDecl{{Name: "proto:" + path, Pos: ir.Pos{File: path}}}
 }
 func (s *fakeSchemas) ParseSQL(path string, _ []byte) []*ir.TypeDecl { return nil }
-func (s *fakeSchemas) Build(types []*ir.TypeDecl) *detect.Schema {
-	s.built = types
-	return detect.BuildSchema(detect.NewClassifier(nil), types)
+func (s *fakeSchemas) Build(types []*ir.TypeDecl, opts detect.SchemaOptions) *detect.Schema {
+	s.built, s.opts = types, opts
+	return detect.BuildSchema(detect.NewClassifier(nil), types, opts)
 }
 
 type fixture struct {

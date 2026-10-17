@@ -4,6 +4,7 @@
 package config
 
 import (
+	"strings"
 	"testing"
 	"testing/fstest"
 )
@@ -54,5 +55,20 @@ func TestLoader(t *testing.T) {
 	}
 	if _, err := l.Load(fstest.MapFS{}, FileName, true); err == nil {
 		t.Error("missing required file accepted")
+	}
+}
+
+func TestSensitiveMarkers(t *testing.T) {
+	c, err := Parse([]byte("schema:\n  sensitive_markers: [mask, \"@Masked\"]\n"), ".datawarden.yaml")
+	if err != nil || len(c.Schema.SensitiveMarkers) != 2 || c.Schema.SensitiveMarkers[1] != "@Masked" {
+		t.Fatalf("markers: %+v %v", c.Schema, err)
+	}
+	for _, bad := range []string{"schema:\n  sensitive_markers: [\"@\"]\n", "schema:\n  sensitive_markers: [\"pii:email\"]\n", "schema:\n  sensitive_markers: [\" \"]\n"} {
+		if _, err := Parse([]byte(bad), ".datawarden.yaml"); err == nil || !strings.Contains(err.Error(), "sensitive_markers") {
+			t.Errorf("%q: accepted (%v)", bad, err)
+		}
+	}
+	if _, err := Parse([]byte(Template), ".datawarden.yaml"); err != nil {
+		t.Errorf("template: %v", err)
 	}
 }

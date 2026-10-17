@@ -4,6 +4,8 @@
 package detect
 
 import (
+	"github.com/GoNetTools/datawarden/internal/ir"
+
 	"reflect"
 	"testing"
 )
@@ -180,5 +182,114 @@ func TestCustomTaxonomy(t *testing.T) {
 	}
 	if c.Lookup("loyalty_card").Label != "Loyalty card" || c.Known("email") {
 		t.Error("lookup")
+	}
+}
+
+// TestClassifyCardData covers the cardholder data types of PCI DSS: the
+// card number, the security code, the expiry date, track data and the
+// cardholder name, and the look-alikes that are not cards.
+func TestClassifyCardData(t *testing.T) {
+	want := map[string]string{
+		"cardNumber": "credit_card", "primaryAccountNumber": "credit_card", "pan": "credit_card", "cardPan": "credit_card", "ccNum": "credit_card",
+		"cvv": "card_security_code", "cvc": "card_security_code", "cvv2": "card_security_code", "cardCvv": "card_security_code",
+		"securityCode": "card_security_code", "cardSecurityCode": "card_security_code", "cardVerificationValue": "card_security_code", "card_verification_code": "card_security_code",
+		"cardExpiry": "card_expiry", "cardExpiration": "card_expiry", "expMonth": "card_expiry", "expYear": "card_expiry", "expiryMonth": "card_expiry",
+		"expiryYear": "card_expiry", "validThru": "card_expiry", "ccExp": "card_expiry", "expiryDate": "card_expiry", "expirationDate": "card_expiry",
+		"track2Data": "card_track_data", "track1": "card_track_data", "trackData": "card_track_data", "magneticStripe": "card_track_data", "magstripe": "card_track_data",
+		"pinBlock": "card_track_data", "cardPin": "card_track_data", "emvData": "card_track_data",
+		"cardholderName": "cardholder_name", "cardHolderName": "cardholder_name", "nameOnCard": "cardholder_name", "cardholder": "cardholder_name",
+	}
+	for name, dt := range want {
+		m, ok := testC.Ident(name)
+		if !ok || m.DataType != dt {
+			t.Errorf("Ident(%q) = %+v, %v; want %s", name, m, ok, dt)
+		}
+		if c := testC.Lookup(m.DataType).Class; c != "pci" {
+			t.Errorf("%s: class %s, want pci", m.DataType, c)
+		}
+	}
+	// The expiry date of anything else is not cardholder data, and the
+	// bare words are weak: a bare expiryDate scores below a cardExpiry.
+	for _, name := range []string{"tokenExpiryDate", "sessionExpiry", "certificateExpirationDate", "passwordExpiryDate", "couponExpiryDate", "subscriptionExpiration", "cacheExpiry", "licenseExpiryDate",
+		"trackingNumber", "trackId", "gitTracked", "trackEvent", "cardType", "cardBrand", "cardLast4", "cardToken", "cvvLength", "cvvFieldLabel", "securityCodeLength", "otpSecurityCode",
+		"cardholderAgreement", "pinCode", "zipCode"} {
+		if m, ok := testC.Ident(name); ok && testC.Lookup(m.DataType).Class == "pci" {
+			t.Errorf("Ident(%q) = %+v; want no cardholder data", name, m)
+		}
+	}
+	weak, _ := testC.Ident("expiryDate")
+	strong, _ := testC.Ident("cardExpiry")
+	if weak.Conf >= strong.Conf {
+		t.Errorf("expiryDate %.2f should score below cardExpiry %.2f", weak.Conf, strong.Conf)
+	}
+	if m, ok := testC.Field("com.acme.Cardholder", "name"); !ok || m.DataType != "cardholder_name" {
+		t.Errorf("Cardholder.name: %+v %v", m, ok)
+	}
+	if m, ok := testC.Field("model.Card", "HolderName"); !ok || m.DataType != "cardholder_name" {
+		t.Errorf("Card.HolderName: %+v %v", m, ok)
+	}
+	if m, ok := testC.Field("model.Account", "HolderName"); !ok || m.DataType != "person_name" {
+		t.Errorf("Account.HolderName: %+v %v", m, ok)
+	}
+	if m, ok := testC.Getter("getCvv"); !ok || m.DataType != "card_security_code" {
+		t.Errorf("getCvv: %+v %v", m, ok)
+	}
+}
+
+// TestSchemaSensitiveMarkers covers the built-in markers (pii, pci, phi,
+// sensitive, @PII, @PCI, @Sensitive...) and the repository's own
+// (SchemaOptions.SensitiveMarkers).
+func TestSchemaSensitiveMarkers(t *testing.T) {
+	types := []*ir.TypeDecl{
+		{Name: "p.Card", Kind: "struct", Fields: []ir.Field{
+			{Name: "Number", Type: "string", Tags: map[string]string{"pci": "credit_card"}},
+			{Name: "Code", Type: "string", Tags: map[string]string{"pci": "true"}},
+			{Name: "Holder", Type: "string", Tags: map[string]string{"mask": "cardholder_name"}},
+			{Name: "ExpMonth", Type: "string", Tags: map[string]string{"sensitive": ""}},
+			{Name: "Note", Type: "string", Tags: map[string]string{"mask": "-"}},
+			{Name: "Theme", Type: "string", Tags: map[string]string{"json": "theme"}},
+		}},
+		{Name: "com.acme.Patient", Kind: "class", Fields: []ir.Field{
+			{Name: "record", Type: "String", Tags: map[string]string{"@PHI": ""}},
+			{Name: "contact", Type: "String", Tags: map[string]string{"@Masked": "phone"}},
+			{Name: "nickname", Type: "String", Tags: map[string]string{"@Masked": ""}},
+			{Name: "diagnosis", Type: "String", Tags: map[string]string{"@Confidential": ""}},
+		}},
+	}
+	// Built-in markers only: mask and @Masked mean nothing.
+	s := BuildSchema(testC, types)
+	for field, want := range map[string]string{"Number": "credit_card", "Code": "pci", "ExpMonth": "card_expiry"} {
+		if h, st := s.Field("p.Card", field); st != FieldPII || h.DataType != want || h.Conf != 1 {
+			t.Errorf("Card.%s: %+v %v, want %s", field, h, st, want)
+		}
+	}
+	if _, st := s.Field("p.Card", "Holder"); st != FieldUnknown {
+		t.Errorf("Card.Holder: mask is not a built-in marker, got %v", st)
+	}
+	if h, st := s.Field("com.acme.Patient", "record"); st != FieldPII || h.DataType != "phi" {
+		t.Errorf("Patient.record: %+v %v", h, st)
+	}
+	if h, st := s.Field("com.acme.Patient", "diagnosis"); st != FieldPII || h.DataType != "health" {
+		t.Errorf("Patient.diagnosis: %+v %v", h, st)
+	}
+	if testC.Lookup("pci").Class != "pci" || testC.Lookup("phi").Class != "phi" || testC.Lookup("loyalty").Class != "pii" {
+		t.Error("a class id used as a data type belongs to that class")
+	}
+	// With the repository's markers.
+	s = BuildSchema(testC, types, SchemaOptions{SensitiveMarkers: []string{"mask", "@Masked"}})
+	if h, st := s.Field("p.Card", "Holder"); st != FieldPII || h.DataType != "cardholder_name" || h.Via != `mask:"cardholder_name"` {
+		t.Errorf("Card.Holder: %+v %v", h, st)
+	}
+	if _, st := s.Field("p.Card", "Note"); st != FieldNotPII {
+		t.Errorf("Card.Note: mask:\"-\" suppresses, got %v", st)
+	}
+	if h, st := s.Field("com.acme.Patient", "contact"); st != FieldPII || h.DataType != "phone" {
+		t.Errorf("Patient.contact: %+v %v", h, st)
+	}
+	if h, st := s.Field("com.acme.Patient", "nickname"); st != FieldPII || h.DataType != "pii" {
+		t.Errorf("Patient.nickname: %+v %v", h, st)
+	}
+	if dts := s.TypeDataTypes("p.Card"); len(dts) != 4 {
+		t.Errorf("Card carries %v", dts)
 	}
 }

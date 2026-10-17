@@ -137,6 +137,14 @@ type Rule struct {
 	// HostArg names an argument holding a URL; when it is a constant the
 	// host is used as the destination host.
 	HostArg *int `yaml:"host_arg,omitempty" json:"host_arg,omitempty"`
+	// ArgIs restricts a sink to calls whose argument (by index, -1 for
+	// the receiver) is a variable whose name matches the regular
+	// expression: fmt.Fprintf is a log only when it writes to os.Stderr.
+	// ArgNot is the opposite: the rule does not apply when the argument
+	// matches. Qualified names are matched as "importpath.Name"
+	// (os.Stderr) or "obj.field" chains.
+	ArgIs  map[int]string `yaml:"arg_is,omitempty" json:"arg_is,omitempty"`
+	ArgNot map[int]string `yaml:"arg_not,omitempty" json:"arg_not,omitempty"`
 	// DataType is produced by source rules.
 	DataType string `yaml:"data_type,omitempty" json:"data_type,omitempty"`
 	// Field lists field reads that are sources, as "Type.field" ('*'
@@ -162,6 +170,8 @@ type Rule struct {
 	Origin string `yaml:"-" json:"origin"`
 
 	callRes  []*regexp.Regexp
+	argIs    map[int]*regexp.Regexp
+	argNot   map[int]*regexp.Regexp
 	fields   []fieldPattern
 	recvRe   *regexp.Regexp
 	names    []string         // last segment of each call pattern
@@ -388,6 +398,16 @@ func (r *Rule) compile() error {
 	if r.HostArg != nil && *r.HostArg < 0 {
 		return fmt.Errorf("host_arg %d: indexes start at 0", *r.HostArg)
 	}
+	if (len(r.ArgIs) > 0 || len(r.ArgNot) > 0) && r.Kind != KindSink {
+		return fmt.Errorf("arg_is and arg_not are for sink rules")
+	}
+	var err error
+	if r.argIs, err = compileArgPatterns("arg_is", r.ArgIs); err != nil {
+		return err
+	}
+	if r.argNot, err = compileArgPatterns("arg_not", r.ArgNot); err != nil {
+		return err
+	}
 	r.callRes, r.names, r.nameRes, r.typeSegs = nil, nil, nil, nil
 	for _, c := range r.Call {
 		re, err := globToRegexp(c)
@@ -439,6 +459,41 @@ func (r *Rule) compile() error {
 type fieldPattern struct {
 	owner *regexp.Regexp
 	name  string
+}
+
+func compileArgPatterns(key string, m map[int]string) (map[int]*regexp.Regexp, error) {
+	if len(m) == 0 {
+		return nil, nil
+	}
+	out := make(map[int]*regexp.Regexp, len(m))
+	for i, p := range m {
+		if i < -1 {
+			return nil, fmt.Errorf("%s %d: indexes start at 0 (-1 is the receiver)", key, i)
+		}
+		re, err := regexp.Compile(p)
+		if err != nil {
+			return nil, fmt.Errorf("%s %d: %w", key, i, err)
+		}
+		out[i] = re
+	}
+	return out, nil
+}
+
+// ArgAllowed reports whether a call with the given argument names (by
+// index, -1 for the receiver; "" when unnamed) passes the rule's arg_is
+// and arg_not conditions.
+func (r *Rule) ArgAllowed(name func(i int) string) bool {
+	for i, re := range r.argIs {
+		if !re.MatchString(name(i)) {
+			return false
+		}
+	}
+	for i, re := range r.argNot {
+		if re.MatchString(name(i)) {
+			return false
+		}
+	}
+	return true
 }
 
 func globToRegexp(g string) (*regexp.Regexp, error) {
