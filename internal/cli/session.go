@@ -4,6 +4,8 @@
 package cli
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
@@ -38,7 +40,10 @@ type session struct {
 	paths []string // root-relative, slash-separated
 	cfg   *config.Config
 	rules RuleSet
-	logf  func(string, ...any)
+	// taxonomy digests the repository's taxonomy files: a change to
+	// them, like a rule change, invalidates cached summaries.
+	taxonomy string
+	logf     func(string, ...any)
 }
 
 func (a *App) open(c *common, positional []string) (*session, error) {
@@ -96,6 +101,9 @@ func (a *App) open(c *common, positional []string) (*session, error) {
 		return nil, err
 	}
 
+	if s.taxonomy, err = a.loadTaxonomy(s); err != nil {
+		return nil, err
+	}
 	var rulePaths []string
 	for _, r := range s.cfg.Rules {
 		rel := filepath.ToSlash(r)
@@ -113,6 +121,34 @@ func (a *App) open(c *common, positional []string) (*session, error) {
 		s.logf = func(format string, args ...any) { fmt.Fprintf(a.Stderr, "datawarden: "+format+"\n", args...) }
 	}
 	return s, nil
+}
+
+// loadTaxonomy extends the catalog with the repository's taxonomy files
+// (config.Taxonomy; missing files are skipped) and returns a digest of
+// their contents.
+func (a *App) loadTaxonomy(s *session) (string, error) {
+	h := sha256.New()
+	for _, p := range s.cfg.Taxonomy {
+		rel := filepath.ToSlash(p)
+		if filepath.IsAbs(p) {
+			var err error
+			if rel, err = a.relToRoot(s.root, p); err != nil {
+				return "", fmt.Errorf("taxonomy path %s: %w", p, err)
+			}
+		}
+		b, err := fs.ReadFile(s.repo.FS, rel)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return "", fmt.Errorf("taxonomy %s: %w", p, err)
+		}
+		if err := a.Catalog.Extend(b); err != nil {
+			return "", fmt.Errorf("taxonomy %s: %w", p, err)
+		}
+		h.Write(b)
+	}
+	return hex.EncodeToString(h.Sum(nil)[:8]), nil
 }
 
 func (a *App) relToRoot(root, abs string) (string, error) {
@@ -139,13 +175,22 @@ func (s *session) inRoot(p string) string {
 func (a *App) request(s *session, c *common) scan.Request {
 	return scan.Request{
 		Repo:       s.repo,
-		Cache:      a.OpenCache(s.repo, s.inRoot(s.cfg.CacheDir), s.rules.Hash(), !c.noCache),
+		Cache:      a.OpenCache(s.repo, s.inRoot(s.cfg.CacheDir), s.cacheKey(), !c.noCache),
 		Config:     s.cfg,
 		Rules:      s.rules,
 		Heuristics: s.rules.Heuristics(),
 		Paths:      s.paths,
 		Logf:       s.logf,
 	}
+}
+
+// cacheKey is what cached summaries are valid for: the rules and the
+// repository's taxonomy.
+func (s *session) cacheKey() string {
+	if s.taxonomy == "" {
+		return s.rules.Hash()
+	}
+	return s.rules.Hash() + "+" + s.taxonomy
 }
 
 // markBaseline marks findings accepted by the baseline file at path (a

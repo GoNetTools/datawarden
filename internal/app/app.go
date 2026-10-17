@@ -117,7 +117,7 @@ func NewWith(stdout, stderr io.Writer, d Deps) *cli.App {
 		Rules:      ruleLoader{},
 		Policy:     policy.Policies{Catalog: comp.Classifier},
 		Baselines:  baseline.Codec{},
-		Reporter:   report.Writer{},
+		Reporter:   report.NewWriter(),
 		DataMapper: datamap.Mapper{},
 		Grapher:    flowgraph.Renderer{},
 		RuleTester: ruletest.Tester{},

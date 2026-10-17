@@ -202,7 +202,7 @@ func newHarness(files map[string]string) *harness {
 		Rules:      testRules{},
 		Policy:     policy.Policies{Catalog: classifier},
 		Baselines:  baseline.Codec{},
-		Reporter:   report.Writer{},
+		Reporter:   report.NewWriter(),
 		DataMapper: datamap.Mapper{},
 		Grapher:    flowgraph.Renderer{},
 		RuleTester: ruletest.Tester{},
@@ -632,5 +632,41 @@ func TestExplain(t *testing.T) {
 	h.app.Explainer = nil
 	if code := h.run("explain", "app/Repo.kt:9"); code != ExitError {
 		t.Errorf("no explainer: exit %d", code)
+	}
+}
+
+// The repository's taxonomy file extends the catalog before the scan and
+// is part of the cache key; a bad one is an error.
+func TestSessionTaxonomy(t *testing.T) {
+	h := newHarness(map[string]string{
+		".datawarden/taxonomy.yaml": "data_types:\n  - {id: loyalty_card, label: Loyalty card, class: pii, category: financial, patterns: [loyalty card]}\n",
+		"main.go":                   "package main",
+	})
+	var keys []string
+	h.app.OpenCache = func(repo scan.Repo, dir, rulesHash string, persist bool) scan.Cache {
+		keys = append(keys, rulesHash)
+		return cache.Open(nil, ingest.NewHasher(repo.FS), "test", rulesHash)
+	}
+	if code := h.run("scan", "--no-cache", "--no-fail"); code != ExitClean {
+		t.Fatalf("exit %d: %s", code, h.errb)
+	}
+	if dt := h.app.Catalog.Lookup("loyalty_card"); dt.Label != "Loyalty card" {
+		t.Errorf("catalog not extended: %+v", dt)
+	}
+	plain := newHarness(map[string]string{"main.go": "package main"})
+	var plainKeys []string
+	plain.app.OpenCache = func(repo scan.Repo, dir, rulesHash string, persist bool) scan.Cache {
+		plainKeys = append(plainKeys, rulesHash)
+		return cache.Open(nil, ingest.NewHasher(repo.FS), "test", rulesHash)
+	}
+	if code := plain.run("scan", "--no-cache", "--no-fail"); code != ExitClean {
+		t.Fatalf("exit %d: %s", code, plain.errb)
+	}
+	if len(keys) != 1 || len(plainKeys) != 1 || keys[0] == plainKeys[0] {
+		t.Errorf("cache keys: with taxonomy %v, without %v", keys, plainKeys)
+	}
+	bad := newHarness(map[string]string{".datawarden/taxonomy.yaml": "data_types:\n  - {id: x, label: X, class: nope, category: c, patterns: [x]}\n", "main.go": "package main"})
+	if code := bad.run("scan", "--no-cache"); code != ExitError || !strings.Contains(bad.errb.String(), "taxonomy") {
+		t.Errorf("bad taxonomy: exit %d\n%s", code, bad.errb)
 	}
 }

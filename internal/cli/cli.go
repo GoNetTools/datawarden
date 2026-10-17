@@ -70,6 +70,8 @@ type Commenter interface {
 // Catalog describes data types (*detect.Classifier).
 type Catalog interface {
 	Lookup(id string) detect.DataType
+	// Extend adds a taxonomy document's classes and data types.
+	Extend(doc []byte) error
 }
 
 // App is the command line application.
