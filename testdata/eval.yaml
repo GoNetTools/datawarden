@@ -252,13 +252,18 @@ cases:
     dir: .
     langs: [swift]
     min_precision: 1.0
-    min_recall: 0.83
+    # 6 of 8 labelled flows: the person name under the key "name" and the
+    # cardholder name read from nameOnCardTextField are known misses.
+    min_recall: 0.75
     flows:
       - {data_type: password, sink_rule: storage.swift.write_file, function: PListViewController.saveInPlistFileTapped, note: "userInfo.plist"}
       - {data_type: password, sink_rule: log.swift.print, function: DeviceLogsViewController.signupTapped, note: "print(user.description) of the sign-up object"}
       - {data_type: email, sink_rule: log.swift.print, function: DeviceLogsViewController.signupTapped}
       - {data_type: phone, sink_rule: log.swift.print, function: DeviceLogsViewController.signupTapped}
       - {data_type: credit_card, sink_rule: net.swift.urlsession, function: TransportLayerProtectionViewController.sendRequestOverUrl, note: "over plain HTTP"}
+      - {data_type: card_security_code, sink_rule: net.swift.urlsession, function: TransportLayerProtectionViewController.sendRequestOverUrl, note: "card_cvv in the same form, over plain HTTP"}
+      - {data_type: cardholder_name, sink_rule: net.swift.urlsession, function: TransportLayerProtectionViewController.sendRequestOverUrl,
+         note: "known miss: card_name is read from nameOnCardTextField.text, and neither the key nor the text field's name says cardholder"}
       - {data_type: person_name, sink_rule: log.swift.print, function: DeviceLogsViewController.signupTapped,
          note: "known miss: stored under the key name, which alone does not say person name"}
 
