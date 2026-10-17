@@ -105,6 +105,9 @@ type Config struct {
 	Schema        Schema   `yaml:"schema" json:"schema"`
 	// Go build flags / tags passed to go/packages.
 	GoBuildTags []string `yaml:"go_build_tags" json:"go_build_tags,omitempty"`
+	// Workers is how many parts of the call graph the analysis works on
+	// at a time: 0 for one per CPU, 1 for one after the other.
+	Workers int `yaml:"workers" json:"workers,omitempty"`
 
 	Path string `yaml:"-" json:"-"`
 }
@@ -160,6 +163,9 @@ func Parse(data []byte, origin string) (*Config, error) {
 	if c.Literals.Enabled == nil {
 		t := true
 		c.Literals.Enabled = &t
+	}
+	if c.Workers < 0 {
+		return nil, fmt.Errorf("%s: workers must be 0 (one per CPU) or more", origin)
 	}
 	if c.Policy.FailOnLiterals == nil {
 		t := true
@@ -226,6 +232,10 @@ rules: [.datawarden/rules]
 
 baseline: .datawarden/baseline.json
 cache_dir: .datawarden/cache
+
+# Parts of the call graph analyzed at a time: 0 is one per CPU, 1 is
+# one after the other (the --workers flag overrides it).
+workers: 0
 
 literals:
   enabled: true

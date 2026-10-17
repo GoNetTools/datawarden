@@ -110,7 +110,7 @@ datawarden map --format dpia > docs/data-map.md
 | `datawarden comment datawarden.md` | Creates or updates the PR (GitHub) / MR (GitLab) comment. |
 | `datawarden init` | Writes starter config files. |
 
-Useful `scan` flags: `--fail-on log,third_party` (only these destination kinds fail the build; overrides `policy.fail_on`), `--format text|json|sarif|markdown|gitlab`, `--sarif FILE`, `--markdown FILE`, `--json FILE`, `--gitlab FILE` (write several reports in one run), `--baseline FILE`, `--no-baseline`, `--caller-depth N`, `--min-confidence F`, `--all`, `--call-graph` (the call tree of each flow, in text and Markdown; JSON always has it as `calls` and `called_by`), `--no-cache`, `--no-fail`, `--verbose`, `--cpuprofile FILE`, `--memprofile FILE` (pprof profiles of the analysis; also on `baseline` and `map`). Flags can come before or after paths.
+Useful `scan` flags: `--workers N` (parts of the call graph analyzed at a time; 0, the default, is one per CPU, 1 is one after the other), `--fail-on log,third_party` (only these destination kinds fail the build; overrides `policy.fail_on`), `--format text|json|sarif|markdown|gitlab`, `--sarif FILE`, `--markdown FILE`, `--json FILE`, `--gitlab FILE` (write several reports in one run), `--baseline FILE`, `--no-baseline`, `--caller-depth N`, `--min-confidence F`, `--all`, `--call-graph` (the call tree of each flow, in text and Markdown; JSON always has it as `calls` and `called_by`), `--no-cache`, `--no-fail`, `--verbose`, `--cpuprofile FILE`, `--memprofile FILE` (pprof profiles of the analysis; also on `baseline` and `map`). Flags can come before or after paths.
 
 With `--call-graph`, each flow shows the functions its data goes through, indented by call depth, and the functions that call the one where it enters:
 
@@ -345,6 +345,7 @@ first_party_domains: [api.example.com]       # network sinks to these hosts beco
 rules: [.datawarden/rules]
 baseline: .datawarden/baseline.json
 cache_dir: .datawarden/cache
+workers: 0                    # parts of the call graph analyzed at a time: 0 is one per CPU (--workers overrides)
 literals: { enabled: true, min_confidence: 0.6 }
 schema:
   sensitive_markers: []      # your own field markers, e.g. [mask, "@Masked"]; built in: pii, pci, phi, sensitive, @PII, @Sensitive, ...

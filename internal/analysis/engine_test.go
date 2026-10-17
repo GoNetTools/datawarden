@@ -337,3 +337,90 @@ func TestHeuristicTablesExist(t *testing.T) {
 		t.Error("no heuristics means no name matches")
 	}
 }
+
+// fanout builds a program whose call graph has width as well as depth:
+// main calls n services, each service calls a shared helper that logs and
+// a pair of mutually recursive functions, and every service leaks the
+// email it is given. Workers can run the services at the same time.
+func fanout(n int) []*ir.Func {
+	var funcs []*ir.Func
+	p := func(file string, line int) ir.Pos { return ir.Pos{File: file, Line: line} }
+	leak := func(fn *ir.Func, v ir.VarID, file string, line int) {
+		fn.Emit(ir.Instr{Op: ir.OpCall, Dst: fn.Temp(p(file, line)), Args: []ir.VarID{v}, Call: &ir.Call{Name: "leak"}, Pos: p(file, line)})
+	}
+	call := func(fn *ir.Func, target, name string, v ir.VarID, file string, line int) ir.VarID {
+		d := fn.Temp(p(file, line))
+		fn.Emit(ir.Instr{Op: ir.OpCall, Dst: d, Args: []ir.VarID{v}, Call: &ir.Call{Name: name, Target: target}, Pos: p(file, line)})
+		return d
+	}
+	helper := &ir.Func{ID: "p.helper", Name: "helper", Lang: "go", File: "helper.go"}
+	hv := helper.AddParam("v", "string", p("helper.go", 1))
+	leak(helper, hv, "helper.go", 2)
+	helper.Emit(ir.Instr{Op: ir.OpReturn, Dst: ir.NoVar, Args: []ir.VarID{hv}, Pos: p("helper.go", 3)})
+	ping := &ir.Func{ID: "p.ping", Name: "ping", Lang: "go", File: "pp.go"}
+	pong := &ir.Func{ID: "p.pong", Name: "pong", Lang: "go", File: "pp.go"}
+	pv := ping.AddParam("v", "string", p("pp.go", 1))
+	ping.Emit(ir.Instr{Op: ir.OpReturn, Dst: ir.NoVar, Args: []ir.VarID{call(ping, "p.pong", "pong", pv, "pp.go", 2)}, Pos: p("pp.go", 3)})
+	qv := pong.AddParam("v", "string", p("pp.go", 10))
+	leak(pong, qv, "pp.go", 11)
+	pong.Emit(ir.Instr{Op: ir.OpReturn, Dst: ir.NoVar, Args: []ir.VarID{call(pong, "p.ping", "ping", qv, "pp.go", 12)}, Pos: p("pp.go", 13)})
+	funcs = append(funcs, helper, ping, pong)
+	main := &ir.Func{ID: "p.main", Name: "main", Lang: "go", File: "main.go"}
+	email := main.AddParam("email", "string", p("main.go", 1))
+	for i := 0; i < n; i++ {
+		id, file := fmt.Sprintf("p.svc%d", i), fmt.Sprintf("svc%d.go", i)
+		svc := &ir.Func{ID: id, Name: fmt.Sprintf("svc%d", i), Lang: "go", File: file}
+		v := svc.AddParam("v", "string", p(file, 1))
+		r := call(svc, "p.helper", "helper", v, file, 2)
+		leak(svc, call(svc, "p.ping", "ping", r, file, 3), file, 4)
+		funcs = append(funcs, svc)
+		call(main, id, svc.Name, email, "main.go", 2+i)
+	}
+	return append(funcs, main)
+}
+
+// Analyzing components in parallel reports exactly what analyzing them
+// one after the other reports.
+func TestParallelMatchesSequential(t *testing.T) {
+	rs, err := rules.Load(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := detect.NewClassifier(detect.DefaultTaxonomy())
+	run := func(workers int, funcs []*ir.Func) *Result {
+		t.Helper()
+		res, err := Engine{Names: names}.Analyze(context.Background(), funcs, Input{Rules: fakeRules{}, Heuristics: rs.Heuristics(), Schema: detect.BuildSchema(names, nil), Workers: workers})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+	for _, funcs := range [][]*ir.Func{fanout(40), chain(60)} {
+		seq := run(1, funcs)
+		if len(seq.Flows) == 0 {
+			t.Fatal("the program leaks")
+		}
+		for _, workers := range []int{0, 3, 16} {
+			par := run(workers, funcs)
+			if len(par.Flows) != len(seq.Flows) {
+				t.Fatalf("workers=%d: %d flows, sequential %d", workers, len(par.Flows), len(seq.Flows))
+			}
+			for i := range seq.Flows {
+				if seq.Flows[i].Fingerprint != par.Flows[i].Fingerprint || seq.Flows[i].Confidence != par.Flows[i].Confidence || fmt.Sprint(seq.Flows[i].Path) != fmt.Sprint(par.Flows[i].Path) {
+					t.Errorf("workers=%d: flow %d differs:\n%+v\n%+v", workers, i, seq.Flows[i], par.Flows[i])
+				}
+			}
+			for id, s := range seq.Summaries {
+				if ps := par.Summaries[id]; ps == nil || ps.Digest() != s.Digest() {
+					t.Errorf("workers=%d: summary of %s differs", workers, id)
+				}
+			}
+		}
+	}
+	// Cancellation stops the workers.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := (Engine{Names: names}).Analyze(ctx, fanout(40), Input{Rules: fakeRules{}, Schema: detect.BuildSchema(names, nil), Workers: 4}); err == nil {
+		t.Error("a cancelled context is an error")
+	}
+}

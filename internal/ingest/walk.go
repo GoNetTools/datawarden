@@ -11,6 +11,7 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/GoNetTools/datawarden/internal/lang"
 )
@@ -135,6 +136,7 @@ func (Lister) Select(fsys fs.FS, all []File, paths []string) []File {
 type Hasher struct {
 	fsys  fs.FS
 	cache map[string]string
+	mu    sync.Mutex // the cache is read by analysis workers
 }
 
 // NewHasher returns a Hasher reading from fsys.
@@ -142,6 +144,8 @@ func NewHasher(fsys fs.FS) *Hasher { return &Hasher{fsys: fsys, cache: map[strin
 
 // Hash returns the content hash of a root-relative file ("" if missing).
 func (h *Hasher) Hash(rel string) string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	if v, ok := h.cache[rel]; ok {
 		return v
 	}

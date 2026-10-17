@@ -89,6 +89,7 @@ func (a *App) runScan(ctx context.Context, args []string) (int, error) {
 	callGraph := fs.Bool("call-graph", false, "text and Markdown output: show the functions each flow goes through, as a call tree")
 	minConf := fs.Float64("min-confidence", 0, "override policy.min_confidence")
 	failOn := fs.String("fail-on", "", "override policy.fail_on: destination kinds that are violations, comma-separated (log, third_party, network, storage, ipc)")
+	workers := fs.Int("workers", -1, "parts of the call graph analyzed at a time: 0 for one per CPU, 1 for one after the other (default from config: workers)")
 	noFail := fs.Bool("no-fail", false, "exit 0 even when there are new violations")
 	fs.Usage = func() {
 		fmt.Fprintln(a.Stderr, "Usage: datawarden scan [paths...] [flags]")
@@ -104,6 +105,9 @@ func (a *App) runScan(ctx context.Context, args []string) (int, error) {
 	}
 	if *minConf > 0 {
 		s.cfg.Policy.MinConfidence = *minConf
+	}
+	if *workers >= 0 {
+		s.cfg.Workers = *workers
 	}
 	if *failOn != "" {
 		kinds := strings.Split(*failOn, ",")
