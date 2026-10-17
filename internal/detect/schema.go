@@ -353,7 +353,9 @@ func (s *Schema) Field(owner, field string) (Hint, FieldState) {
 	return best, FieldPII
 }
 
-// TypeDataTypes returns the data types a value of this type carries.
+// TypeDataTypes returns the data types a value of this type carries. A
+// collection of such values (List<User>, []User, User[]) carries what
+// its elements carry.
 func (s *Schema) TypeDataTypes(typ string) []string {
 	if s == nil || typ == "" {
 		return nil
@@ -363,7 +365,60 @@ func (s *Schema) TypeDataTypes(typ string) []string {
 			return dts
 		}
 	}
+	if el := elementType(typ); el != "" {
+		return s.TypeDataTypes(el)
+	}
 	return nil
+}
+
+// elementType is the element type of a collection type, or "": the last
+// type argument of List<User>, Map<String, User> or list[User], the
+// element of []User, [5]User, map[string]User or User[].
+func elementType(t string) string {
+	t = strings.TrimLeft(t, "*&")
+	switch {
+	case strings.HasPrefix(t, "[]"):
+		return t[2:]
+	case strings.HasPrefix(t, "["):
+		if i := strings.IndexByte(t, ']'); i > 0 {
+			return t[i+1:]
+		}
+	case strings.HasPrefix(t, "map["):
+		depth := 0
+		for i := 4; i < len(t); i++ {
+			switch t[i] {
+			case '[':
+				depth++
+			case ']':
+				if depth == 0 {
+					return t[i+1:]
+				}
+				depth--
+			}
+		}
+	case strings.HasSuffix(t, "[]"):
+		return t[:len(t)-2]
+	}
+	open := strings.IndexAny(t, "<[")
+	if open <= 0 || !(isCollectionType(t) || isCarrierType(t)) || !strings.HasSuffix(t, string(t[open]+2)) {
+		return ""
+	}
+	inner := t[open+1 : len(t)-1]
+	// The last top-level type argument: the value type of a map.
+	depth, last := 0, 0
+	for i := 0; i < len(inner); i++ {
+		switch inner[i] {
+		case '<', '[':
+			depth++
+		case '>', ']':
+			depth--
+		case ',':
+			if depth == 0 {
+				last = i + 1
+			}
+		}
+	}
+	return strings.TrimSpace(strings.TrimSuffix(inner[last:], "?"))
 }
 
 // KnownType reports whether the schema has field information for typ.
@@ -379,14 +434,29 @@ func (s *Schema) KnownType(typ string) bool {
 	return false
 }
 
+// isCarrierType reports whether a generic type's value carries its type
+// argument (Optional<User>, CompletableFuture<User>, Mono<User>).
+func isCarrierType(t string) bool {
+	i := strings.IndexByte(t, '<')
+	if i <= 0 {
+		return false
+	}
+	switch lastSegment(t[:i]) {
+	case "Optional", "Future", "CompletableFuture", "Mono", "Flux", "Single", "Maybe", "Deferred", "Lazy", "Supplier", "Iterator", "Stream", "Queue", "Deque":
+		return true
+	}
+	return false
+}
+
 func isCollectionType(t string) bool {
 	t = strings.TrimLeft(t, "*&")
 	if strings.HasPrefix(t, "[]") || strings.HasPrefix(t, "map[") || strings.HasSuffix(t, "[]") {
 		return true
 	}
-	if i := strings.IndexByte(t, '<'); i > 0 {
+	if i := strings.IndexAny(t, "<["); i > 0 {
 		switch lastSegment(t[:i]) {
-		case "List", "MutableList", "Set", "MutableSet", "Map", "MutableMap", "Collection", "Array", "ArrayList", "HashSet", "HashMap", "Iterable", "Sequence", "Flow", "LiveData", "Observable", "Promise", "Record", "ReadonlyArray":
+		case "List", "MutableList", "Set", "MutableSet", "Map", "MutableMap", "Collection", "Array", "ArrayList", "LinkedList", "HashSet", "HashMap", "LinkedHashMap", "TreeMap", "Iterable", "Sequence", "Stream", "Flow", "LiveData", "Observable", "Promise", "Record", "ReadonlyArray",
+			"list", "set", "dict", "tuple", "frozenset", "deque":
 			return true
 		}
 	}

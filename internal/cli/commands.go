@@ -88,6 +88,7 @@ func (a *App) runScan(ctx context.Context, args []string) (int, error) {
 	all := fs.Bool("all", false, "text output: also show flows accepted by policy")
 	callGraph := fs.Bool("call-graph", false, "text and Markdown output: show the functions each flow goes through, as a call tree")
 	minConf := fs.Float64("min-confidence", 0, "override policy.min_confidence")
+	failOn := fs.String("fail-on", "", "override policy.fail_on: destination kinds that are violations, comma-separated (log, third_party, network, storage, ipc)")
 	noFail := fs.Bool("no-fail", false, "exit 0 even when there are new violations")
 	fs.Usage = func() {
 		fmt.Fprintln(a.Stderr, "Usage: datawarden scan [paths...] [flags]")
@@ -103,6 +104,18 @@ func (a *App) runScan(ctx context.Context, args []string) (int, error) {
 	}
 	if *minConf > 0 {
 		s.cfg.Policy.MinConfidence = *minConf
+	}
+	if *failOn != "" {
+		kinds := strings.Split(*failOn, ",")
+		for i, k := range kinds {
+			kinds[i] = strings.TrimSpace(k)
+			switch kinds[i] {
+			case rules.DestThirdParty, rules.DestFirstParty, rules.DestLog, rules.DestStorage, rules.DestNetwork, rules.DestIPC:
+			default:
+				return ExitError, fmt.Errorf("--fail-on: unknown destination kind %q (log, third_party, first_party, network, storage, ipc)", kinds[i])
+			}
+		}
+		s.cfg.Policy.FailOn = kinds
 	}
 	req := a.request(s, &c)
 	req.DiffBase, req.LiteralsOnly, req.Staged, req.CallerDepth = *diff, *literalsOnly || *staged, *staged, *callerDepth

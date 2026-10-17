@@ -110,7 +110,7 @@ datawarden map --format dpia > docs/data-map.md
 | `datawarden comment datawarden.md` | Creates or updates the PR (GitHub) / MR (GitLab) comment. |
 | `datawarden init` | Writes starter config files. |
 
-Useful `scan` flags: `--format text|json|sarif|markdown|gitlab`, `--sarif FILE`, `--markdown FILE`, `--json FILE`, `--gitlab FILE` (write several reports in one run), `--baseline FILE`, `--no-baseline`, `--caller-depth N`, `--min-confidence F`, `--all`, `--call-graph` (the call tree of each flow, in text and Markdown; JSON always has it as `calls` and `called_by`), `--no-cache`, `--no-fail`, `--verbose`, `--cpuprofile FILE`, `--memprofile FILE` (pprof profiles of the analysis; also on `baseline` and `map`). Flags can come before or after paths.
+Useful `scan` flags: `--fail-on log,third_party` (only these destination kinds fail the build; overrides `policy.fail_on`), `--format text|json|sarif|markdown|gitlab`, `--sarif FILE`, `--markdown FILE`, `--json FILE`, `--gitlab FILE` (write several reports in one run), `--baseline FILE`, `--no-baseline`, `--caller-depth N`, `--min-confidence F`, `--all`, `--call-graph` (the call tree of each flow, in text and Markdown; JSON always has it as `calls` and `called_by`), `--no-cache`, `--no-fail`, `--verbose`, `--cpuprofile FILE`, `--memprofile FILE` (pprof profiles of the analysis; also on `baseline` and `map`). Flags can come before or after paths.
 
 With `--call-graph`, each flow shows the functions its data goes through, indented by call depth, and the functions that call the one where it enters:
 
@@ -301,6 +301,20 @@ Callee names:
 Calls that cannot be resolved still match heuristically on the receiver type name (`Sentry.setUser` behind a wildcard import) or a `receiver` regex (`logger.info`), with lower confidence.
 
 ## Configuration
+
+Common setups need no config file:
+
+```sh
+datawarden scan --fail-on log                 # only data written to logs fails the build
+datawarden scan --fail-on log,third_party     # logs, crash reporters, analytics and partner SDKs
+```
+
+and two lines of `.datawarden.yaml` narrow a scan to one class of data:
+
+```yaml
+policy:
+  ignore_classes: [pii, phi, credential]      # keep cardholder data (pci) only
+```
 
 `.datawarden.yaml` (all keys optional; `datawarden init` writes a commented copy):
 
