@@ -1647,6 +1647,9 @@ func (kb *ktBuilder) call(n *Node) ir.VarID {
 		}
 		typ := kb.typeOf(recvNode)
 		recv := kb.expr(recvNode)
+		if typ == "" && recv >= 0 {
+			typ = kb.fn.Vars[recv].Type // a call's result, typed by its api rule
+		}
 		args := kb.args(n)
 		c := &ir.Call{Name: m, HasRecv: true, RecvType: typ, RecvText: trimText(kb.text(recvNode))}
 		rt := ""

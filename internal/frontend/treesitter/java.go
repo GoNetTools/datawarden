@@ -905,6 +905,11 @@ func (jb *jvBuilder) invoke(n, obj *Node, m string, argsOf func() []ir.VarID) ir
 	}
 	typ := jb.typeOf(obj)
 	recv := jb.expr(obj)
+	if typ == "" && recv >= 0 {
+		// The receiver is a call's result: its type came from the
+		// callee's declaration or an api rule.
+		typ = jb.fn.Vars[recv].Type
+	}
 	args := argsOf()
 	c := &ir.Call{Name: m, HasRecv: true, RecvType: typ, RecvText: trimText(jb.text(obj))}
 	if strings.Contains(typ, ".") {

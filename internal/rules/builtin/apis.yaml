@@ -1,0 +1,197 @@
+# API models: what library calls do with the data they are given, and
+# what they return. Sinks say where data leaves the program; these say
+# how it moves inside it, so the engine does not have to guess from a
+# method's name.
+#
+#   effect: builder   the arguments go into the receiver, which is returned (StringBuilder.append, Request.Builder.post)
+#   effect: sends     the arguments leave the program; the result is the remote's answer (HttpClient.send)
+#   effect: derives   the result carries every argument (String.format)
+#   effect: none      the result carries no data (String.length, List.size)
+#   returns: T        the qualified type the call returns; "$T" is the receiver's element type (Optional<User>.get())
+#
+# A call no rule describes is handled by name: put/add/append/with...
+# are builders, post/fetch/request send, size/isEmpty/equals carry
+# nothing, and anything else derives.
+
+# ---- Logging: loggers and fluent builders ----
+- id: api.jvm.logger_factories
+  kind: api
+  lang: [kotlin, java]
+  call: ["org.slf4j.LoggerFactory.getLogger"]
+  returns: org.slf4j.Logger
+- id: api.jvm.log4j_factories
+  kind: api
+  lang: [kotlin, java]
+  call: ["org.apache.logging.log4j.LogManager.getLogger", "org.apache.logging.log4j.LogManager.getRootLogger", "org.apache.logging.log4j.LogManager.getFormatterLogger"]
+  returns: org.apache.logging.log4j.Logger
+- id: api.jvm.jul_factory
+  kind: api
+  lang: [kotlin, java]
+  call: ["java.util.logging.Logger.getLogger", "java.util.logging.Logger.getAnonymousLogger"]
+  returns: java.util.logging.Logger
+- id: api.jvm.commons_log_factory
+  kind: api
+  lang: [kotlin, java]
+  call: ["org.apache.commons.logging.LogFactory.getLog"]
+  returns: org.apache.commons.logging.Log
+- id: api.jvm.jboss_log_factory
+  kind: api
+  lang: [kotlin, java]
+  call: ["org.jboss.logging.Logger.getLogger"]
+  returns: org.jboss.logging.Logger
+- id: api.jvm.slf4j_fluent
+  kind: api
+  lang: [kotlin, java]
+  call: ["org.slf4j.Logger.atTrace", "org.slf4j.Logger.atDebug", "org.slf4j.Logger.atInfo", "org.slf4j.Logger.atWarn", "org.slf4j.Logger.atError", "org.slf4j.Logger.atLevel", "org.slf4j.Logger.makeLoggingEventBuilder"]
+  returns: org.slf4j.spi.LoggingEventBuilder
+- id: api.jvm.slf4j_fluent_builder
+  kind: api
+  lang: [kotlin, java]
+  call: ["org.slf4j.spi.LoggingEventBuilder.addArgument", "org.slf4j.spi.LoggingEventBuilder.addKeyValue", "org.slf4j.spi.LoggingEventBuilder.setMessage",
+         "org.slf4j.spi.LoggingEventBuilder.setCause", "org.slf4j.spi.LoggingEventBuilder.addMarker"]
+  effect: builder
+  returns: org.slf4j.spi.LoggingEventBuilder
+- id: api.jvm.log4j_fluent
+  kind: api
+  lang: [kotlin, java]
+  call: ["org.apache.logging.log4j.Logger.atTrace", "org.apache.logging.log4j.Logger.atDebug", "org.apache.logging.log4j.Logger.atInfo", "org.apache.logging.log4j.Logger.atWarn",
+         "org.apache.logging.log4j.Logger.atError", "org.apache.logging.log4j.Logger.atFatal", "org.apache.logging.log4j.Logger.atLevel", "org.apache.logging.log4j.Logger.always"]
+  returns: org.apache.logging.log4j.LogBuilder
+- id: api.jvm.log4j_fluent_builder
+  kind: api
+  lang: [kotlin, java]
+  call: ["org.apache.logging.log4j.LogBuilder.withMarker", "org.apache.logging.log4j.LogBuilder.withThrowable", "org.apache.logging.log4j.LogBuilder.withLocation"]
+  effect: builder
+  returns: org.apache.logging.log4j.LogBuilder
+- id: api.jvm.mdc
+  kind: api
+  lang: [kotlin, java]
+  call: ["org.slf4j.MDC.get", "org.apache.logging.log4j.ThreadContext.get"]
+  returns: java.lang.String
+
+# ---- HTTP clients: request builders and the calls that send ----
+- id: api.jvm.okhttp_request_builder
+  kind: api
+  lang: [kotlin, java]
+  call: ["okhttp3.Request.Builder.url", "okhttp3.Request.Builder.method", "okhttp3.Request.Builder.get", "okhttp3.Request.Builder.head", "okhttp3.Request.Builder.post",
+         "okhttp3.Request.Builder.put", "okhttp3.Request.Builder.patch", "okhttp3.Request.Builder.delete", "okhttp3.Request.Builder.header", "okhttp3.Request.Builder.addHeader",
+         "okhttp3.Request.Builder.headers", "okhttp3.Request.Builder.tag", "okhttp3.Request.Builder.cacheControl", "okhttp3.Request.newBuilder"]
+  effect: builder
+  returns: okhttp3.Request.Builder
+- id: api.jvm.okhttp_request_build
+  kind: api
+  lang: [kotlin, java]
+  call: ["okhttp3.Request.Builder.build"]
+  effect: derives
+  returns: okhttp3.Request
+- id: api.jvm.okhttp_body_builders
+  kind: api
+  lang: [kotlin, java]
+  call: ["okhttp3.FormBody.Builder.add", "okhttp3.FormBody.Builder.addEncoded", "okhttp3.MultipartBody.Builder.addFormDataPart", "okhttp3.MultipartBody.Builder.addPart",
+         "okhttp3.MultipartBody.Builder.setType", "okhttp3.HttpUrl.Builder.addQueryParameter", "okhttp3.HttpUrl.Builder.addEncodedQueryParameter",
+         "okhttp3.HttpUrl.Builder.addPathSegment", "okhttp3.HttpUrl.Builder.setQueryParameter", "okhttp3.HttpUrl.Builder.host", "okhttp3.HttpUrl.Builder.scheme"]
+  effect: builder
+- id: api.jvm.okhttp_bodies
+  kind: api
+  lang: [kotlin, java]
+  call: ["okhttp3.RequestBody.create", "okhttp3.RequestBody.Companion.create", "okhttp3.FormBody.Builder.build", "okhttp3.MultipartBody.Builder.build", "okhttp3.HttpUrl.Builder.build"]
+  effect: derives
+- id: api.jvm.okhttp_new_call
+  kind: api
+  lang: [kotlin, java]
+  call: ["okhttp3.OkHttpClient.newCall", "okhttp3.Call.Factory.newCall"]
+  returns: okhttp3.Call
+- id: api.jvm.okhttp_send
+  kind: api
+  lang: [kotlin, java]
+  call: ["okhttp3.Call.execute", "okhttp3.Call.enqueue", "retrofit2.Call.execute", "retrofit2.Call.enqueue"]
+  effect: sends
+- id: api.jvm.http_request_builder
+  kind: api
+  lang: [kotlin, java]
+  call: ["java.net.http.HttpRequest.Builder.uri", "java.net.http.HttpRequest.Builder.header", "java.net.http.HttpRequest.Builder.headers", "java.net.http.HttpRequest.Builder.POST",
+         "java.net.http.HttpRequest.Builder.PUT", "java.net.http.HttpRequest.Builder.method", "java.net.http.HttpRequest.Builder.timeout", "java.net.http.HttpRequest.newBuilder"]
+  effect: builder
+  returns: java.net.http.HttpRequest.Builder
+- id: api.jvm.http_request_build
+  kind: api
+  lang: [kotlin, java]
+  call: ["java.net.http.HttpRequest.Builder.build"]
+  effect: derives
+  returns: java.net.http.HttpRequest
+- id: api.jvm.http_client_send
+  kind: api
+  lang: [kotlin, java]
+  call: ["java.net.http.HttpClient.send", "java.net.http.HttpClient.sendAsync"]
+  effect: sends
+- id: api.jvm.rest_template_send
+  kind: api
+  lang: [kotlin, java]
+  call: ["org.springframework.web.client.RestTemplate.postForObject", "org.springframework.web.client.RestTemplate.postForEntity", "org.springframework.web.client.RestTemplate.exchange",
+         "org.springframework.web.client.RestTemplate.put", "org.springframework.web.client.RestTemplate.patchForObject", "org.springframework.web.client.RestTemplate.getForObject",
+         "org.springframework.web.client.RestTemplate.getForEntity", "org.springframework.web.client.RestTemplate.postForLocation"]
+  effect: sends
+- id: api.jvm.uri_builder
+  kind: api
+  lang: [kotlin, java]
+  call: ["org.springframework.web.util.UriComponentsBuilder.queryParam", "org.springframework.web.util.UriComponentsBuilder.path", "org.springframework.web.util.UriComponentsBuilder.pathSegment",
+         "org.springframework.web.util.UriComponentsBuilder.uriVariables", "org.springframework.web.util.UriComponentsBuilder.fragment"]
+  effect: builder
+  returns: org.springframework.web.util.UriComponentsBuilder
+
+# ---- Strings and serialization ----
+- id: api.jvm.string_builders
+  kind: api
+  lang: [kotlin, java]
+  call: ["java.lang.StringBuilder.append", "java.lang.StringBuilder.insert", "java.lang.StringBuffer.append", "java.lang.StringBuffer.insert", "java.util.StringJoiner.add"]
+  effect: builder
+- id: api.jvm.string_derives
+  kind: api
+  lang: [kotlin, java]
+  call: ["java.lang.String.format", "java.lang.String.valueOf", "java.lang.String.join", "java.lang.String.concat", "java.lang.String.trim", "java.lang.String.strip",
+         "java.lang.String.toLowerCase", "java.lang.String.toUpperCase", "java.lang.String.replace", "java.lang.String.replaceAll", "java.lang.String.formatted",
+         "java.lang.StringBuilder.toString", "java.lang.StringBuffer.toString", "java.util.StringJoiner.toString", "java.util.Objects.toString", "java.text.MessageFormat.format",
+         "com.fasterxml.jackson.databind.ObjectMapper.writeValueAsString", "com.google.gson.Gson.toJson", "org.json.JSONObject.toString", "org.json.JSONArray.toString",
+         "org.apache.commons.lang3.StringUtils.join", "org.apache.commons.lang3.ToStringBuilder.reflectionToString"]
+  effect: derives
+  returns: java.lang.String
+- id: api.jvm.string_none
+  kind: api
+  lang: [kotlin, java]
+  call: ["java.lang.String.length", "java.lang.String.isEmpty", "java.lang.String.isBlank", "java.lang.String.equals", "java.lang.String.equalsIgnoreCase",
+         "java.lang.String.startsWith", "java.lang.String.endsWith", "java.lang.String.matches", "java.lang.String.contains", "java.lang.String.compareTo",
+         "java.lang.String.hashCode", "java.lang.String.indexOf", "java.lang.String.lastIndexOf",
+         "java.util.Objects.equals", "java.util.Objects.hash", "java.util.Objects.hashCode", "java.util.Objects.isNull", "java.util.Objects.nonNull"]
+  effect: none
+
+# ---- Collections and wrappers ----
+- id: api.jvm.collection_elements
+  kind: api
+  lang: [kotlin, java]
+  call: ["java.util.List.get", "java.util.List.getFirst", "java.util.List.getLast", "java.util.List.remove", "java.util.Iterator.next", "java.util.ListIterator.next",
+         "java.util.Queue.poll", "java.util.Queue.peek", "java.util.Deque.pop", "java.util.Deque.peekFirst", "java.util.Map.get", "java.util.Map.getOrDefault", "java.util.Map.remove",
+         "java.util.Optional.get", "java.util.Optional.orElse", "java.util.Optional.orElseThrow", "java.util.Optional.orElseGet",
+         "java.util.concurrent.CompletableFuture.get", "java.util.concurrent.CompletableFuture.join", "java.util.concurrent.Future.get",
+         "reactor.core.publisher.Mono.block", "org.springframework.http.ResponseEntity.getBody", "org.springframework.http.HttpEntity.getBody",
+         "retrofit2.Response.body", "java.util.function.Supplier.get"]
+  returns: $T
+- id: api.jvm.collection_none
+  kind: api
+  lang: [kotlin, java]
+  call: ["java.util.Collection.size", "java.util.Collection.isEmpty", "java.util.Collection.contains", "java.util.List.size", "java.util.List.isEmpty", "java.util.List.contains",
+         "java.util.List.indexOf", "java.util.Set.size", "java.util.Set.isEmpty", "java.util.Set.contains", "java.util.Map.size", "java.util.Map.isEmpty",
+         "java.util.Map.containsKey", "java.util.Map.containsValue", "java.util.Optional.isPresent", "java.util.Optional.isEmpty"]
+  effect: none
+- id: api.jvm.collection_factories
+  kind: api
+  lang: [kotlin, java]
+  call: ["java.util.List.of", "java.util.Set.of", "java.util.Map.of", "java.util.Map.entry", "java.util.Arrays.asList", "java.util.Collections.singletonList",
+         "java.util.Collections.unmodifiableList", "java.util.Collections.unmodifiableMap", "java.util.Objects.requireNonNull", "java.util.Objects.requireNonNullElse"]
+  effect: derives
+- id: api.jvm.collection_builders
+  kind: api
+  lang: [kotlin, java]
+  call: ["java.util.List.add", "java.util.List.addAll", "java.util.List.set", "java.util.Set.add", "java.util.Set.addAll", "java.util.Collection.add",
+         "java.util.Map.put", "java.util.Map.putAll", "java.util.Map.putIfAbsent", "java.util.Map.merge", "java.util.Map.compute", "java.util.Map.computeIfAbsent",
+         "java.util.Queue.add", "java.util.Queue.offer", "java.util.Deque.push", "java.util.Deque.addFirst", "java.util.Deque.addLast"]
+  effect: builder

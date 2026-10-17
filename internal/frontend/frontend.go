@@ -40,6 +40,9 @@ type Options struct {
 	// graph. Frontends without whole-program type information use it to
 	// resolve calls into files that are not part of a PR scan.
 	KnownFunc func(id string) bool
+	// ReturnType gives the type a library call returns, from the api
+	// rules ("$T" for the receiver's element type), or ""; may be nil.
+	ReturnType func(lang string, c *ir.Call) string
 }
 
 // Factory creates a frontend for one scan.

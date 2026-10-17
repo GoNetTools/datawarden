@@ -28,6 +28,7 @@ import (
 	"github.com/GoNetTools/datawarden/internal/ingest"
 	"github.com/GoNetTools/datawarden/internal/ir"
 	"github.com/GoNetTools/datawarden/internal/lang"
+	"github.com/GoNetTools/datawarden/internal/rules"
 )
 
 // Modes.
@@ -437,6 +438,14 @@ func (s *Scanner) lower(ctx context.Context, req Request, targets []ingest.File,
 		BuildTags: cfg.GoBuildTags,
 		Logf:      req.Logf,
 	}
+	if req.Rules != nil { // Lower (datawarden ir) runs without rules
+		fopts.ReturnType = func(lang string, c *ir.Call) string {
+			if r := bestRule(req.Rules.Match(lang, rules.KindAPI, c)); r != nil {
+				return r.Returns
+			}
+			return ""
+		}
+	}
 	if req.Cache != nil {
 		fopts.KnownFunc = req.Cache.Has
 	}
@@ -525,4 +534,15 @@ func dedupeIDs(funcs []*ir.Func) {
 		}
 		seen[f.ID] = 1
 	}
+}
+
+// bestRule picks the most confident hit's rule, or nil.
+func bestRule(hits []rules.Hit) *rules.Rule {
+	var best rules.Hit
+	for _, h := range hits {
+		if h.Conf > best.Conf {
+			best = h
+		}
+	}
+	return best.Rule
 }

@@ -265,6 +265,9 @@ func describe(f *finding.Flow) string {
 func Missing(set *rules.Set, covered map[string]bool, langs map[string]bool) []string {
 	var out []string
 	for _, r := range set.Rules {
+		if r.Kind == rules.KindAPI {
+			continue // api models are checked through the flows they enable
+		}
 		runnable := false
 		for _, l := range r.Lang {
 			runnable = runnable || langs[l]

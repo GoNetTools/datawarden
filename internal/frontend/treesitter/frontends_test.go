@@ -572,3 +572,41 @@ class A {
 		t.Errorf("generic class method: %+v", c)
 	}
 }
+
+// Library calls get their return type from the api rules, so chains
+// resolve: LoggerFactory.getLogger(..).info(..) is org.slf4j.Logger.info,
+// and Optional<User>.get() is a User.
+func TestJavaLibraryReturnTypes(t *testing.T) {
+	returns := map[string]string{"org.slf4j.LoggerFactory.getLogger": "org.slf4j.Logger", "okhttp3.Request.Builder.url": "okhttp3.Request.Builder", "java.util.Optional.get": "$T"}
+	fsys := fstest.MapFS{"p/A.java": &fstest.MapFile{Data: []byte(`package p;
+import java.util.Optional;
+import okhttp3.Request;
+import org.slf4j.LoggerFactory;
+class User { String email; }
+class A {
+    void f(Optional<User> maybe, String u) {
+        LoggerFactory.getLogger(A.class).info("x");
+        new Request.Builder().url(u).post(null);
+        User got = maybe.get();
+    }
+}`)}}
+	opts := frontend.Options{FS: fsys, ReturnType: func(lang string, c *ir.Call) string { return returns[c.Callee] }}
+	m, err := NewJava(opts).Lower(context.Background(), []string{"p/A.java"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cs := calls(m)
+	if c := cs["info"]; c == nil || c.Callee != "org.slf4j.Logger.info" {
+		t.Errorf("chained logger call: %+v", c)
+	}
+	if c := cs["post"]; c == nil || c.Callee != "okhttp3.Request.Builder.post" {
+		t.Errorf("chained builder call: %+v", c)
+	}
+	for _, f := range m.Funcs {
+		for _, v := range f.Vars {
+			if v.Name == "got" && v.Type != "p.User" {
+				t.Errorf("Optional<User>.get(): type %q", v.Type)
+			}
+		}
+	}
+}
