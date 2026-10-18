@@ -5,6 +5,7 @@ package analysis
 
 import (
 	"strings"
+	"sync"
 
 	"github.com/GoNetTools/datawarden/internal/ir"
 )
@@ -21,6 +22,7 @@ import (
 // closures created in another. See closureFlow.field.
 type fileDeps struct {
 	edges   map[string]map[string]bool
+	mu      sync.Mutex // reached is filled lazily, by any worker
 	reached map[string]map[string]bool
 }
 
@@ -97,6 +99,8 @@ func (d *fileDeps) reaches(from, to string) bool {
 	if from == to {
 		return true
 	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	r, ok := d.reached[from]
 	if !ok {
 		r = map[string]bool{from: true}
