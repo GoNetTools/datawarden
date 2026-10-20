@@ -118,7 +118,7 @@ flowchart TB
 | Composition root | `internal/app` | The only place that chooses concrete implementations and connects them. |
 | Orchestration | `internal/cli`, `internal/scan` | Commands, flags and exit codes; the scan pipeline. They know *what* happens, not *how*. |
 | Components | `frontend/*`, `analysis`, `detect`, `rules`, `policy`, `baseline`, `report`, `datamap`, `flowgraph`, `cache`, `ingest`, `config`, `cicomment`, `ruletest`, `eval` | One job each, behind interfaces their consumers declare. |
-| Operating system | `internal/platform` | The only package that touches disk, processes (`git`) and the cache file. |
+| Operating system | `internal/platform` | The only package that touches disk, processes (`git`, external frontends) and the cache file. |
 | Vocabulary | `internal/ir`, `internal/finding`, `internal/lang` | Types every component exchanges: the IR, findings, the language table. |
 
 What each component does:
@@ -127,6 +127,7 @@ What each component does:
 |---|---|
 | `frontend` | The `Frontend` interface, the `Registry` of frontends per language, the `Registrar` plugin contract. |
 | `frontend/golang` | Go via `go/packages` and SSA: full type information. |
+| `frontend/plugin` | A frontend outside the binary: a program named in `.datawarden.yaml` (`frontends:`) that reads a JSON request and writes the module as JSON, verified with `ir.Verify` ([IR.md](IR.md#external-frontends)). |
 | `frontend/treesitter` | Python, Java, Kotlin, Swift, TypeScript via tree-sitter (cgo): syntax plus import and declaration resolution. The runtime is the official `github.com/tree-sitter/go-tree-sitter`, wrapped by `node.go` (`*Node`; compare nodes with `Equal`, since each access returns a new value). Each `Lower` closes its trees when done. The grammars come from their own repositories: `tree-sitter/tree-sitter-{java,python,typescript}` and `tree-sitter-grammars/tree-sitter-kotlin`. Swift is vendored in `third_party/tree-sitter-swift`: newer releases parse real code worse, and the release used has no Go bindings. A frontend may normalize a file before parsing without moving positions (`program.normalize`). Swift blanks syntax its grammar predates; TypeScript blanks the type arguments of tagged templates. |
 | `analysis` | The taint engine: sources, propagation, function summaries, flows. |
 | `detect` | Identifier classifier and taxonomy, schema index, literal validators. |
@@ -176,6 +177,7 @@ Interfaces are declared by the consumer. The table shows where each one lives an
 | | `RuleTester` | `ruletest.Tester` | real tester |
 | `scan.Scanner` | `FileLister` | `ingest.Lister` | `ingest.Lister` on `fstest.MapFS` |
 | | `Frontends` | `frontend.Registry` | fake frontends |
+| | `Plugins` | `plugin.New` + `platform.ExecCommand` (adapter in `app`) | fake recording the commands |
 | | `Analyzer` | `analysis.Engine` | fake analyzer |
 | | `LiteralDetector` | `detect.LiteralScanner` | fake detector |
 | | `SchemaParser` | `detect.Schemas` | fake parser |
@@ -342,6 +344,7 @@ The cache stores function summaries, the call graph, schema declarations and the
 |---|---|---|
 | **A rule** for an SDK | YAML entry in `internal/rules/builtin/` (or `.datawarden/rules/` in your repository), plus an annotated example | `TestBuiltinRuleConventions`, `TestRuleExamples`, `datawarden rules test` |
 | **A language** | entry in `internal/lang`, a frontend, registration in `app.NewComponents`, the 29 conformance programs, rules with examples | `TestEveryLanguageIsWired`, `TestFrontendConformance`, `TestRuleExamples` |
+| **A language without changing datawarden** | a program that lowers its files to the IR as JSON, named under `frontends:` in `.datawarden.yaml`, and rules for it under `.datawarden/rules/` ([IR.md](IR.md#external-frontends)) | `ir.Verify` on its output, `datawarden ir --verify`, `TestExternalFrontend` |
 | **A data type, a class or a secret pattern** | an entry in `internal/detect/builtin/datatypes.yaml`, cases in `detect_test.go` or `secrets_test.go`, a labelled leak in a fixture; a repository adds its own in `.datawarden/taxonomy.yaml` (`Classifier.Extend`, loaded by the CLI session) | `TestBuiltinTaxonomy`, `TestTaxonomyValidation`, `TestTaxonomyExtension`, `TestRepositoryTaxonomy`, `TestBuiltinRuleConventions` (source rules must use known types), `datawarden-bench -check` |
 | **A negative-context or transform word** | `internal/detect/names.go` | `detect_test.go` |
 | **A name heuristic** (a mutator prefix, a data-free call, a consent word, an immediate callback) | an entry in `internal/rules/builtin/heuristics.yaml` (or under `heuristics:` in a repository rule file) | `TestHeuristics`, `TestHeuristicTablesExist` |

@@ -6,6 +6,7 @@ package cli
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -114,7 +115,11 @@ func (a *App) open(c *common, positional []string) (*session, error) {
 		}
 		rulePaths = append(rulePaths, rel)
 	}
-	if s.rules, err = a.Rules.Load(s.repo.FS, rulePaths...); err != nil {
+	var pluginLangs []string
+	for _, f := range s.cfg.Frontends {
+		pluginLangs = append(pluginLangs, f.Lang)
+	}
+	if s.rules, err = a.Rules.Load(s.repo.FS, pluginLangs, rulePaths...); err != nil {
 		return nil, err
 	}
 	if c.verbose {
@@ -184,13 +189,20 @@ func (a *App) request(s *session, c *common) scan.Request {
 	}
 }
 
-// cacheKey is what cached summaries are valid for: the rules and the
-// repository's taxonomy.
+// cacheKey is what cached summaries are valid for: the rules, the
+// repository's taxonomy and its external frontends (their commands: a
+// change inside a program is not seen, so clear the cache after one).
 func (s *session) cacheKey() string {
-	if s.taxonomy == "" {
-		return s.rules.Hash()
+	key := s.rules.Hash()
+	if s.taxonomy != "" {
+		key += "+" + s.taxonomy
 	}
-	return s.rules.Hash() + "+" + s.taxonomy
+	if len(s.cfg.Frontends) > 0 {
+		b, _ := json.Marshal(s.cfg.Frontends)
+		sum := sha256.Sum256(b)
+		key += "+fe" + hex.EncodeToString(sum[:8])
+	}
+	return key
 }
 
 // markBaseline marks findings accepted by the baseline file at path (a

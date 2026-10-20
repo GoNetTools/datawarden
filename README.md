@@ -355,6 +355,7 @@ taxonomy: [.datawarden/taxonomy.yaml]   # your own classes and data types
 baseline: .datawarden/baseline.json
 cache_dir: .datawarden/cache
 workers: 0                    # parts of the call graph analyzed at a time: 0 is one per CPU (--workers overrides)
+frontends: []                 # programs that lower other languages to the IR, e.g. [{lang: ruby, extensions: [.rb], command: [ruby, tools/dw.rb]}]
 literals: { enabled: true, min_confidence: 0.6 }
 schema:
   sensitive_markers: []      # your own field markers, e.g. [mask, "@Masked"]; built in: pii, pci, phi, sensitive, @PII, @Sensitive, ...
@@ -379,6 +380,8 @@ policy:
 ```
 
 Hashes (`sha256`, `hashed`) are not safe transforms for personal data by default: phone and ID numbers are low-entropy, so their hashes can be reversed by enumeration. Add them to `safe_transforms` if you salt or key them. For credentials hashing is the point, so the `credential` class accepts it.
+
+`frontends` adds a language without changing datawarden: a program, run from the repository root, that reads the files to lower as JSON on its standard input and writes the IR as JSON ([docs/IR.md](docs/IR.md#external-frontends)). Its output is verified before the analysis reads it, and rules for the language go in `.datawarden/rules/`.
 
 `consent_guarded` lists destination kinds whose flows are acceptable when the sink runs only after a consent check passed: with `consent_guarded: [third_party]`, `if (consents.hasConsent()) analytics.track(email)` is shown as allowed ("consent: …") instead of failing the build. Set it per class to keep health data a violation either way (`classes: { phi: { consent_guarded: [] } }`).
 
@@ -558,7 +561,7 @@ cmd/datawarden ──► internal/app (composition root) ──► cli.App ─�
 |---|---|---|---|
 | `cli.App` | `Workspace`, `Scanner`, `CacheOpener`, `Commenter`, `Catalog`, `Clock` | `platform.OS`, `scan.Scanner`, `cache.Open`+`platform.FileBlob`, `cicomment.Client`, `detect.Classifier`, `time.Now` | in-memory workspace, fake scanner and commenter (`internal/cli/cli_test.go`) |
 | `cli.App` services | `ConfigLoader`, `RuleLoader` (→ `RuleSet`), `Policy`, `BaselineCodec`, `Reporter`, `DataMapper`, `RuleTester` | `config.Loader`, `rules.Load` (adapted in `app`), `policy.Policies`, `baseline.Codec`, `report.Writer`, `datamap.Mapper`, `ruletest.Tester` | the same implementations, or any fake that satisfies the interface |
-| `scan.Scanner` | `FileLister`, `Frontends`, `Analyzer`, `LiteralDetector`, `SchemaParser`, `VCS`, `Cache`, `Clock`, `fs.FS` | `ingest.Lister`, `frontend.Registry`, `analysis.Engine`, `detect.LiteralScanner`, `detect.Schemas`, `ingest.Git`, `cache.Store`, `os.DirFS` | `fstest.MapFS`, fake frontends/VCS/analyzer (`internal/scan/scan_test.go`) |
+| `scan.Scanner` | `FileLister`, `Frontends`, `Plugins`, `Analyzer`, `LiteralDetector`, `SchemaParser`, `VCS`, `Cache`, `Clock`, `fs.FS` | `ingest.Lister`, `frontend.Registry`, `frontend/plugin`+`platform.ExecCommand`, `analysis.Engine`, `detect.LiteralScanner`, `detect.Schemas`, `ingest.Git`, `cache.Store`, `os.DirFS` | `fstest.MapFS`, fake frontends/plugins/VCS/analyzer (`internal/scan/scan_test.go`) |
 | `analysis.Engine` | `RuleMatcher`, `SchemaIndex`, `NameClassifier` | `rules.Set`, `detect.Schema`, `detect.Classifier` | fake rule matcher (`internal/analysis/engine_test.go`) |
 | `ingest.Git` | `Runner` | `platform.ExecGit` | scripted runner (`internal/ingest/ignore_test.go`) |
 | `cache.Store` | `Persister`, `Hasher` | `platform.FileBlob`, `ingest.Hasher` | `cache.Memory`, map hasher |

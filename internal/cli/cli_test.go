@@ -169,7 +169,7 @@ func sentryFlow() []*finding.Flow {
 // testRules loads real rules (app wires the same adapter).
 type testRules struct{}
 
-func (testRules) Load(fsys fs.FS, paths ...string) (RuleSet, error) {
+func (testRules) Load(fsys fs.FS, _ []string, paths ...string) (RuleSet, error) {
 	set, err := rules.Load(fsys, paths...)
 	if err != nil {
 		return nil, err

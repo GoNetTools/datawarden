@@ -329,3 +329,54 @@ func TestContactDoc(t *testing.T) {
 		}
 	}
 }
+
+type fakePlugins struct{ made []string }
+
+func (p *fakePlugins) Frontend(lang string, command []string, o frontend.Options) frontend.Frontend {
+	p.made = append(p.made, lang+":"+strings.Join(command, " "))
+	return fakeFE{lang: lang, f: &fakeFrontends{}}
+}
+
+func TestExternalFrontendsLowerTheirFiles(t *testing.T) {
+	fx := newFixture(t, map[string]string{
+		"go.mod":           "module x",
+		"a.go":             "package a",
+		"lib/app.rb":       "puts email",
+		"lib/task.RAKE":    "task",
+		"spec/app_spec.rb": "describe",
+		"app/src/C.java":   "class C",
+	}, fakeVCS{})
+	plugins := &fakePlugins{}
+	fx.scanner.Plugins = plugins
+	fx.req.Config.Frontends = []config.Frontend{
+		{Lang: "ruby", Extensions: []string{".rb", ".rake"}, Command: []string{"ruby", "tools/dw.rb"}},
+		{Lang: "java", Command: []string{"./dw-java"}}, // replaces the built-in (unavailable) frontend
+	}
+	res, err := fx.scanner.Run(context.Background(), fx.req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sort.Strings(plugins.made)
+	if got := strings.Join(plugins.made, ";"); got != "java:./dw-java;ruby:ruby tools/dw.rb" {
+		t.Errorf("plugins made: %s", got)
+	}
+	if res.FilesAnalyzed["ruby"] != 2 || res.FilesAnalyzed["java"] != 1 || res.FilesAnalyzed["go"] != 1 {
+		t.Errorf("files analyzed: %v", res.FilesAnalyzed)
+	}
+	if strings.Contains(strings.Join(res.Warnings, "\n"), "java") {
+		t.Errorf("built-in java frontend used: %v", res.Warnings)
+	}
+	// Test files of a plugin language follow the directory conventions.
+	if slices.Contains(fx.analyzer.funcs, "ruby:spec/app_spec.rb") || !slices.Contains(fx.analyzer.funcs, "ruby:lib/task.RAKE") {
+		t.Errorf("analyzed %v", fx.analyzer.funcs)
+	}
+
+	fx.scanner.Plugins = nil
+	res, err = fx.scanner.Run(context.Background(), fx.req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.FilesAnalyzed["ruby"] != 0 || !strings.Contains(strings.Join(res.Warnings, "\n"), "ruby: 2 files skipped: this build cannot run external frontends") {
+		t.Errorf("without a runner: %v %v", res.FilesAnalyzed, res.Warnings)
+	}
+}

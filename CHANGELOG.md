@@ -6,6 +6,7 @@ All notable changes to datawarden are documented here. The format follows [Keep 
 
 ### Added
 
+- External frontends: `frontends:` in `.datawarden.yaml` names a program per language that lowers its files to the IR as JSON (`datawarden ir --format json` is the form), run from the repository root; its output is checked with `ir.Verify` and a failure is a warning for that language. Rules may target the language, `datawarden ir --verify` shows what the program produced, and the commands are part of the cache key. A built-in language's name replaces its frontend. See docs/IR.md, "External frontends".
 - The analysis runs the components of the call graph in parallel, one worker per CPU by default: a component starts once every component it calls is done, so results are the same as before in any order. `workers:` in `.datawarden.yaml` or `datawarden scan --workers N` sets the number (1 is the previous, sequential behaviour).
 - A repository's own data types and classes: `.datawarden/taxonomy.yaml` (or the files under `taxonomy:` in `.datawarden.yaml`) extends the built-in taxonomy in the same format, or replaces a built-in type by id. The CLI loads it before the scan, and its content is part of the summary cache key.
 - Output formats are a registry: `report.NewWriter()` registers text, json, sarif, markdown and gitlab, `Register` adds or replaces one, and `datawarden scan --format` lists what is registered.

@@ -5,10 +5,13 @@ package platform
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/GoNetTools/datawarden/internal/scan"
@@ -81,5 +84,37 @@ func TestOSGetwdAndIsDir(t *testing.T) {
 	}
 	if got := o.FindRoot(dir); got != dir {
 		t.Errorf("FindRoot without markers returns the directory itself: %s", got)
+	}
+}
+
+// TestHelperProcess is the program TestExecCommand runs: it copies its
+// standard input to its standard output upper-cased, or fails when told to.
+func TestHelperProcess(t *testing.T) {
+	if os.Getenv("DATAWARDEN_HELPER") != "1" {
+		return
+	}
+	in, _ := io.ReadAll(os.Stdin)
+	if os.Getenv("DATAWARDEN_HELPER_FAIL") == "1" {
+		fmt.Fprintln(os.Stderr, "boom:", string(in))
+		os.Exit(3)
+	}
+	fmt.Print(strings.ToUpper(string(in)))
+	os.Exit(0)
+}
+
+func TestExecCommand(t *testing.T) {
+	t.Setenv("DATAWARDEN_HELPER", "1")
+	argv := []string{os.Args[0], "-test.run=^TestHelperProcess$"}
+	out, err := ExecCommand(context.Background(), t.TempDir(), argv, []byte("hello"))
+	if err != nil || string(out) != "HELLO" {
+		t.Errorf("out = %q, err = %v", out, err)
+	}
+	t.Setenv("DATAWARDEN_HELPER_FAIL", "1")
+	_, err = ExecCommand(context.Background(), t.TempDir(), argv, []byte("x"))
+	if err == nil || !strings.Contains(err.Error(), "exit status 3") || !strings.Contains(err.Error(), "boom: x") {
+		t.Errorf("failure: %v", err)
+	}
+	if _, err := ExecCommand(context.Background(), "", nil, nil); err == nil {
+		t.Error("empty command accepted")
 	}
 }

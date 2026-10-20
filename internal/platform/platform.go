@@ -31,6 +31,31 @@ func ExecGit(ctx context.Context, dir string, args ...string) ([]byte, error) {
 	return out.Bytes(), nil
 }
 
+// ExecCommand runs a program in dir with input on its standard input and
+// returns its standard output (a plugin.Exec). When it fails, the error
+// carries the end of its standard error.
+func ExecCommand(ctx context.Context, dir string, argv []string, input []byte) ([]byte, error) {
+	if len(argv) == 0 {
+		return nil, errors.New("no command")
+	}
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd.Dir = dir
+	cmd.Stdin = bytes.NewReader(input)
+	var out, errb bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errb
+	if err := cmd.Run(); err != nil {
+		msg := strings.TrimSpace(errb.String())
+		if len(msg) > 2000 {
+			msg = "..." + msg[len(msg)-2000:]
+		}
+		if msg == "" {
+			return nil, err
+		}
+		return nil, fmt.Errorf("%v: %s", err, msg)
+	}
+	return out.Bytes(), nil
+}
+
 // OS is the cli.Workspace on the local machine.
 type OS struct {
 	// Git runs git commands; ExecGit in production.

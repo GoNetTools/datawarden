@@ -46,9 +46,10 @@ type RuleSet interface {
 }
 
 // RuleLoader loads the built-in rules merged with repository overrides
-// (rules.Load, adapted in internal/app).
+// (rules.LoadFor, adapted in internal/app). langs are the languages of
+// the configuration's external frontends, which rules may target too.
 type RuleLoader interface {
-	Load(fsys fs.FS, paths ...string) (RuleSet, error)
+	Load(fsys fs.FS, langs []string, paths ...string) (RuleSet, error)
 }
 
 // Policy decides which findings are violations under a configuration
