@@ -335,3 +335,18 @@ heuristics:
 		}
 	}
 }
+
+func TestLoadForExternalLanguages(t *testing.T) {
+	fsys := fstest.MapFS{"rules/ruby.yaml": {Data: []byte("- id: log.ruby.puts\n  lang: ruby\n  call: [Kernel.puts]\n  dest: {kind: log}\n")}}
+	if _, err := Load(fsys, "rules"); err == nil || !strings.Contains(err.Error(), `lang "ruby" is not supported`) {
+		t.Errorf("unknown language: %v", err)
+	}
+	set, err := LoadFor([]string{"ruby"}, fsys, "rules")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hits := set.Match("ruby", KindSink, &ir.Call{Name: "puts", Callee: "Kernel.puts"})
+	if len(hits) != 1 || hits[0].Rule.ID != "log.ruby.puts" {
+		t.Errorf("hits = %+v", hits)
+	}
+}

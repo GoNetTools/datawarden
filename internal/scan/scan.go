@@ -79,6 +79,14 @@ type Frontends interface {
 	Frontend(lang string, o frontend.Options) (frontend.Frontend, error)
 }
 
+// Plugins makes a frontend out of an external program named in the
+// configuration (frontend/plugin, run by platform.ExecCommand). Nil when
+// the build cannot run programs; configured frontends are then skipped
+// with a warning.
+type Plugins interface {
+	Frontend(lang string, command []string, o frontend.Options) frontend.Frontend
+}
+
 // Analyzer runs the taint analysis (analysis.Engine).
 type Analyzer interface {
 	Analyze(ctx context.Context, funcs []*ir.Func, in analysis.Input) (*analysis.Result, error)
@@ -110,10 +118,12 @@ type FileLister interface {
 type Scanner struct {
 	Files     FileLister
 	Frontends Frontends
-	Analyzer  Analyzer
-	Literals  LiteralDetector
-	Schemas   SchemaParser
-	Clock     func() time.Time
+	// Plugins runs the frontends in Config.Frontends; may be nil.
+	Plugins  Plugins
+	Analyzer Analyzer
+	Literals LiteralDetector
+	Schemas  SchemaParser
+	Clock    func() time.Time
 }
 
 // Request describes one scan.
@@ -419,22 +429,36 @@ func (s *Scanner) lower(ctx context.Context, req Request, targets []ingest.File,
 	for _, l := range cfg.Languages {
 		langs[lang.Normalize(l)] = true
 	}
+	plugins := map[string]config.Frontend{}
+	byExt := map[string]string{}
+	for _, p := range cfg.Frontends {
+		plugins[p.Lang] = p
+		for _, e := range p.Extensions {
+			byExt[e] = p.Lang
+		}
+	}
 	groups := map[string][]string{}
 	for _, f := range targets {
-		l, ok := lang.Lookup(f.Lang)
-		if !ok || l.Kind != lang.Code {
+		name := f.Lang
+		l, ok := lang.Lookup(name)
+		if ok && l.Kind != lang.Code {
 			continue
+		}
+		if !ok { // a file only an external frontend reads
+			if name = byExt[strings.ToLower(path.Ext(f.Rel))]; name == "" {
+				continue
+			}
 		}
 		if f.Test && !cfg.IncludeTests {
 			continue
 		}
-		if l.Ignored(f.Rel) {
+		if ok && l.Ignored(f.Rel) {
 			continue
 		}
-		if len(langs) > 0 && !langs[f.Lang] {
+		if len(langs) > 0 && !langs[name] {
 			continue
 		}
-		groups[f.Lang] = append(groups[f.Lang], f.Rel)
+		groups[name] = append(groups[name], f.Rel)
 	}
 	fopts := frontend.Options{
 		Root:      req.Repo.Root,
@@ -458,7 +482,7 @@ func (s *Scanner) lower(ctx context.Context, req Request, targets []ingest.File,
 	langNames := slices.Sorted(maps.Keys(groups))
 	for _, name := range langNames {
 		files := groups[name]
-		fe, err := s.Frontends.Frontend(name, fopts)
+		fe, err := s.frontend(name, plugins, fopts)
 		if err != nil {
 			res.Warnings = append(res.Warnings, fmt.Sprintf("%s: %d files skipped: %v", name, len(files), err))
 			continue
@@ -475,6 +499,19 @@ func (s *Scanner) lower(ctx context.Context, req Request, targets []ingest.File,
 		prog.Merge(m)
 	}
 	return prog, lowered
+}
+
+// frontend picks the frontend for a language: the external one the
+// configuration names, else the built-in one.
+func (s *Scanner) frontend(name string, plugins map[string]config.Frontend, o frontend.Options) (frontend.Frontend, error) {
+	p, ok := plugins[name]
+	if !ok {
+		return s.Frontends.Frontend(name, o)
+	}
+	if s.Plugins == nil {
+		return nil, errors.New("this build cannot run external frontends")
+	}
+	return s.Plugins.Frontend(p.Lang, p.Command, o), nil
 }
 
 // buildSchema builds the schema and the class table: from the lowered

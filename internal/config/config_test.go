@@ -72,3 +72,29 @@ func TestSensitiveMarkers(t *testing.T) {
 		t.Errorf("template: %v", err)
 	}
 }
+
+func TestFrontends(t *testing.T) {
+	c, err := Parse([]byte("frontends:\n  - {lang: Ruby, extensions: [.RB, .rake], command: [ruby, tools/dw.rb]}\n  - {lang: java, command: [./dw-java]}\nlanguages: [ruby, go]\n"), "x.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Frontends) != 2 || c.Frontends[0].Lang != "ruby" || c.Frontends[0].Extensions[0] != ".rb" || c.Frontends[1].Lang != "java" {
+		t.Errorf("frontends: %+v", c.Frontends)
+	}
+	if got := strings.Join(c.CodeLanguages(), ","); got != "go,java,kotlin,python,ruby,swift,typescript" {
+		t.Errorf("code languages = %s", got)
+	}
+	bad := map[string]string{
+		"no command":           "frontends:\n  - {lang: ruby, extensions: [.rb]}\n",
+		"no lang":              "frontends:\n  - {extensions: [.rb], command: [ruby]}\n",
+		"no extensions":        "frontends:\n  - {lang: ruby, command: [ruby]}\n",
+		"bad extension":        "frontends:\n  - {lang: ruby, extensions: [rb], command: [ruby]}\n",
+		"twice":                "frontends:\n  - {lang: ruby, extensions: [.rb], command: [ruby]}\n  - {lang: ruby, extensions: [.rbx], command: [ruby]}\n",
+		"unknown in languages": "languages: [ruby]\n",
+	}
+	for name, doc := range bad {
+		if _, err := Parse([]byte(doc), "x.yaml"); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}

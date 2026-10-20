@@ -27,6 +27,7 @@ import (
 	"github.com/GoNetTools/datawarden/internal/flowgraph"
 	"github.com/GoNetTools/datawarden/internal/frontend"
 	"github.com/GoNetTools/datawarden/internal/frontend/golang"
+	"github.com/GoNetTools/datawarden/internal/frontend/plugin"
 	"github.com/GoNetTools/datawarden/internal/frontend/treesitter"
 	"github.com/GoNetTools/datawarden/internal/ingest"
 	"github.com/GoNetTools/datawarden/internal/platform"
@@ -61,6 +62,7 @@ func NewComponents(clock func() time.Time) *Components {
 		Scanner: &scan.Scanner{
 			Files:     ingest.Lister{},
 			Frontends: reg,
+			Plugins:   plugins{exec: platform.ExecCommand},
 			Analyzer:  analysis.Engine{Names: classifier},
 			Literals:  &detect.LiteralScanner{Classifier: classifier},
 			Schemas:   detect.Schemas{Classifier: classifier},
@@ -131,12 +133,20 @@ func NewWith(stdout, stderr io.Writer, d Deps) *cli.App {
 // ruleLoader adapts rules.Load to the CLI's RuleLoader.
 type ruleLoader struct{}
 
-func (ruleLoader) Load(fsys fs.FS, paths ...string) (cli.RuleSet, error) {
-	set, err := rules.Load(fsys, paths...)
+func (ruleLoader) Load(fsys fs.FS, langs []string, paths ...string) (cli.RuleSet, error) {
+	set, err := rules.LoadFor(langs, fsys, paths...)
 	if err != nil {
 		return nil, err // not a typed nil inside the interface
 	}
 	return set, nil
+}
+
+// plugins makes frontends out of the programs .datawarden.yaml names
+// (scan.Plugins).
+type plugins struct{ exec plugin.Exec }
+
+func (p plugins) Frontend(lang string, command []string, o frontend.Options) frontend.Frontend {
+	return plugin.New(lang, command, p.exec)(o)
 }
 
 // commenter adapts cicomment errors to the CLI's.

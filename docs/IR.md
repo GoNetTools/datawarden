@@ -185,6 +185,61 @@ dominates `P`. Dominance is computed over normal and exceptional edges
   each call throws, in the blocks whose exceptional edges lead to it.
 - **Dispatch**: the class table (`Module.Classes`).
 
+## External frontends
+
+A frontend need not be part of the binary. `frontends:` in
+`.datawarden.yaml` names a program per language, run from the repository
+root (`internal/frontend/plugin`, executed by `platform.ExecCommand`):
+
+```yaml
+frontends:
+  - lang: ruby
+    extensions: [.rb]
+    command: [ruby, tools/datawarden-ruby.rb]
+```
+
+The program reads one JSON request on its standard input and writes one
+JSON module on its standard output; a non-zero exit, with its standard
+error, is reported as a warning for that language. The request is:
+
+```json
+{"version": 3, "lang": "ruby", "root": "/abs/path/to/repo", "files": ["lib/app.rb"]}
+```
+
+`files` are the files to lower, relative to `root` (test files are
+left out unless `include_tests` is set, like for built-in frontends).
+The response is an `ir.Module` in the JSON form `datawarden ir --format
+json` prints, with the IR `version` it was written for:
+
+```json
+{"version": 3, "lang": "ruby",
+ "funcs": [{"id": "lib/app.greet", "name": "greet", "lang": "ruby", "file": "lib/app.rb",
+            "pos": {"file": "lib/app.rb", "line": 1},
+            "params": [0],
+            "vars": [{"name": "email", "param": 0, "pos": {"file": "lib/app.rb", "line": 1}}],
+            "instrs": [{"op": 3, "dst": -1, "args": [0], "call": {"name": "puts", "callee": "Kernel.puts"},
+                        "pos": {"file": "lib/app.rb", "line": 2}},
+                       {"op": 4, "dst": -1, "pos": {"file": "lib/app.rb", "line": 3}}],
+            "blocks": [{"term": 2}]}],
+ "types": [], "classes": [], "warnings": []}
+```
+
+Opcodes and terminators are numbered as `ir.Op` and `ir.Term` declare
+them (`assign` 0, `load` 1, `store` 2, `call` 3, `return` 4, `phi` 5,
+`compute` 6, `new` 7, `throw` 8, `catch` 9, `closure` 10, `yield` 11;
+`jump` 0, `if` 1, `return` 2, `throw` 3). A function's `lang` defaults to
+the request's. The version must be this document's; every function is
+checked with `ir.Verify` and the whole language is skipped, with the
+errors, when one fails, so a frontend can never crash the analysis.
+`datawarden ir --verify lib/app.rb` runs the program and shows what the
+engine will see.
+
+Rules for the language go in `.datawarden/rules/` with `lang: ruby`;
+the name must also be listed in `languages:` when that key narrows the
+scan. A built-in language's name replaces its frontend (`lang: java`
+needs no `extensions`). The commands are part of the cache key, but a
+change inside a program is not seen: clear the cache after one.
+
 ## Text form
 
 `ir.Format` prints a function for debugging; `datawarden ir [paths...]

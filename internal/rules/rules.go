@@ -17,6 +17,7 @@ import (
 	"io/fs"
 	"path"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -231,6 +232,12 @@ func BuiltinHeuristics() (*Heuristics, error) {
 // YAML file or a directory of them; missing paths are skipped. fsys may
 // be nil when there are no overrides.
 func Load(fsys fs.FS, paths ...string) (*Set, error) {
+	return LoadFor(nil, fsys, paths...)
+}
+
+// LoadFor is Load for a configuration with external frontends: rules may
+// also target the given languages, which internal/lang does not know.
+func LoadFor(langs []string, fsys fs.FS, paths ...string) (*Set, error) {
 	all, heur, err := readTree(builtinFS, "builtin", "builtin:")
 	if err != nil {
 		return nil, err
@@ -246,7 +253,7 @@ func Load(fsys fs.FS, paths ...string) (*Set, error) {
 		all = append(all, rs...)
 		heur.merge(h)
 	}
-	set, err := NewSet(all)
+	set, err := newSet(all, langs)
 	if err != nil {
 		return nil, err
 	}
@@ -361,6 +368,11 @@ func parse(b []byte, origin string) ([]*Rule, *Heuristics, error) {
 // NewSet merges rules by id (later wins), drops disabled ones, validates
 // and compiles them.
 func NewSet(rules []*Rule) (*Set, error) {
+	return newSet(rules, nil)
+}
+
+// newSet is NewSet accepting rules for the extra languages too.
+func newSet(rules []*Rule, langs []string) (*Set, error) {
 	order := []string{}
 	byID := map[string]*Rule{}
 	for _, r := range rules {
@@ -381,7 +393,7 @@ func NewSet(rules []*Rule) (*Set, error) {
 		if r.Disabled {
 			continue
 		}
-		if err := r.compile(); err != nil {
+		if err := r.compile(langs); err != nil {
 			return nil, fmt.Errorf("%s: rule %s: %w", r.Origin, r.ID, err)
 		}
 		s.Rules = append(s.Rules, r)
@@ -413,7 +425,9 @@ func (s *Set) rehash() {
 	s.hash = hex.EncodeToString(h[:8])
 }
 
-func (r *Rule) compile() error {
+// compile validates the rule and compiles its patterns. extraLangs are
+// the languages of external frontends a rule may target.
+func (r *Rule) compile(extraLangs []string) error {
 	if r.Kind == "" {
 		r.Kind = KindSink
 	}
@@ -463,8 +477,8 @@ func (r *Rule) compile() error {
 	}
 	for i, l := range r.Lang {
 		r.Lang[i] = lang.Normalize(l)
-		if !lang.IsCode(r.Lang[i]) {
-			return fmt.Errorf("lang %q is not supported (use one of %s)", l, strings.Join(lang.CodeNames(), ", "))
+		if !lang.IsCode(r.Lang[i]) && !slices.Contains(extraLangs, r.Lang[i]) {
+			return fmt.Errorf("lang %q is not supported (use one of %s)", l, strings.Join(append(lang.CodeNames(), extraLangs...), ", "))
 		}
 	}
 	for _, i := range r.Arg.Indexes {

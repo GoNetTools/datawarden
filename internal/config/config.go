@@ -85,6 +85,21 @@ type Schema struct {
 	SensitiveMarkers []string `yaml:"sensitive_markers" json:"sensitive_markers,omitempty"`
 }
 
+// Frontend is an external frontend: a program that lowers the files of
+// one language to the IR (docs/IR.md, "External frontends"). It runs
+// from the repository root, reads a JSON request on standard input and
+// writes an ir.Module as JSON on standard output.
+type Frontend struct {
+	// Lang names the language, as rules and reports refer to it. A
+	// built-in language's name replaces the built-in frontend.
+	Lang string `yaml:"lang" json:"lang"`
+	// Extensions lists the file extensions of the language, with the dot
+	// (required unless Lang is a built-in language).
+	Extensions []string `yaml:"extensions" json:"extensions,omitempty"`
+	// Command is the program and its arguments.
+	Command []string `yaml:"command" json:"command"`
+}
+
 // Config is .datawarden.yaml.
 type Config struct {
 	Version int `yaml:"version" json:"version"`
@@ -112,6 +127,8 @@ type Config struct {
 	// Workers is how many parts of the call graph the analysis works on
 	// at a time: 0 for one per CPU, 1 for one after the other.
 	Workers int `yaml:"workers" json:"workers,omitempty"`
+	// Frontends are external frontends, one per language.
+	Frontends []Frontend `yaml:"frontends" json:"frontends,omitempty"`
 
 	Path string `yaml:"-" json:"-"`
 }
@@ -209,12 +226,49 @@ func (c *Config) validate() error {
 			return fmt.Errorf("%s: schema.sensitive_markers: %q is not a struct tag key (pii) or an annotation (@Sensitive)", c.Path, m)
 		}
 	}
+	seen := map[string]bool{}
+	for i := range c.Frontends {
+		f := &c.Frontends[i]
+		f.Lang = lang.Normalize(f.Lang)
+		if f.Lang == "" || strings.ContainsAny(f.Lang, " /\\:") {
+			return fmt.Errorf("%s: frontends[%d]: lang must be a language name (ruby)", c.Path, i)
+		}
+		if seen[f.Lang] {
+			return fmt.Errorf("%s: frontends: %s is listed twice", c.Path, f.Lang)
+		}
+		seen[f.Lang] = true
+		if len(f.Command) == 0 || f.Command[0] == "" {
+			return fmt.Errorf("%s: frontends[%d] (%s): command is required", c.Path, i, f.Lang)
+		}
+		if len(f.Extensions) == 0 && !lang.IsCode(f.Lang) {
+			return fmt.Errorf("%s: frontends[%d] (%s): extensions are required for a language datawarden does not know", c.Path, i, f.Lang)
+		}
+		for j, e := range f.Extensions {
+			f.Extensions[j] = strings.ToLower(e)
+			if !strings.HasPrefix(e, ".") || len(e) < 2 || strings.ContainsAny(e, "/\\ ") {
+				return fmt.Errorf("%s: frontends[%d] (%s): extension %q must be .ext", c.Path, i, f.Lang, e)
+			}
+		}
+	}
 	for _, l := range c.Languages {
-		if !lang.IsCode(l) {
-			return fmt.Errorf("%s: languages: unsupported language %q (supported: %s)", c.Path, l, strings.Join(lang.CodeNames(), ", "))
+		if !lang.IsCode(l) && !seen[lang.Normalize(l)] {
+			return fmt.Errorf("%s: languages: unsupported language %q (supported: %s)", c.Path, l, strings.Join(c.CodeLanguages(), ", "))
 		}
 	}
 	return nil
+}
+
+// CodeLanguages lists the languages the configuration can analyze: the
+// built-in ones and those with an external frontend, sorted.
+func (c *Config) CodeLanguages() []string {
+	out := lang.CodeNames()
+	for _, f := range c.Frontends {
+		if !slices.Contains(out, f.Lang) {
+			out = append(out, f.Lang)
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 // Template is written by `datawarden init`.
@@ -246,6 +300,14 @@ cache_dir: .datawarden/cache
 # Parts of the call graph analyzed at a time: 0 is one per CPU, 1 is
 # one after the other (the --workers flag overrides it).
 workers: 0
+
+# External frontends: a program per language that lowers its files to
+# the IR as JSON (docs/IR.md, "External frontends"). It runs from the
+# repository root. A built-in language's name replaces that frontend.
+frontends: []
+#  - lang: ruby
+#    extensions: [.rb]
+#    command: [ruby, tools/datawarden-ruby.rb]
 
 literals:
   enabled: true
